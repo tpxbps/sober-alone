@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+
+# Environment & Secrets
+.env
+*.env.local
+backend/.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.claude/settings.json
+.claude/settings.local.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+dist/
+build/

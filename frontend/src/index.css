@@ -1,0 +1,307 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  /* Custom colors for the game */
+  --color-glow: var(--glow);
+  --color-glow-secondary: var(--glow-secondary);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+}
+
+/* Dark cyberpunk theme - default dark mode */
+:root {
+  --radius: 0.75rem;
+
+  /* Base colors - deep dark background */
+  --background: oklch(0.12 0.01 270);
+  --foreground: oklch(0.95 0.02 270);
+
+  /* Card colors - slightly lighter than background */
+  --card: oklch(0.16 0.015 270);
+  --card-foreground: oklch(0.95 0.02 270);
+
+  /* Popover colors */
+  --popover: oklch(0.14 0.015 270);
+  --popover-foreground: oklch(0.95 0.02 270);
+
+  /* Primary - purple glow */
+  --primary: oklch(0.65 0.2 290);
+  --primary-foreground: oklch(0.98 0.01 270);
+
+  /* Secondary - muted purple */
+  --secondary: oklch(0.25 0.04 280);
+  --secondary-foreground: oklch(0.9 0.02 270);
+
+  /* Muted - for less emphasis */
+  --muted: oklch(0.22 0.02 270);
+  --muted-foreground: oklch(0.65 0.02 270);
+
+  /* Accent - cyan/teal for highlights */
+  --accent: oklch(0.55 0.15 190);
+  --accent-foreground: oklch(0.98 0.01 270);
+
+  /* Destructive - red for warnings */
+  --destructive: oklch(0.6 0.22 25);
+
+  /* Border and input */
+  --border: oklch(0.28 0.02 270);
+  --input: oklch(0.22 0.02 270);
+  --ring: oklch(0.65 0.2 290);
+
+  /* Custom glow colors */
+  --glow: oklch(0.65 0.2 290);
+  --glow-secondary: oklch(0.55 0.15 190);
+
+  /* Status colors */
+  --success: oklch(0.65 0.18 145);
+  --warning: oklch(0.75 0.18 85);
+  --danger: oklch(0.6 0.22 25);
+
+  /* Sidebar */
+  --sidebar: oklch(0.14 0.015 270);
+  --sidebar-foreground: oklch(0.95 0.02 270);
+  --sidebar-primary: oklch(0.65 0.2 290);
+  --sidebar-primary-foreground: oklch(0.98 0.01 270);
+  --sidebar-accent: oklch(0.25 0.04 280);
+  --sidebar-accent-foreground: oklch(0.9 0.02 270);
+  --sidebar-border: oklch(0.28 0.02 270);
+  --sidebar-ring: oklch(0.65 0.2 290);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+/* Custom utility classes */
+@layer utilities {
+  /* Glow effects */
+  .glow {
+    box-shadow: 0 0 20px var(--glow), 0 0 40px oklch(0.65 0.15 290 / 30%);
+  }
+
+  .glow-accent {
+    box-shadow: 0 0 20px var(--glow-secondary), 0 0 40px oklch(0.55 0.1 190 / 30%);
+  }
+
+  .text-glow {
+    text-shadow: 0 0 10px var(--glow), 0 0 20px oklch(0.65 0.15 290 / 50%);
+  }
+
+  .text-glow-accent {
+    text-shadow: 0 0 10px var(--glow-secondary), 0 0 20px oklch(0.55 0.1 190 / 50%);
+  }
+
+  /* Glass morphism effect */
+  .glass {
+    background: oklch(0.16 0.015 270 / 60%);
+    backdrop-filter: blur(12px);
+    border: 1px solid oklch(0.35 0.03 270 / 40%);
+  }
+
+  .glass-dark {
+    background: oklch(0.12 0.01 270 / 80%);
+    backdrop-filter: blur(16px);
+    border: 1px solid oklch(0.28 0.02 270 / 50%);
+  }
+
+  /* Animated border gradient */
+  .border-glow {
+    position: relative;
+  }
+
+  .border-glow::before {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(135deg, var(--glow), transparent 50%, var(--glow-secondary));
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+
+  /* Breathing animation for active speaker */
+  .breathing {
+    animation: breathing 2s ease-in-out infinite;
+  }
+
+  @keyframes breathing {
+    0%, 100% {
+      box-shadow: 0 0 5px var(--glow), 0 0 10px oklch(0.65 0.15 290 / 30%);
+    }
+    50% {
+      box-shadow: 0 0 15px var(--glow), 0 0 30px oklch(0.65 0.15 290 / 50%);
+    }
+  }
+
+  /* Prominent breathing animation for script button */
+  .breathing-prominent {
+    animation: breathingProminent 1.5s ease-in-out infinite;
+  }
+
+  @keyframes breathingProminent {
+    0%, 100% {
+      transform: scale(1);
+      box-shadow: 0 0 8px var(--glow), 0 0 16px oklch(0.65 0.15 290 / 40%);
+    }
+    50% {
+      transform: scale(1.2);
+      box-shadow: 0 0 25px var(--glow), 0 0 50px oklch(0.65 0.2 290 / 60%), 0 0 80px oklch(0.65 0.15 290 / 30%);
+    }
+  }
+
+  /* Fade in animation */
+  .fade-in {
+    animation: fadeIn 0.3s ease-out;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* Stage transition overlay */
+  .stage-transition {
+    animation: stageTransition 2s ease-in-out forwards;
+  }
+
+  @keyframes stageTransition {
+    0% {
+      opacity: 0;
+    }
+    20% {
+      opacity: 1;
+    }
+    80% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
+
+  /* Scrollbar styling */
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: oklch(0.18 0.01 270);
+    border-radius: 3px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: oklch(0.35 0.03 270);
+    border-radius: 3px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background: oklch(0.45 0.04 270);
+  }
+
+  /* Pulse animation for typing indicator */
+  .pulse-dot {
+    animation: pulseDot 1.4s ease-in-out infinite;
+  }
+
+  @keyframes pulseDot {
+    0%, 80%, 100% {
+      transform: scale(0.6);
+      opacity: 0.5;
+    }
+    40% {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+}
+
+/* Custom selection color */
+::selection {
+  background: oklch(0.65 0.2 290 / 40%);
+  color: var(--foreground);
+}
+
+/* Focus visible styles */
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Hide scrollbar but keep functionality */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Markdown content styling - reduce paragraph spacing */
+.markdown-content {
+  line-height: 1.6;
+}
+
+.markdown-content p {
+  margin-bottom: 0.25rem;
+}
+
+.markdown-content p:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-content br {
+  display: block;
+  content: "";
+  margin-top: 0.125rem;
+}
+

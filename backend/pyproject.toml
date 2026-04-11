@@ -1,0 +1,38 @@
+[project]
+name = "sober-alone-backend"
+version = "0.1.0"
+description = "AI-powered Murder Mystery Game API"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    # Web framework
+    "fastapi>=0.128.0",
+    "uvicorn[standard]>=0.40.0",
+    # Database
+    "sqlalchemy>=2.0.46",
+    "aiosqlite>=0.22.1",
+    # LangChain & AI
+    "langchain>=1.2.7",
+    "langchain-community>=0.4.1",
+    "langchain-openai>=1.1.7",
+    "langchain-deepseek>=1.0.1",
+    "langgraph>=1.0.7",
+    # Vector database
+    "chromadb>=1.4.1",
+    # HTTP client
+    "httpx>=0.28.1",
+    # ZhipuAI SDK (for embedding)
+    "zhipuai>=2.1.5",
+    # Utilities
+    "pydantic>=2.12.5",
+    "pydantic-settings>=2.12.0",
+    "python-dotenv>=1.2.1",
+]
+
+[project.scripts]
+dev = "uvicorn app.main:app --reload --host 0.0.0.0 --port 8000"
+
+[[index]]
+name = "aliyun"
+url = "https://mirrors.aliyun.com/pypi/simple/"
+default = true
