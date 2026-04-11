@@ -1,7 +1,5 @@
 # 独醒 (Sober Alone)
 
-[English](#english) | 中文
-
 **众人皆醉我独醒** — AI 驱动的剧本杀游戏。
 
 玩家扮演侦探角色，与多个 AI 角色一起阅读线索、自由讨论、投票推理，最终揭开真相。
@@ -67,82 +65,6 @@ npm run dev
 ## 支持的 LLM
 
 通过 `.env` 配置，支持多个 LLM 提供商，可为不同 AI 角色指定不同模型。
-
-## License
-
-Private
-
----
-
-<a id="english"></a>
-
-# Sober Alone
-
-[English](#english) | [中文](#)
-
-An AI-powered murder mystery game where you play as a detective, analyzing clues, discussing with AI characters, and voting to uncover the truth.
-
-## Architecture
-
-```
-sober-alone/
-├── backend/          # Python (FastAPI + LangChain)
-│   └── app/
-│       ├── api/      # REST / SSE endpoints
-│       ├── game/     # Core game logic (speech scheduling, voting, stage management)
-│       ├── agents/   # AI character agents
-│       ├── rag/      # Script knowledge base retrieval
-│       ├── services/ # Business service layer
-│       └── core/     # Config, LLM factory
-│
-└── frontend/         # React + TypeScript + Vite
-    └── src/
-        ├── screens/     # Pages (lobby, game)
-        ├── components/  # UI components
-        ├── stores/      # Zustand state management
-        └── types/       # Type definitions
-```
-
-## Getting Started
-
-### Prerequisites
-
-- Node.js 18+
-- Python 3.11+
-- At least one LLM API Key
-
-### Backend
-
-```bash
-cd backend
-uv sync
-uv run uvicorn app.main:app --reload --port 8000
-```
-
-> Configure API Keys in `backend/.env` (see `core/config.py` for key names).
-
-### Frontend
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Visit `http://localhost:5173`.
-
-## Game Flow
-
-1. **Lobby** — Browse and select a script
-2. **Intro** — AI narrates the story background and assigns roles
-3. **Clue Analysis** — Players and AI characters analyze clues together
-4. **Free Discussion** — AI characters speak in turns; the player can join anytime
-5. **Vote** — Everyone votes for the prime suspect
-6. **Summary** — Truth revealed with voting results
-
-## Supported LLMs
-
-Configure via `.env`. Multiple LLM providers are supported — assign different models to different AI characters.
 
 ## License
 
