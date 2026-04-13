@@ -82,6 +82,7 @@ export function ScriptDetailModal({
   const [aiModels, setAiModels] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [openSelectId, setOpenSelectId] = useState<string | null>(null);
 
   const difficultyInfo =
     DIFFICULTY_COLORS[script.difficulty] || DIFFICULTY_COLORS[1];
@@ -279,9 +280,10 @@ export function ScriptDetailModal({
                             className="flex justify-center"
                           >
                             <div
-                              onClick={() =>
-                                handleCharacterSelect(char.character_id)
-                              }
+                              onClick={() => {
+                                if (openSelectId) return;
+                                handleCharacterSelect(char.character_id);
+                              }}
                               className={`w-[95%] p-4 rounded-xl cursor-pointer transition-all border
                                 ${
                                   selectedCharacter === char.character_id
@@ -352,6 +354,9 @@ export function ScriptDetailModal({
                                     initial={{ opacity: 0, height: 0 }}
                                     animate={{ opacity: 1, height: "auto" }}
                                     className="mt-3 pt-3 border-t border-border/50"
+                                    onClick={(e) => e.stopPropagation()}
+                                    onPointerDown={(e) => e.stopPropagation()}
+                                    onTouchEnd={(e) => e.stopPropagation()}
                                   >
                                     <label className="text-xs text-muted-foreground flex items-center gap-1.5 mb-2">
                                       <Cpu className="w-3 h-3" />
@@ -368,12 +373,23 @@ export function ScriptDetailModal({
                                           value
                                         )
                                       }
+                                      onOpenChange={(open) => {
+                                        setOpenSelectId(
+                                          open ? char.character_id : null
+                                        );
+                                      }}
                                     >
                                       <Select.Trigger
                                         className="w-full px-3 py-2 text-sm rounded-lg bg-secondary/30 border border-border
                                                hover:bg-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/50
                                                flex items-center justify-between"
                                         onClick={(e: React.MouseEvent) =>
+                                          e.stopPropagation()
+                                        }
+                                        onPointerDown={(e) =>
+                                          e.stopPropagation()
+                                        }
+                                        onTouchEnd={(e) =>
                                           e.stopPropagation()
                                         }
                                       >

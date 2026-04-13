@@ -259,7 +259,6 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
       const stream = speechApi.processSSEStream(response, controller.signal);
 
       let nextSpeakerId: string | null = null;
-      let stageComplete = false;
 
       for await (const message of stream) {
 
@@ -272,7 +271,6 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
         } else if (message.type === 'done') {
           // 全部完成
           nextSpeakerId = message.next_speaker_id || null;
-          stageComplete = message.stage_complete || false;
         } else if (message.type === 'error') {
           throw new Error(message.message || '发言失败');
         }

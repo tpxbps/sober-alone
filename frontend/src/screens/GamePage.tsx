@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { FileEdit, BookOpen } from "lucide-react";
 
 import { useGameStore } from "@/stores/gameStore";
 import { GameHeader } from "@/components/game/GameHeader";
@@ -27,6 +28,9 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
   const [speechReminderShown, setSpeechReminderShown] = useState(false);
   const [previousStage, setPreviousStage] = useState<GameStage | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [draftOpen, setDraftOpen] = useState(false);
+  const [scriptOpen, setScriptOpen] = useState(false);
+  const [scriptOpened, setScriptOpened] = useState(false);
 
   const { playStage } = useBGM();
 
@@ -65,6 +69,25 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
     setPendingHumanSpeech,
     cancelActiveOperations,
   } = useGameStore();
+
+  // Track script opened state for mobile toolbar badge
+  useEffect(() => {
+    if (sessionId) {
+      const key = `script_opened_${sessionId}`;
+      setScriptOpened(localStorage.getItem(key) === "true");
+    }
+  }, [sessionId]);
+
+  const handleScriptOpenChange = useCallback(
+    (open: boolean) => {
+      setScriptOpen(open);
+      if (!open && sessionId) {
+        const key = `script_opened_${sessionId}`;
+        setScriptOpened(localStorage.getItem(key) === "true");
+      }
+    },
+    [sessionId]
+  );
 
   // Initialize game
   useEffect(() => {
@@ -316,6 +339,76 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
             onEndGame={() => endGame().then(onExit)}
             canAdvanceEarly={allPlayersSpokenOnce}
           />
+
+          {/* Mobile Bottom Toolbar - flow-based, NOT fixed */}
+          <div className="lg:hidden shrink-0 border-t border-border/30 bg-background/90 backdrop-blur-md px-2 py-1.5">
+            <div className="flex items-center gap-2">
+              {/* Character avatars - horizontally scrollable */}
+              <div className="flex gap-1.5 overflow-x-auto flex-1 py-0.5 scrollbar-hide">
+                {characters.map((char) => {
+                  const isSpeaking = currentSpeakerId === char.character_id;
+                  const isHuman = humanCharacterId === char.character_id;
+
+                  return (
+                    <div
+                      key={char.character_id}
+                      className={`relative w-8 h-8 rounded-full shrink-0 flex items-center justify-center
+                        ${isSpeaking ? "breathing ring-2 ring-primary" : ""}
+                        bg-gradient-to-br from-primary/30 to-accent/30`}
+                    >
+                      {char.avatar_url ? (
+                        <img
+                          src={char.avatar_url}
+                          alt={char.name}
+                          className="w-full h-full rounded-full object-cover"
+                        />
+                      ) : (
+                        <span className="text-xs font-bold">{char.name[0]}</span>
+                      )}
+                      {isHuman && (
+                        <div
+                          className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-accent
+                                      flex items-center justify-center text-[8px]"
+                        >
+                          你
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Divider */}
+              <div className="w-px h-6 bg-border/40 shrink-0" />
+
+              {/* Action buttons */}
+              <div className="flex gap-1.5 shrink-0">
+                <button
+                  onClick={() => setDraftOpen(true)}
+                  className="w-8 h-8 rounded-full bg-secondary/50 hover:bg-secondary/70
+                             flex items-center justify-center transition-colors"
+                  title="草稿本"
+                >
+                  <FileEdit className="w-4 h-4" />
+                </button>
+                {humanCharacterScript && (
+                  <button
+                    onClick={() => setScriptOpen(true)}
+                    className="relative w-8 h-8 rounded-full bg-primary/80 hover:bg-primary
+                               flex items-center justify-center transition-colors"
+                    title="查看我的剧本"
+                  >
+                    <BookOpen className="w-4 h-4" />
+                    {!scriptOpened && (
+                      <span className="absolute -top-0.5 -right-0.5 px-1 rounded-full bg-accent text-[7px] font-bold text-accent-foreground">
+                        新
+                      </span>
+                    )}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Right Character Panel */}
@@ -328,44 +421,6 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
             humanCharacterId={humanCharacterId}
             side="right"
           />
-        </div>
-      </div>
-
-      {/* Mobile Character Indicators */}
-      <div className="lg:hidden fixed bottom-20 left-0 right-0 px-4">
-        <div className="flex justify-center gap-2 overflow-x-auto py-2">
-          {characters.map((char) => {
-            const isSpeaking = currentSpeakerId === char.character_id;
-            const isHuman = humanCharacterId === char.character_id;
-
-            return (
-              <motion.div
-                key={char.character_id}
-                whileHover={{ scale: 1.1 }}
-                className={`relative w-10 h-10 rounded-full shrink-0 flex items-center justify-center
-                  ${isSpeaking ? "breathing ring-2 ring-primary" : ""}
-                  bg-gradient-to-br from-primary/30 to-accent/30`}
-              >
-                {char.avatar_url ? (
-                  <img
-                    src={char.avatar_url}
-                    alt={char.name}
-                    className="w-full h-full rounded-full object-cover"
-                  />
-                ) : (
-                  <span className="text-sm font-bold">{char.name[0]}</span>
-                )}
-                {isHuman && (
-                  <div
-                    className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-accent
-                                flex items-center justify-center text-[10px]"
-                  >
-                    你
-                  </div>
-                )}
-              </motion.div>
-            );
-          })}
         </div>
       </div>
 
@@ -487,10 +542,16 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
           characters.find((c) => c.character_id === humanCharacterId)?.name
         }
         sessionId={sessionId}
+        open={scriptOpen}
+        onOpenChange={handleScriptOpenChange}
       />
 
       {/* Draft Notebook */}
-      <DraftNotebook sessionId={sessionId} />
+      <DraftNotebook
+        sessionId={sessionId}
+        open={draftOpen}
+        onOpenChange={setDraftOpen}
+      />
     </div>
   );
 }

@@ -38,22 +38,22 @@ export function GameHeader({
 
   return (
     <header className="sticky top-0 z-40 border-b border-border/50 bg-background/80 backdrop-blur-xl">
-      <div className="container mx-auto px-4 py-3">
-        <div className="flex items-center justify-between">
+      <div className="container mx-auto px-3 lg:px-4 py-2 lg:py-3">
+        <div className="flex items-center justify-between gap-2">
           {/* Left: Logo & Script */}
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
-              <BookIcon size={44} />
+          <div className="flex items-center gap-2 lg:gap-4 shrink-0">
+            <div className="flex items-center gap-1.5 lg:gap-2">
+              <BookIcon size={36} />
               <span className="font-bold text-glow hidden sm:inline">独醒</span>
             </div>
 
             <button
               onClick={onOpenScript}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-lg
+              className="flex items-center gap-1.5 lg:gap-2 px-2 lg:px-3 py-1 lg:py-1.5 rounded-lg
                        bg-secondary/30 hover:bg-secondary/50 transition-colors"
             >
-              <BookOpen className="w-4 h-4" />
-              <span className="text-sm truncate max-w-[150px]">{scriptTitle}</span>
+              <BookOpen className="w-3.5 h-3.5 lg:w-4 lg:h-4" />
+              <span className="text-xs lg:text-sm truncate max-w-[80px] lg:max-w-[150px]">{scriptTitle}</span>
             </button>
           </div>
 
@@ -62,34 +62,34 @@ export function GameHeader({
             key={stage}
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="flex items-center gap-3 px-4 py-2 rounded-full glass"
+            className="flex items-center gap-1.5 lg:gap-3 px-2.5 lg:px-4 py-1 lg:py-2 rounded-full glass"
           >
-            <div className={`w-2 h-2 rounded-full animate-pulse ${stage === 'loading' ? 'bg-muted-foreground' : 'bg-primary'}`} />
-            <span className={`font-medium ${STAGE_COLORS[stage]}`}>
+            <div className={`w-1.5 h-1.5 lg:w-2 lg:h-2 rounded-full animate-pulse ${stage === 'loading' ? 'bg-muted-foreground' : 'bg-primary'}`} />
+            <span className={`text-xs lg:text-sm font-medium ${STAGE_COLORS[stage]}`}>
               {STAGE_NAMES[stage]}
             </span>
             {currentRound > 0 && (
-              <span className="text-xs text-muted-foreground">
-                第 {currentRound} 轮
+              <span className="text-[10px] lg:text-xs text-muted-foreground">
+                第{currentRound}轮
               </span>
             )}
           </motion.div>
 
           {/* Right: Actions */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 lg:gap-2 shrink-0">
             <button
               onClick={onSettings}
-              className="p-2 rounded-lg hover:bg-secondary/50 transition-colors"
+              className="p-1.5 lg:p-2 rounded-lg hover:bg-secondary/50 transition-colors"
               title="设置"
             >
-              <Settings className="w-5 h-5" />
+              <Settings className="w-4 h-4 lg:w-5 lg:h-5" />
             </button>
             <button
               onClick={() => setShowExitConfirm(true)}
-              className="p-2 rounded-lg hover:bg-danger/20 text-danger transition-colors"
+              className="p-1.5 lg:p-2 rounded-lg hover:bg-danger/20 text-danger transition-colors"
               title="退出游戏"
             >
-              <LogOut className="w-5 h-5" />
+              <LogOut className="w-4 h-4 lg:w-5 lg:h-5" />
             </button>
           </div>
         </div>

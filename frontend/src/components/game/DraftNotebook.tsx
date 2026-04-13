@@ -4,9 +4,15 @@ import { FileEdit, X, Save } from "lucide-react";
 
 interface DraftNotebookProps {
   sessionId?: string;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
-export function DraftNotebook({ sessionId }: DraftNotebookProps) {
+export function DraftNotebook({
+  sessionId,
+  open,
+  onOpenChange,
+}: DraftNotebookProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [content, setContent] = useState("");
 
@@ -14,6 +20,13 @@ export function DraftNotebook({ sessionId }: DraftNotebookProps) {
   const storageKey = sessionId
     ? `draft_notebook_${sessionId}`
     : "draft_notebook_temp";
+
+  // Sync with external open prop (triggered from mobile toolbar)
+  useEffect(() => {
+    if (open && !isOpen) {
+      setIsOpen(true);
+    }
+  }, [open]);
 
   // 从 localStorage 加载草稿
   useEffect(() => {
@@ -38,20 +51,25 @@ export function DraftNotebook({ sessionId }: DraftNotebookProps) {
     }
   }, [content, isOpen]);
 
+  const handleOpen = () => {
+    setIsOpen(true);
+  };
+
   // 关闭时保存
   const handleClose = () => {
     saveDraft();
     setIsOpen(false);
+    onOpenChange?.(false);
   };
 
   return (
     <>
-      {/* Floating button - 样式与PlayerScriptTooltip保持一致 */}
+      {/* Floating button - desktop only (hidden on mobile, toolbar provides button) */}
       <motion.button
-        onClick={() => setIsOpen(true)}
+        onClick={handleOpen}
         className="fixed bottom-6 right-24 z-40 w-14 h-14 rounded-full
                    bg-primary/90 hover:bg-primary text-foreground
-                   shadow-lg flex items-center justify-center
+                   shadow-lg hidden lg:flex items-center justify-center
                    transition-colors"
         whileHover={{ scale: 1.1 }}
         whileTap={{ scale: 0.95 }}

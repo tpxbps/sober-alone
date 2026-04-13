@@ -198,7 +198,7 @@ export function ChatArea({
     !isAdvancingStage;
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col flex-1 min-h-0">
       {/* Messages Area */}
       <div className="flex-1 overflow-auto p-4 scrollbar-thin">
         <div className="max-w-3xl mx-auto space-y-4">
@@ -469,13 +469,13 @@ export function ChatArea({
                   </button>
                 </div>
               )}
-              <div className="flex gap-3">
+              <div className="flex gap-2 lg:gap-3">
                 <textarea
                   ref={inputRef as React.RefObject<HTMLTextAreaElement>}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyPress}
-                  placeholder="输入你的发言... (Enter添加内容，Ctrl+Enter发送)"
+                  placeholder="输入你的发言..."
                   maxLength={3000}
                   disabled={
                     !!pendingHumanSpeech ||
@@ -485,12 +485,12 @@ export function ChatArea({
                       humanRemainingSpeechCount !== undefined &&
                       humanRemainingSpeechCount <= 0)
                   }
-                  rows={2}
-                  className="flex-1 px-4 py-3 rounded-xl bg-secondary/30 border border-border/50
+                  rows={1}
+                  className="flex-1 px-3 py-2 lg:px-4 lg:py-3 rounded-xl bg-secondary/30 border border-border/50
                            focus:outline-none focus:ring-2 focus:ring-primary/50
-                           disabled:opacity-50 disabled:cursor-not-allowed resize-none"
+                           disabled:opacity-50 disabled:cursor-not-allowed resize-none text-sm"
                 />
-                <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-1.5 lg:gap-2">
                   <button
                     type="submit"
                     disabled={
@@ -499,13 +499,13 @@ export function ChatArea({
                       isStreaming ||
                       isProcessingReactions
                     }
-                    className="px-4 py-2 rounded-xl bg-secondary/50 border border-border/50 text-sm
+                    className="px-3 py-1.5 lg:px-4 lg:py-2 rounded-xl bg-secondary/50 border border-border/50 text-sm
                              hover:bg-secondary/70 disabled:opacity-50 disabled:cursor-not-allowed
-                             transition-colors flex items-center gap-1"
+                             transition-colors flex items-center gap-1 whitespace-nowrap"
                     title="添加更多发言 (Enter)"
                   >
                     <Plus className="w-4 h-4" />
-                    继续发言
+                    <span className="hidden sm:inline">继续发言</span>
                   </button>
                   <button
                     type="button"
@@ -519,25 +519,28 @@ export function ChatArea({
                         humanRemainingSpeechCount !== undefined &&
                         humanRemainingSpeechCount <= 0)
                     }
-                    className="px-4 py-2 rounded-xl bg-primary text-primary-foreground font-medium
+                    className="px-3 py-1.5 lg:px-4 lg:py-2 rounded-xl bg-primary text-primary-foreground font-medium
                              hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed
-                             transition-colors flex items-center gap-1"
+                             transition-colors flex items-center gap-1 whitespace-nowrap"
                   >
                     <Send className="w-4 h-4" />
-                    完成发言
+                    <span className="hidden sm:inline">完成发言</span>
                   </button>
                 </div>
               </div>
-              {/* Speech count indicator for free discussion */}
+              {/* Speech count indicator - hide keyboard shortcut hints on mobile */}
               {stage === "free_discussion" &&
                 humanRemainingSpeechCount !== undefined && (
                   <p className="text-xs text-muted-foreground text-center">
-                    剩余发言次数: {humanRemainingSpeechCount} · Enter
-                    添加更多内容 · Ctrl+Enter 发送全部发言并完成
+                    剩余发言次数: {humanRemainingSpeechCount}
+                    <span className="hidden lg:inline">
+                      {" "}· Enter 添加更多内容 · Ctrl+Enter
+                      发送全部发言并完成
+                    </span>
                   </p>
                 )}
               {stage !== "free_discussion" && (
-                <p className="text-xs text-muted-foreground text-center">
+                <p className="text-xs text-muted-foreground text-center hidden lg:block">
                   Enter 添加更多内容 · Ctrl+Enter 发送全部发言并完成
                 </p>
               )}

@@ -6,6 +6,8 @@ interface PlayerScriptTooltipProps {
   scriptContent: string;
   characterName?: string;
   sessionId?: string; // 用于持久化存储状态
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 // Simple markdown-like renderer for basic formatting
@@ -21,9 +23,18 @@ export function PlayerScriptTooltip({
   scriptContent,
   characterName,
   sessionId,
+  open,
+  onOpenChange,
 }: PlayerScriptTooltipProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [hasOpenedBefore, setHasOpenedBefore] = useState(false);
+
+  // Sync with external open prop (triggered from mobile toolbar)
+  useEffect(() => {
+    if (open && !isOpen) {
+      handleOpenScript();
+    }
+  }, [open]);
 
   // 从 localStorage 恢复状态
   useEffect(() => {
@@ -51,12 +62,12 @@ export function PlayerScriptTooltip({
 
   return (
     <>
-      {/* Floating button with optional glow effect */}
+      {/* Floating button - desktop only (hidden on mobile, toolbar provides button) */}
       <motion.button
         onClick={handleOpenScript}
         className={`fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full
                    bg-primary/90 hover:bg-primary text-foreground
-                   shadow-lg flex flex-col items-center justify-center gap-1
+                   shadow-lg hidden lg:flex flex-col items-center justify-center gap-1
                    transition-colors ${showGlow ? "breathing-prominent" : ""}`}
         whileHover={{ scale: 1.1 }}
         whileTap={{ scale: 0.95 }}
@@ -86,7 +97,10 @@ export function PlayerScriptTooltip({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-            onClick={() => setIsOpen(false)}
+            onClick={() => {
+              setIsOpen(false);
+              onOpenChange?.(false);
+            }}
           >
             <motion.div
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
@@ -104,7 +118,10 @@ export function PlayerScriptTooltip({
                   </h3>
                 </div>
                 <button
-                  onClick={() => setIsOpen(false)}
+                  onClick={() => {
+                    setIsOpen(false);
+                    onOpenChange?.(false);
+                  }}
                   className="p-2 rounded-lg hover:bg-secondary/50 transition-colors"
                 >
                   <X className="w-5 h-5" />
