@@ -305,3 +305,36 @@ html {
   margin-top: 0.125rem;
 }
 
+/* Speaker icon playing animation - blue-purple flowing glow */
+.speaker-playing {
+  animation: speakerGlow 1.5s ease-in-out infinite;
+  position: relative;
+}
+
+@keyframes speakerGlow {
+  0% {
+    box-shadow:
+      0 0 6px oklch(0.6 0.2 280 / 80%),
+      0 0 12px oklch(0.55 0.18 290 / 40%);
+    filter: hue-rotate(0deg);
+  }
+  33% {
+    box-shadow:
+      0 0 10px oklch(0.65 0.22 300 / 90%),
+      0 0 20px oklch(0.6 0.18 280 / 50%);
+    filter: hue-rotate(20deg);
+  }
+  66% {
+    box-shadow:
+      0 0 8px oklch(0.7 0.2 310 / 85%),
+      0 0 16px oklch(0.55 0.22 290 / 45%);
+    filter: hue-rotate(-10deg);
+  }
+  100% {
+    box-shadow:
+      0 0 6px oklch(0.6 0.2 280 / 80%),
+      0 0 12px oklch(0.55 0.18 290 / 40%);
+    filter: hue-rotate(0deg);
+  }
+}
+

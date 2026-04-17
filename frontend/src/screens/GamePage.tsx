@@ -334,6 +334,7 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
             humanRemainingSpeechCount={humanRemainingSpeeches}
             pendingHumanSpeech={pendingHumanSpeech}
             setPendingHumanSpeech={setPendingHumanSpeech}
+            scriptId={script?.script_id}
             onSendMessage={handleSendMessage}
             onAdvanceStage={handleAdvanceStage}
             onEndGame={() => endGame().then(onExit)}
@@ -542,6 +543,8 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
           characters.find((c) => c.character_id === humanCharacterId)?.name
         }
         sessionId={sessionId}
+        scriptId={script?.script_id}
+        characterId={humanCharacterId || undefined}
         open={scriptOpen}
         onOpenChange={handleScriptOpenChange}
       />

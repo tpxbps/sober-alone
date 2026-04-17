@@ -44,6 +44,7 @@ export interface Character {
   avatar_url?: string;
   portrait_url?: string;
   is_human?: boolean;
+  voice_id?: string; // StepFun TTS voice ID
 }
 
 // Player state from backend
@@ -68,6 +69,7 @@ export interface GameRecord {
   speaker_name?: string;
   content: string;
   record_type: 'system' | 'speech' | 'action';
+  audio_url?: string; // TTS audio file URL
   created_at: string;
 }
 
@@ -105,7 +107,7 @@ export interface GameSessionState {
 
 // Streaming message types
 export interface StreamingMessage {
-  type: 'token' | 'complete' | 'done' | 'error' | 'progress' | 'tool_call' | 'tool_result' | 'thinking' | 'thinking_end' | 'speech_done' | 'reactions_done';
+  type: 'token' | 'complete' | 'done' | 'error' | 'progress' | 'tool_call' | 'tool_result' | 'thinking' | 'thinking_end' | 'speech_done' | 'reactions_done' | 'audio_delta' | 'audio_done';
   character_id?: string;
   character_name?: string;
   content?: string;
@@ -114,6 +116,8 @@ export interface StreamingMessage {
   data?: unknown;
   next_speaker_id?: string;
   stage_complete?: boolean;
+  audio?: string;    // base64 encoded audio data (for audio_delta)
+  duration?: number; // audio duration in seconds (for audio_delta)
 }
 
 // AI model option

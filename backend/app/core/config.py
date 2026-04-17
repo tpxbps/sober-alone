@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     QWEN_API_KEY: Optional[str] = None
     DOUBAO_API_KEY: Optional[str] = None
 
+    # TTS API Keys
+    MIMO_API_KEY: Optional[str] = None
+    # STEPFUN_API_KEY: Optional[str] = None
+
     # LLM API Base URLs
     DEEPSEEK_API_BASE_URL: Optional[str] = "https://api.deepseek.com"
     ZHIPUAI_API_BASE_URL: Optional[str] = "https://open.bigmodel.cn/api/paas/v4/"
@@ -41,6 +45,7 @@ class Settings(BaseSettings):
         "https://dashscope.aliyuncs.com/compatible-mode/v1"
     )
     DOUBAO_API_BASE_URL: Optional[str] = "https://ark.cn-beijing.volces.com/api/v3"
+    MIMO_API_BASE_URL: Optional[str] = "https://api.xiaomimimo.com/v1"
 
     # 默认LLM提供商
     DEFAULT_LLM_PROVIDER: str = "stepfun"
@@ -70,6 +75,7 @@ class Settings(BaseSettings):
             "stepfun": self.STEPFUN_API_KEY,
             "alibaba": self.QWEN_API_KEY,
             "bytedance": self.DOUBAO_API_KEY,
+            "mimo": self.MIMO_API_KEY,
         }
         return key_mapping.get(provider)
 
@@ -81,6 +87,7 @@ class Settings(BaseSettings):
             "stepfun": self.STEPFUN_API_BASE_URL,
             "alibaba": self.QWEN_API_BASE_URL,
             "bytedance": self.DOUBAO_API_BASE_URL,
+            "mimo": self.MIMO_API_BASE_URL,
         }
         return url_mapping.get(provider)
 

@@ -3,9 +3,12 @@ GameService - 游戏服务层
 提供游戏相关的业务逻辑
 """
 
+import logging
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 import uuid
+
+logger = logging.getLogger(__name__)
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -331,6 +334,7 @@ class GameService:
                     "occupation": c.get("occupation"),
                     "profile": c.get("profile"),
                     "avatar_url": c.get("avatar_url"),
+                    "voice_id": c.get("voice_id"),
                     "is_human": c.get("character_id")
                     == game_session.human_character_id,
                     "character_script": (
@@ -490,7 +494,9 @@ class GameService:
 
         yield f"data: {_json.dumps({'type': 'done', 'next_speaker_id': result.get('next_speaker'), 'next_speaker_name': result.get('next_speaker_name', '')}, ensure_ascii=False)}\n\n"
 
-    async def process_ai_speech_stream(self, session_id: str, character_id: str):
+    async def process_ai_speech_stream(
+        self, session_id: str, character_id: str
+    ):
         """
         处理AI玩家发言（流式）
 
@@ -507,6 +513,7 @@ class GameService:
             str: SSE格式的数据行
         """
         import json
+        import asyncio
 
         flow_controller = await ensure_flow_controller(session_id, self.db)
         if not flow_controller:
@@ -517,28 +524,31 @@ class GameService:
         full_content = ""
         is_thinking = False
 
-        async for chunk in flow_controller.generate_ai_speech(character_id, self.db):
-            # chunk 是 dict，包含 type 和相应字段
-            if isinstance(chunk, dict):
-                chunk_type = chunk.get("type", "unknown")
+        try:
+            async for chunk in flow_controller.generate_ai_speech(
+                character_id, self.db
+            ):
+                # chunk 是 dict，包含 type 和相应字段
+                if isinstance(chunk, dict):
+                    chunk_type = chunk.get("type", "unknown")
 
-                # 只处理文本token和进度更新
-                if chunk_type == "token":
-                    if is_thinking:
-                        is_thinking = False
+                    if chunk_type == "token":
+                        if is_thinking:
+                            is_thinking = False
 
-                    text = chunk.get("text", "")
-                    full_content += text
-                    # 只发送文本token给前端
-                    yield f"data: {json.dumps({'type': 'token', 'text': text}, ensure_ascii=False)}\n\n"
+                        text = chunk.get("text", "")
+                        full_content += text
+                        # 发送文本token给前端
+                        yield f"data: {json.dumps({'type': 'token', 'text': text}, ensure_ascii=False)}\n\n"
 
-                elif chunk_type == "progress":
-                    # 进度更新，发送工具调用的友好提示消息
-                    status = chunk.get("status", "")
-                    if status:
-                        # 直接发送工具返回的友好提示（如"正在回忆具体细节..."）
-                        yield f"data: {json.dumps({'type': 'thinking', 'message': status}, ensure_ascii=False)}\n\n"
-                        is_thinking = True
+                    elif chunk_type == "progress":
+                        status = chunk.get("status", "")
+                        if status:
+                            yield f"data: {json.dumps({'type': 'thinking', 'message': status}, ensure_ascii=False)}\n\n"
+                            is_thinking = True
+        except Exception as e:
+            logger.error(f"AI speech stream error: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
 
         # AI发言流结束，通知前端进入反应处理阶段
         yield f"data: {json.dumps({'type': 'speech_done'}, ensure_ascii=False)}\n\n"
@@ -611,12 +621,16 @@ class GameService:
 
             # 如果有系统通知，记录到游戏记录
             if transition.system_notice:
+                audio_url = None
+                if transition.audio_key:
+                    audio_url = f"/audio/scripts/{flow_controller.session.script_id}/system_messages/{transition.audio_key}.wav"
                 record = GameRecord(
                     session_id=session_id,
                     record_type="system",
                     stage=transition.to_stage,
                     round_num=transition.round_num,
                     raw_content=transition.system_notice,
+                    audio_url=audio_url,
                     timestamp=datetime.now(),
                 )
                 self.db.add(record)

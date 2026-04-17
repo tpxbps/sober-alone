@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useMemo } from "react";
+import { useRef, useEffect, useState, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Send, Loader2, ArrowRight, Plus, Info, X } from "lucide-react";
 import type {
@@ -12,6 +12,9 @@ import { DynamicDot } from "@/components/ui/DynamicDot";
 import { Markdown } from "@/components/ui/Markdown";
 import { GameMessageMarkdown } from "@/components/ui/GameMessageMarkdown";
 import { StreamingBubble } from "@/components/game/StreamingBubble";
+import { SpeakerIcon, type SpeakerState } from "@/components/ui/SpeakerIcon";
+import { audioPlayerManager } from "@/lib/audioPlayerManager";
+import { useSettingsStore } from "@/stores/settingsStore";
 
 const THINKING_MESSAGES = [
   "大家正在分析听到的发言",
@@ -34,6 +37,7 @@ interface ChatAreaProps {
   humanRemainingSpeechCount?: number; // 玩家剩余发言次数
   pendingHumanSpeech: string | null; // 待发送的真人发言
   setPendingHumanSpeech: (speech: string | null) => void; // 设置待发送发言
+  scriptId?: string; // 剧本 ID，用于构建音频 URL
   onSendMessage: (content: string) => void;
   onAdvanceStage: () => void;
   onEndGame: () => void;
@@ -63,6 +67,7 @@ export function ChatArea({
   humanRemainingSpeechCount,
   pendingHumanSpeech,
   setPendingHumanSpeech,
+  scriptId,
   onSendMessage,
   onAdvanceStage,
   onEndGame,
@@ -74,8 +79,199 @@ export function ChatArea({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
+  // TTS state tracking per-record: recordId -> 'loading' | 'playing' | 'error'
+  const [ttsStates, setTtsStates] = useState<Record<number, SpeakerState>>({});
+  const ttsEnabled = useSettingsStore((s) => s.ttsEnabled);
+
   // User scroll priority ref: shared with StreamingBubble via DOM event
   const userScrollTimerRef = useRef<number>(0);
+
+  // Track active audio across all handlers: enables toggle-off and SSE abort
+  const activeAudioRef = useRef<{
+    recordId: number;
+    type: 'static' | 'streaming';
+    abortController?: AbortController;
+  } | null>(null);
+
+  /** Stop current active audio (abort SSE if streaming) */
+  const stopActiveAudio = useCallback(() => {
+    if (activeAudioRef.current) {
+      activeAudioRef.current.abortController?.abort();
+      activeAudioRef.current = null;
+    }
+    if (audioPlayerManager.getIsPlaying()) {
+      audioPlayerManager.stop();
+    }
+    setTtsStates({});
+  }, []);
+
+  // Handle TTS playback for a record (AI speech — Blob cache, audio_url, or SSE stream)
+  const handlePlayRecordAudio = useCallback(async (record: GameRecord) => {
+    // If already playing this record → stop (toggle off)
+    if (activeAudioRef.current?.recordId === record.id && audioPlayerManager.isAudioActive()) {
+      stopActiveAudio();
+      return;
+    }
+
+    // Stop whatever else is playing
+    stopActiveAudio();
+
+    // Check frontend Blob cache first
+    const cachedUrl = audioPlayerManager.getCachedUrl(record.id);
+    if (cachedUrl) {
+      activeAudioRef.current = { recordId: record.id, type: 'static' };
+      setTtsStates({ [record.id]: 'playing' });
+      try {
+        await audioPlayerManager.play(cachedUrl);
+        const unsub = audioPlayerManager.onStateChange((playing) => {
+          if (!playing && !audioPlayerManager.isAudioActive()) {
+            setTtsStates(prev => ({ ...prev, [record.id]: 'off' }));
+            if (activeAudioRef.current?.recordId === record.id) activeAudioRef.current = null;
+            unsub();
+          }
+        });
+      } catch {
+        setTtsStates({ [record.id]: 'error' });
+        activeAudioRef.current = null;
+      }
+      return;
+    }
+
+    // Check backend pre-generated audio_url
+    if (record.audio_url) {
+      activeAudioRef.current = { recordId: record.id, type: 'static' };
+      setTtsStates({ [record.id]: 'loading' });
+      try {
+        await audioPlayerManager.play(record.audio_url);
+        setTtsStates({ [record.id]: 'playing' });
+        const unsub = audioPlayerManager.onStateChange((playing) => {
+          if (!playing && !audioPlayerManager.isAudioActive()) {
+            setTtsStates(prev => ({ ...prev, [record.id]: 'off' }));
+            if (activeAudioRef.current?.recordId === record.id) activeAudioRef.current = null;
+            unsub();
+          }
+        });
+      } catch {
+        setTtsStates({ [record.id]: 'error' });
+        activeAudioRef.current = null;
+      }
+      return;
+    }
+
+    // AI character record: stream TTS via SSE
+    if (record.speaker_id && record.speaker_id !== humanCharacterId) {
+      const abortController = new AbortController();
+      activeAudioRef.current = {
+        recordId: record.id,
+        type: 'streaming',
+        abortController,
+      };
+
+      setTtsStates({ [record.id]: 'loading' });
+
+      try {
+        await audioPlayerManager.startStream();
+        setTtsStates({ [record.id]: 'playing' });
+
+        // Listen for streaming audio end to reset speaker state
+        const unsub = audioPlayerManager.onStateChange((playing) => {
+          if (!playing && !audioPlayerManager.isAudioActive()) {
+            setTtsStates(prev => ({ ...prev, [record.id]: 'off' }));
+            if (activeAudioRef.current?.recordId === record.id) activeAudioRef.current = null;
+            unsub();
+          }
+        });
+
+        const apiBase = import.meta.env.VITE_API_URL || '/api/v1';
+        const response = await fetch(
+          `${apiBase}/game/${record.session_id}/tts/stream`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ record_id: record.id }),
+            signal: abortController.signal,
+          }
+        );
+
+        if (!response.body) throw new Error('No response body');
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            try {
+              const data = JSON.parse(line.slice(6));
+              // Guard: ignore stale chunks if user switched to different audio
+              if (activeAudioRef.current?.recordId !== record.id) return;
+              if (data.type === 'audio_delta' && data.audio) {
+                await audioPlayerManager.appendChunk(data.audio);
+              } else if (data.type === 'audio_done') {
+                audioPlayerManager.endStream(record.id);
+              } else if (data.type === 'error') {
+                audioPlayerManager.stop();
+                setTtsStates({ [record.id]: 'error' });
+                activeAudioRef.current = null;
+                return;
+              }
+            } catch {
+              // skip invalid JSON
+            }
+          }
+        }
+        // Streaming completed naturally
+        if (activeAudioRef.current?.recordId === record.id) {
+          activeAudioRef.current = null;
+        }
+      } catch (e) {
+        if ((e as Error).name !== 'AbortError') {
+          audioPlayerManager.stop();
+          setTtsStates({ [record.id]: 'error' });
+        }
+        activeAudioRef.current = null;
+      }
+    }
+  }, [humanCharacterId, stopActiveAudio]);
+
+  // Handle system message audio playback
+  const handlePlaySystemAudio = useCallback(async (record: GameRecord) => {
+    // If already playing this system record → stop (toggle off)
+    if (activeAudioRef.current?.recordId === record.id && audioPlayerManager.isAudioActive()) {
+      stopActiveAudio();
+      return;
+    }
+
+    // Stop whatever else is playing
+    stopActiveAudio();
+
+    if (!record.audio_url) return;
+
+    activeAudioRef.current = { recordId: record.id, type: 'static' };
+    setTtsStates({ [record.id]: 'loading' });
+    try {
+      await audioPlayerManager.play(record.audio_url);
+      setTtsStates({ [record.id]: 'playing' });
+      const unsub = audioPlayerManager.onStateChange((playing) => {
+        if (!playing && !audioPlayerManager.isAudioActive()) {
+          setTtsStates(prev => ({ ...prev, [record.id]: 'off' }));
+          if (activeAudioRef.current?.recordId === record.id) activeAudioRef.current = null;
+          unsub();
+        }
+      });
+    } catch {
+      setTtsStates({ [record.id]: 'error' });
+      activeAudioRef.current = null;
+    }
+  }, [stopActiveAudio]);
 
   // Update thinking message when processing starts
   useEffect(() => {
@@ -210,6 +406,7 @@ export function ChatArea({
 
               // System message styling
               if (isSystem) {
+                const sysSpeakerState: SpeakerState = ttsStates[record.id] || 'off';
                 return (
                   <motion.div
                     key={record.id || index}
@@ -222,6 +419,12 @@ export function ChatArea({
                       className="flex items-start gap-3 px-5 py-4 rounded-2xl bg-gradient-to-r from-primary/10 via-accent/5 to-primary/10
                                   border border-primary/20 max-w-[85%] shadow-sm"
                     >
+                      <SpeakerIcon
+                        state={sysSpeakerState}
+                        onClick={() => handlePlaySystemAudio(record)}
+                        size={14}
+                        className="shrink-0 mt-0.5"
+                      />
                       <Info className="w-5 h-5 text-primary shrink-0 mt-0.5" />
                       <Markdown className="text-sm text-foreground/90 leading-relaxed">
                         {record.content}
@@ -232,6 +435,9 @@ export function ChatArea({
               }
 
               // Player message styling
+              const isAI = !isHuman && record.speaker_id;
+              const recordSpeakerState: SpeakerState = isAI ? (ttsStates[record.id] || 'off') : 'disabled';
+
               return (
                 <motion.div
                   key={record.id || index}
@@ -242,8 +448,8 @@ export function ChatArea({
                     isHuman ? "flex-row-reverse" : "flex-row"
                   }`}
                 >
-                  {/* Avatar */}
-                  <div className="shrink-0">
+                  {/* Avatar with optional speaker icon */}
+                  <div className="shrink-0 relative">
                     <div
                       className="w-10 h-10 rounded-full overflow-hidden bg-gradient-to-br from-primary/30 to-accent/30
                                   flex items-center justify-center text-sm font-bold"
@@ -258,6 +464,16 @@ export function ChatArea({
                         <span>{record.speaker_name?.[0] || "?"}</span>
                       )}
                     </div>
+                    {/* Speaker icon for AI characters - positioned at top-right of avatar */}
+                    {isAI && (
+                      <div className="absolute -top-1.5 -right-1.5">
+                        <SpeakerIcon
+                          state={recordSpeakerState}
+                          onClick={() => handlePlayRecordAudio(record)}
+                          size={10}
+                        />
+                      </div>
+                    )}
                   </div>
 
                   {/* Message */}

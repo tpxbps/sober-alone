@@ -13,6 +13,8 @@ function getAudio(): HTMLAudioElement {
     audio = new Audio(CLICK_SOUND_SRC);
     audio.volume = 0.25;
     audio.preload = 'auto';
+    // Suppress console errors for missing audio file
+    audio.onerror = () => {};
   }
   return audio;
 }

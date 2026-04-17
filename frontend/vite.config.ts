@@ -10,5 +10,13 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, './src')
     }
-  }
+  },
+  server: {
+    proxy: {
+      '/audio/scripts': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+    },
+  },
 })

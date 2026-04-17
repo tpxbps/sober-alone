@@ -112,7 +112,7 @@ export function StreamingBubble() {
       animate={{ opacity: 1, y: 0 }}
       className="flex gap-3"
     >
-      <div className="shrink-0">
+      <div className="shrink-0 relative">
         <div
           className={`w-10 h-10 rounded-full overflow-hidden bg-gradient-to-br from-primary/30 to-accent/30
                       flex items-center justify-center text-sm font-bold ${

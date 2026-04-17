@@ -77,6 +77,8 @@ function _startGlobalAudio(src: string, volume: number) {
   audio.preload = 'auto';
   audio.loop = true;
   audio.volume = 0;
+  // Suppress console errors for missing audio files
+  audio.onerror = () => {};
   audio.src = src;
 
   const oldAudio = _globalAudio;

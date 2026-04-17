@@ -73,6 +73,12 @@ class VoteRequest(BaseModel):
     reasoning: str = Field(default="", description="投票理由（可选）")
 
 
+class TTSGenerateRequest(BaseModel):
+    """TTS 音频生成请求"""
+
+    record_id: int = Field(..., description="游戏记录 ID")
+
+
 # ============== API Endpoints ==============
 
 
@@ -150,7 +156,9 @@ async def player_speech(
 
 @router.post("/{session_id}/ai-speech/{character_id}")
 async def ai_speech(
-    session_id: str, character_id: str, db: AsyncSession = Depends(get_db)
+    session_id: str,
+    character_id: str,
+    db: AsyncSession = Depends(get_db),
 ):
     """
     AI玩家发言（流式 - SSE格式）
@@ -166,6 +174,7 @@ async def ai_speech(
 
     - **session_id**: 游戏会话ID
     - **character_id**: AI角色ID
+    - **tts**: 是否启用TTS语音合成（默认false）
     """
     game_service = GameService(db)
 
@@ -305,6 +314,104 @@ async def end_game(session_id: str, db: AsyncSession = Depends(get_db)):
     return result
 
 
+# ============== TTS API ==============
+
+
+@router.post("/{session_id}/tts/stream")
+async def stream_tts_audio(
+    session_id: str, request: TTSGenerateRequest, db: AsyncSession = Depends(get_db)
+):
+    """
+    流式 TTS 音频生成（SSE）
+
+    通过 StepFun WebSocket 流式生成语音，通过 SSE 实时推送给前端。
+    不落盘，前端负责缓存。
+
+    SSE 事件类型:
+    - audio_delta: 音频块（base64 编码的 MP3）
+    - audio_done: 生成完成，data.audio 包含完整音频
+    - error: 错误
+
+    - **session_id**: 游戏会话 ID
+    - **record_id**: 游戏记录 ID
+    """
+    from sqlalchemy import select, text as sql_text
+    from app.db.models import GameRecord
+    from app.services.streaming_tts import StreamingTTSSession
+
+    # 获取记录
+    result = await db.execute(
+        select(GameRecord).where(GameRecord.id == request.record_id)
+    )
+    record = result.scalar_one_or_none()
+
+    if not record:
+        raise HTTPException(status_code=404, detail="记录不存在")
+
+    # 校验 record 属于当前 session
+    if record.session_id != session_id:
+        raise HTTPException(status_code=403, detail="记录不属于此会话")
+
+    if not record.raw_content:
+        raise HTTPException(status_code=400, detail="记录无文本内容")
+
+    # 获取角色 voice_id（根据性别选择默认值）
+    default_male_voice = "cixingnansheng"
+    default_female_voice = "lengyanyujie"
+    voice_id = default_male_voice
+    if record.speaker_character_id:
+        char_result = await db.execute(
+            sql_text(
+                "SELECT voice_id, gender FROM characters WHERE character_id = :cid"
+            ),
+            {"cid": record.speaker_character_id},
+        )
+        char_row = char_result.fetchone()
+        if char_row and char_row[0]:
+            voice_id = char_row[0]
+        elif char_row and char_row[1]:
+            gender = str(char_row[1]).strip()
+            if gender in ("女", "female", "F", "f"):
+                voice_id = default_female_voice
+
+    import json
+
+    async def generate():
+        tts = StreamingTTSSession()
+        try:
+            connected = await tts.connect(voice_id)
+            if not connected:
+                yield f"data: {json.dumps({'type': 'error', 'message': 'TTS 连接失败'})}\n\n"
+                return
+
+            # 发送完整文本
+            text = record.raw_content or ""
+            if not text:
+                yield f"data: {json.dumps({'type': 'error', 'message': '文本内容为空'})}\n\n"
+                return
+            await tts.send_text(text)
+            await tts.flush()
+            await tts.finish()
+
+            # 流式转发音频块
+            complete_audio_parts = []
+            async for chunk in tts.receive_audio():
+                yield f"data: {json.dumps({'type': 'audio_delta', 'audio': chunk['audio'], 'duration': chunk.get('duration', 0)}, ensure_ascii=False)}\n\n"
+                complete_audio_parts.append(chunk["audio"])
+
+            # 发送完成事件
+            yield f"data: {json.dumps({'type': 'audio_done'})}\n\n"
+
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"TTS stream error: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+        finally:
+            await tts.close()
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
 # ============== Script API ==============
 
 
@@ -355,7 +462,7 @@ async def get_script_characters(script_id: str, db: AsyncSession = Depends(get_d
     result = await db.execute(
         text(
             """
-            SELECT character_id, name, gender, age, occupation, profile, avatar_url
+            SELECT character_id, name, gender, age, occupation, profile, avatar_url, voice_id
             FROM characters
             WHERE script_id = :script_id
         """
@@ -376,6 +483,7 @@ async def get_script_characters(script_id: str, db: AsyncSession = Depends(get_d
                 "occupation": row[4],
                 "profile": row[5],
                 "avatar_url": row[6],
+                "voice_id": row[7],
             }
             for row in characters
         ],

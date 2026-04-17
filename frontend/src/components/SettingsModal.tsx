@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Volume2, VolumeX } from 'lucide-react';
+import { Volume2, VolumeX, Mic, MicOff } from 'lucide-react';
 import { useSettingsStore } from '@/stores/settingsStore';
 
 interface SettingsModalProps {
@@ -7,8 +7,14 @@ interface SettingsModalProps {
 }
 
 export function SettingsModal({ onClose }: SettingsModalProps) {
-  const { bgmEnabled, bgmVolume, setBgmEnabled, setBgmVolume } =
-    useSettingsStore();
+  const {
+    bgmEnabled,
+    bgmVolume,
+    ttsEnabled,
+    setBgmEnabled,
+    setBgmVolume,
+    setTtsEnabled,
+  } = useSettingsStore();
 
   return (
     <motion.div
@@ -79,9 +85,46 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
           </motion.div>
         )}
 
+        {/* Divider */}
+        <div className="border-t border-border/50 my-4" />
+
+        {/* TTS Toggle */}
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            {ttsEnabled ? (
+              <Mic className="w-5 h-5 text-primary" />
+            ) : (
+              <MicOff className="w-5 h-5 text-muted-foreground" />
+            )}
+            <div className="flex flex-col">
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm font-medium">语音播报</span>
+                <span className="inline-block px-1.5 py-0 rounded text-[10px] font-medium bg-primary/20 text-primary leading-4">
+                  Beta
+                </span>
+              </div>
+              <span className="text-xs text-muted-foreground">
+                AI 角色发言自动转为语音播放
+              </span>
+            </div>
+          </div>
+          <button
+            onClick={() => setTtsEnabled(!ttsEnabled)}
+            className={`w-11 h-6 rounded-full transition-colors relative ${
+              ttsEnabled ? "bg-primary" : "bg-secondary"
+            }`}
+          >
+            <div
+              className={`w-5 h-5 rounded-full bg-white shadow absolute top-0.5 transition-transform ${
+                ttsEnabled ? "translate-x-5" : "translate-x-0.5"
+              }`}
+            />
+          </button>
+        </div>
+
         <button
           onClick={onClose}
-          className="w-full mt-2 px-4 py-2.5 rounded-lg bg-secondary hover:bg-secondary/80
+          className="w-full mt-4 px-4 py-2.5 rounded-lg bg-secondary hover:bg-secondary/80
                    text-sm font-medium transition-colors"
         >
           关闭

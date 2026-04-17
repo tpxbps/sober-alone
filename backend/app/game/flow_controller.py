@@ -28,6 +28,7 @@ class StageTransition:
     round_num: int
     message: str
     system_notice: str
+    audio_key: str = ""  # 用于定位预生成的系统消息音频文件
 
 
 class GameFlowController:
@@ -104,15 +105,20 @@ class GameFlowController:
         system_notice = first_stage.get(
             "system_notice", "游戏开始，请各位依次进行自我介绍。"
         )
+        audio_key = "stage_0" if system_notice else ""
 
         # 记录系统消息到游戏记录
         if db_session and system_notice:
+            audio_url = ""
+            if audio_key:
+                audio_url = f"/audio/scripts/{self.session.script_id}/system_messages/{audio_key}.wav"
             system_record = GameRecord(
                 session_id=self.session.session_id,
                 record_type=RecordType.SYSTEM.value,
                 stage=GameStage.INTRO.value,
                 round_num=0,
                 raw_content=system_notice,
+                audio_url=audio_url or None,
                 timestamp=datetime.now(),
             )
             db_session.add(system_record)
@@ -817,16 +823,28 @@ class GameFlowController:
 
         # 获取系统通知（对于advancement类型，从children中获取）
         system_notice = ""
+        audio_key = ""
         if next_stage_type == "advancement":
             children = next_stage_config.get("children", [])
             if children:
                 system_notice = children[0].get("system_notice", "")
+                audio_key = f"stage_{self.current_process_index}_child_0"
         elif next_stage_type == "vote":
-            system_notice = next_stage_config.get("system_notice", "")
+            # 投票阶段：system_notice 在 children[0]（总结发言引导）
+            children = next_stage_config.get("children", [])
+            if children:
+                system_notice = children[0].get("system_notice", "")
+                audio_key = f"stage_{self.current_process_index}_child_0"
+            else:
+                system_notice = next_stage_config.get("system_notice", "")
+                if system_notice:
+                    audio_key = f"stage_{self.current_process_index}"
             if not system_notice:
                 system_notice = "总结发言阶段，请各位依次进行最终总结，阐述你的推理、指控理由、以及最终辩护。"
         else:
             system_notice = next_stage_config.get("system_notice", "")
+            if system_notice:
+                audio_key = f"stage_{self.current_process_index}"
 
         return StageTransition(
             from_stage=from_stage,
@@ -834,6 +852,7 @@ class GameFlowController:
             round_num=self.session.current_round,
             message=f"阶段从 {from_stage} 推进到 {self.session.current_stage}",
             system_notice=system_notice,
+            audio_key=audio_key,
         )
 
     async def _end_game(self, db_session) -> StageTransition:
@@ -900,6 +919,7 @@ class GameFlowController:
             round_num=self.session.current_round,
             message=f"阶段从 {from_stage} 推进到自由讨论",
             system_notice=system_notice,
+            audio_key=f"stage_{self.current_process_index}_child_1",
         )
 
     async def transition_to_vote(self, db_session=None) -> StageTransition:
@@ -919,11 +939,14 @@ class GameFlowController:
         """
         from_stage = self.session.current_stage
 
-        # 获取当前 vote 配置中的 system_notice
+        # 获取当前 vote 配置中的 system_notice（从 children[1] 获取投票引导）
         current_config = self.game_process[self.current_process_index]
-        system_notice = current_config.get(
-            "system_notice", "总结发言结束，现在进入投票阶段。请各位投票指认凶手！"
-        )
+        children = current_config.get("children", [])
+        default_notice = "总结发言结束，现在进入投票阶段。请各位投票指认凶手！"
+        if len(children) > 1:
+            system_notice = children[1].get("system_notice", default_notice)
+        else:
+            system_notice = current_config.get("system_notice", default_notice)
 
         # 更新阶段
         self.session.current_stage = GameStage.VOTE.value
@@ -939,6 +962,7 @@ class GameFlowController:
             round_num=self.session.current_round,
             message=f"阶段从 {from_stage} 推进到投票",
             system_notice=system_notice,
+            audio_key=f"stage_{self.current_process_index}_child_1",
         )
 
     async def generate_ai_speech(

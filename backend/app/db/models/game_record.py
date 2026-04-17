@@ -63,6 +63,9 @@ class GameRecord(Base):
     # 额外元数据 (注意: 不能使用 'metadata' 作为列名，SQLAlchemy保留字)
     extra_data: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
+    # TTS 音频 URL（按需生成的音频文件路径）
+    audio_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+
     # 时间戳
     timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
@@ -86,6 +89,7 @@ class GameRecord(Base):
             "speaker_name": self.speaker_name,
             "raw_content": self.raw_content,
             "summary_content": self.summary_content,
+            "audio_url": self.audio_url,
             "timestamp": (
                 self.timestamp.isoformat() if self.timestamp is not None else None
             ),
@@ -101,6 +105,7 @@ class GameRecord(Base):
 
         return {
             "id": self.id,
+            "session_id": self.session_id,
             "record_type": self.record_type,  # Frontend expects record_type
             "stage": self.stage,
             "speaker_id": self.speaker_character_id,  # Frontend expects speaker_id
@@ -110,6 +115,7 @@ class GameRecord(Base):
                 else None  # System messages don't have speaker_name
             ),
             "content": self.raw_content,
+            "audio_url": self.audio_url,
             "timestamp": (
                 self.timestamp.isoformat() if self.timestamp is not None else None
             ),

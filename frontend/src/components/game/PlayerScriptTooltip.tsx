@@ -1,42 +1,57 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { BookOpen, X, Lightbulb } from "lucide-react";
+import { SpeakerIcon, type SpeakerState } from "@/components/ui/SpeakerIcon";
+import { audioPlayerManager } from "@/lib/audioPlayerManager";
 
 interface PlayerScriptTooltipProps {
   scriptContent: string;
   characterName?: string;
-  sessionId?: string; // 用于持久化存储状态
+  sessionId?: string;
+  scriptId?: string;
+  characterId?: string;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }
 
-// Simple markdown-like renderer for basic formatting
 function renderMarkdownText(text: string) {
-  // Handle bold text **text**
   let result = text.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-  // Handle italic text *text*
   result = result.replace(/\*(.+?)\*/g, "<em>$1</em>");
   return result;
+}
+
+function formatTime(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
 export function PlayerScriptTooltip({
   scriptContent,
   characterName,
   sessionId,
+  scriptId,
+  characterId,
   open,
   onOpenChange,
 }: PlayerScriptTooltipProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [hasOpenedBefore, setHasOpenedBefore] = useState(false);
+  const [speakerState, setSpeakerState] = useState<SpeakerState>('off');
+  const [progress, setProgress] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const isSeeking = useRef(false);
+  const isScriptAudio = useRef(false);  // 标记当前播放的是否为剧本音频
+  const unsubRef = useRef<(() => void) | null>(null);
 
-  // Sync with external open prop (triggered from mobile toolbar)
+  // Sync with external open prop
   useEffect(() => {
     if (open && !isOpen) {
       handleOpenScript();
     }
   }, [open]);
 
-  // 从 localStorage 恢复状态
+  // Restore from localStorage
   useEffect(() => {
     if (sessionId) {
       const key = `script_opened_${sessionId}`;
@@ -45,7 +60,6 @@ export function PlayerScriptTooltip({
     }
   }, [sessionId]);
 
-  // 保存状态到 localStorage
   const handleOpenScript = () => {
     setIsOpen(true);
     if (sessionId) {
@@ -55,14 +69,90 @@ export function PlayerScriptTooltip({
     }
   };
 
+  // Subscribe to audio player state changes — only track script audio
+  useEffect(() => {
+    const unsub = audioPlayerManager.onStateChange((playing, currentTime, dur) => {
+      if (isSeeking.current) return;
+      if (!isScriptAudio.current) return;
+      setProgress(currentTime);
+      setDuration(dur);
+      // Only treat as ended when the audio source is actually gone (ended/error/stopped),
+      // NOT when merely paused. isAudioActive() returns false only after onended/onerror/stop
+      // clears the audio element reference.
+      if (!playing && !audioPlayerManager.isAudioActive()) {
+        isScriptAudio.current = false;
+        setSpeakerState('off');
+      }
+    });
+    unsubRef.current = unsub;
+    return unsub;
+  }, []);
+
+  // Handle script audio playback
+  const handlePlayScriptAudio = useCallback(async () => {
+    // If script audio is active (playing or paused) → toggle pause
+    if (isScriptAudio.current && audioPlayerManager.isAudioActive()) {
+      const resumed = audioPlayerManager.togglePause();
+      setSpeakerState(resumed ? 'playing' : 'off');
+      return;
+    }
+
+    // Something else is playing → stop it
+    if (audioPlayerManager.getIsPlaying()) {
+      audioPlayerManager.stop();
+    }
+
+    if (!scriptId || !characterId) {
+      setSpeakerState('error');
+      return;
+    }
+
+    const audioUrl = `/audio/scripts/${scriptId}/character_scripts/${characterId}.wav`;
+    isScriptAudio.current = true;
+    setSpeakerState('loading');
+
+    try {
+      await audioPlayerManager.play(audioUrl);
+      setSpeakerState('playing');
+      setProgress(0);
+    } catch {
+      isScriptAudio.current = false;
+      setSpeakerState('error');
+    }
+  }, [scriptId, characterId]);
+
+  // Stop audio when modal closes
+  useEffect(() => {
+    if (!isOpen) {
+      if (isScriptAudio.current) {
+        audioPlayerManager.stop();
+        isScriptAudio.current = false;
+      }
+      setSpeakerState('off');
+      setProgress(0);
+      setDuration(0);
+    }
+  }, [isOpen]);
+
+  // Seek handler
+  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const time = Number(e.target.value);
+    isSeeking.current = true;
+    setProgress(time);
+    audioPlayerManager.seekTo(time);
+    // Reset seeking flag after a short delay to resume progress updates
+    setTimeout(() => { isSeeking.current = false; }, 100);
+  };
+
   if (!scriptContent) return null;
 
-  // 是否显示发光效果（新游戏且未打开过)
   const showGlow = !hasOpenedBefore && !isOpen;
+
+  const showProgressBar = speakerState === 'playing' || (speakerState === 'off' && progress > 0);
 
   return (
     <>
-      {/* Floating button - desktop only (hidden on mobile, toolbar provides button) */}
+      {/* Floating button */}
       <motion.button
         onClick={handleOpenScript}
         className={`fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full
@@ -116,6 +206,11 @@ export function PlayerScriptTooltip({
                   <h3 className="text-lg font-bold">
                     {characterName ? `${characterName}的剧本` : "我的剧本"}
                   </h3>
+                  <SpeakerIcon
+                    state={speakerState}
+                    onClick={handlePlayScriptAudio}
+                    size={16}
+                  />
                 </div>
                 <button
                   onClick={() => {
@@ -127,6 +222,30 @@ export function PlayerScriptTooltip({
                   <X className="w-5 h-5" />
                 </button>
               </div>
+
+              {/* Audio progress bar */}
+              {showProgressBar && (
+                <div className="px-4 pt-2 pb-1 flex items-center gap-2">
+                  <span className="text-[10px] text-muted-foreground tabular-nums w-8 text-right">
+                    {formatTime(progress)}
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={duration || 0}
+                    step={0.1}
+                    value={progress}
+                    onChange={handleSeek}
+                    className="flex-1 h-1 rounded-full appearance-none bg-secondary cursor-pointer
+                               [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3
+                               [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full
+                               [&::-webkit-slider-thumb]:bg-primary"
+                  />
+                  <span className="text-[10px] text-muted-foreground tabular-nums w-8">
+                    {formatTime(duration)}
+                  </span>
+                </div>
+              )}
 
               {/* Guidance tip */}
               <div className="px-4 pt-3">
@@ -142,10 +261,7 @@ export function PlayerScriptTooltip({
               <div className="p-4 overflow-y-auto max-h-[calc(80vh-180px)] scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
                 <div className="prose prose-sm dark:prose-invert max-w-none">
                   {scriptContent.split("\n").map((paragraph, index) => {
-                    // Skip empty lines
                     if (!paragraph.trim()) return null;
-
-                    // Check if it's a heading-like line (starts with 【 or similar markers)
                     const isHeading = /^[【\[（(]/.test(paragraph.trim());
 
                     if (isHeading) {
