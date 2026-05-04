@@ -52,7 +52,7 @@ function reconstructInterruptInfo(
     step,
     step_label: STEP_LABELS[step] || step,
     generated_content: '',
-    characters: state.characters || [],
+    characters: (state.characters || []) as EditorInterruptInfo['characters'],
     character_scripts: state.character_scripts || {},
     review_opinion: state.review_opinion || '',
     game_data_sections: state.game_data_sections || ({} as any),

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { Volume2, VolumeX, Mic, MicOff, KeyRound, Plus, X } from "lucide-react";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { getOwnerUuids, addOwnerUuid } from "@/stores/editorStore";

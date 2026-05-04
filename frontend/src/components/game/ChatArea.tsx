@@ -74,7 +74,6 @@ export function ChatArea({
   humanRemainingSpeechCount,
   pendingHumanSpeech,
   setPendingHumanSpeech,
-  scriptId,
   onSendMessage,
   onAdvanceStage,
   onEndGame,

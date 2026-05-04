@@ -1,6 +1,5 @@
 import { Check, Loader2 } from "lucide-react";
 import { WORKFLOW_PHASES, getPhaseFromStep } from "@/types/editor";
-import type { WorkflowPhaseKey } from "@/types/editor";
 
 interface HorizontalTimelineProps {
   currentStep: string;
@@ -11,7 +10,12 @@ interface HorizontalTimelineProps {
 
 const PHASE_ORDER = WORKFLOW_PHASES.map((p) => p.phase);
 
-export function HorizontalTimeline({ currentStep, isComplete = false, onNodeClick, viewingPhase }: HorizontalTimelineProps) {
+export function HorizontalTimeline({
+  currentStep,
+  isComplete = false,
+  onNodeClick,
+  viewingPhase,
+}: HorizontalTimelineProps) {
   const currentPhase = getPhaseFromStep(currentStep);
   const currentIndex = PHASE_ORDER.indexOf(currentPhase);
 
@@ -21,7 +25,9 @@ export function HorizontalTimeline({ currentStep, isComplete = false, onNodeClic
         const isCompleted = currentIndex > index;
         const isCurrent = currentIndex === index;
         // When workflow is complete and this is the last phase, show checkmark
-        const isPhaseDone = isCompleted || (isCurrent && isComplete && index === PHASE_ORDER.length - 1);
+        const isPhaseDone =
+          isCompleted ||
+          (isCurrent && isComplete && index === PHASE_ORDER.length - 1);
         const isPending = currentIndex < index;
         const isViewing = viewingPhase === phase.phase;
         const isClickable = !isPending && !!onNodeClick;
@@ -38,10 +44,10 @@ export function HorizontalTimeline({ currentStep, isComplete = false, onNodeClic
                   isViewing
                     ? "border-primary bg-primary/20 ring-1 ring-primary/30"
                     : isPhaseDone
-                      ? "border-green-500/30 bg-green-500/5"
-                      : isCurrent
-                        ? "border-primary bg-primary/10"
-                        : "border-border/30 bg-card/50 opacity-50"
+                    ? "border-green-500/30 bg-green-500/5"
+                    : isCurrent
+                    ? "border-primary bg-primary/10"
+                    : "border-border/30 bg-card/50 opacity-50"
                 }
               `}
             >
@@ -59,18 +65,20 @@ export function HorizontalTimeline({ currentStep, isComplete = false, onNodeClic
                     isPhaseDone
                       ? "text-green-500"
                       : isCurrent
-                        ? "text-primary"
-                        : "text-muted-foreground"
+                      ? "text-primary"
+                      : "text-muted-foreground"
                   }`}
                 >
                   {phase.label}
                 </span>
                 {phase.isAuto && (
-                  <span className={`text-[9px] px-1 py-0 rounded shrink-0 ${
-                    isCurrent || isPhaseDone
-                      ? "text-primary/40 bg-primary/5"
-                      : "text-muted-foreground/50 bg-secondary/30"
-                  }`}>
+                  <span
+                    className={`text-[9px] px-1 py-0 rounded shrink-0 ${
+                      isCurrent || isPhaseDone
+                        ? "text-primary/40 bg-primary/5"
+                        : "text-muted-foreground/50 bg-secondary/30"
+                    }`}
+                  >
                     自动
                   </span>
                 )}

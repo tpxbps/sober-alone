@@ -302,7 +302,7 @@ class AudioPlayerManager {
 
     // 缓存
     if (this.streamingChunks.length > 0) {
-      const blob = new Blob(this.streamingChunks, { type: 'audio/mpeg' });
+      const blob = new Blob(this.streamingChunks as BlobPart[], { type: 'audio/mpeg' });
       const blobUrl = URL.createObjectURL(blob);
       this.blobCache.set(recordId, blobUrl);
       return blobUrl;
