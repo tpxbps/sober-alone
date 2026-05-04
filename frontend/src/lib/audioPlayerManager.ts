@@ -104,6 +104,18 @@ class AudioPlayerManager {
     }
   }
 
+  setPlaybackRate(rate: number) {
+    const audio = this.mode === 'streaming' ? this.streamingAudio : this.currentAudio;
+    if (audio) {
+      audio.playbackRate = rate;
+    }
+  }
+
+  getPlaybackRate(): number {
+    const audio = this.mode === 'streaming' ? this.streamingAudio : this.currentAudio;
+    return audio?.playbackRate ?? 1;
+  }
+
   // ========== Blob 缓存 ==========
 
   getCachedUrl(recordId: number): string | null {

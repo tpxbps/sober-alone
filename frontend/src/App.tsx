@@ -4,12 +4,13 @@ import { useSearchParams } from 'react-router-dom';
 
 import { Homepage } from '@/screens/Homepage';
 import { GamePage } from '@/screens/GamePage';
+import { ScriptEditorPage } from '@/screens/ScriptEditorPage';
 import { useGameStore } from '@/stores/gameStore';
 import { gameApi } from '@/lib/api';
 import { useBGM } from '@/hooks/useBGM';
 import { initClickSound } from '@/lib/clickSound';
 
-type AppScreen = 'home' | 'game';
+type AppScreen = 'home' | 'game' | 'editor';
 
 // Storage keys
 const STORAGE_KEY = 'sober_alone_session';
@@ -86,6 +87,16 @@ function App() {
     localStorage.setItem(STORAGE_KEY, newSessionId);
   }, [setSearchParams, stop]);
 
+  // Handle opening script editor
+  const handleOpenEditor = useCallback(() => {
+    setCurrentScreen('editor');
+  }, []);
+
+  // Handle exiting editor back to home
+  const handleExitEditor = useCallback(() => {
+    setCurrentScreen('home');
+  }, []);
+
   // Handle exiting game
   const handleExitGame = useCallback(() => {
     const currentSessionId = sessionId;
@@ -131,7 +142,7 @@ function App() {
             exit={{ opacity: 0 }}
             transition={{ duration: 0.3 }}
           >
-            <Homepage onStartGame={handleStartGame} />
+            <Homepage onStartGame={handleStartGame} onOpenEditor={handleOpenEditor} />
           </motion.div>
         )}
 
@@ -144,6 +155,18 @@ function App() {
             transition={{ duration: 0.3 }}
           >
             <GamePage sessionId={sessionId} onExit={handleExitGame} />
+          </motion.div>
+        )}
+
+        {currentScreen === 'editor' && (
+          <motion.div
+            key="editor"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+          >
+            <ScriptEditorPage onBack={handleExitEditor} />
           </motion.div>
         )}
       </AnimatePresence>

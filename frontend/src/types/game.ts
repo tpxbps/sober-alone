@@ -26,6 +26,8 @@ export interface Script {
   cover_image_url?: string;
   game_full_process?: string;
   full_truth?: string;
+  owner_uuid?: string;
+  is_ai_generated?: boolean;
 }
 
 // Character from backend
@@ -128,8 +130,7 @@ export interface AIModelOption {
 }
 
 export const AI_MODELS: AIModelOption[] = [
-  { id: "glm-4.7", name: "glm-4.7", provider: "zhipuai" },
-  { id: "deepseek-reasoner", name: "deepseek-v3.2", provider: "deepseek" },
+  { id: "deepseek-v4-flash", name: "deepseek-v4-flash", provider: "deepseek" },
   { id: "step-3.5-flash", name: "step-3.5-flash", provider: "stepfun" },
   { id: "qwen3.5-flash-2026-02-23", name: "qwen3.5-flash", provider: "alibaba" },
   { id: "doubao-seed-2-0-mini-260215", name: "doubao-seed-2.0-mini", provider: "bytedance" },
@@ -201,9 +202,12 @@ export interface GameStateResponse {
     is_human?: boolean;
     character_script?: string;
     character_script_summary?: string;
+    system_prompt?: string;
   }>;
   agent_llm_info?: Record<string, AgentLlmInfo>;
   llm_configs?: Record<string, { model: string; provider: string }>;
+  votes?: Record<string, VoteInfo>;
+  vote_results?: VoteResults | null;
 }
 
 // Agent LLM info type

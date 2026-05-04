@@ -133,6 +133,36 @@ class GameFlowController:
             "system_notice": system_notice,
         }
 
+    async def _clear_consumed_perspectives(
+        self, character_id: str, db_session
+    ):
+        """
+        清除该角色已消费的 player_perspectives（发言后调用）
+
+        agent 在 speak() 时通过 _build_knowledge_context 读取并注入了所有累积的 perspectives。
+        注入后这些数据已存在于 agent 的 checkpointer 历史中，下次发言无需重复注入。
+        清除后，下次 _build_knowledge_context 只会注入新累积的 perspectives（增量）。
+        """
+        if not db_session:
+            return
+        try:
+            from sqlalchemy import select
+            from sqlalchemy.orm.attributes import flag_modified
+
+            result = await db_session.execute(
+                select(PlayerState).where(
+                    PlayerState.session_id == self.session.session_id,
+                    PlayerState.character_id == character_id,
+                )
+            )
+            player_state = result.scalar_one_or_none()
+            if player_state and player_state.player_perspectives:
+                player_state.player_perspectives = {}
+                flag_modified(player_state, "player_perspectives")
+                await db_session.commit()
+        except Exception:
+            pass
+
     async def _initialize_player_states(self, db_session):
         """初始化所有玩家的状态"""
         for char in self.characters:
@@ -154,7 +184,7 @@ class GameFlowController:
         await db_session.commit()
 
     async def process_speech(
-        self, character_id: str, content: str, is_human: bool = False, db_session=None
+        self, character_id: str, content: str, is_human: bool = False, db_session=None, skip_reactions: bool = False
     ) -> Dict[str, Any]:
         """
         处理玩家发言
@@ -164,10 +194,14 @@ class GameFlowController:
             content: 发言内容
             is_human: 是否是真人玩家
             db_session: 数据库会话
+            skip_reactions: 跳过反应广播（用于错误兜底消息）
 
         Returns:
             Dict: 处理结果，包含下一位发言者等信息
         """
+        # 清除该角色已消费的 perspectives（已通过 _build_knowledge_context 注入到 agent 历史中）
+        await self._clear_consumed_perspectives(character_id, db_session)
+
         # 记录发言
         await self._record_speech(character_id, content, db_session)
 
@@ -178,18 +212,8 @@ class GameFlowController:
         if self.session.current_stage == GameStage.FREE_DISCUSSION.value:
             await self._increment_wait_rounds_for_others(character_id, db_session)
 
-        # 广播给其他AI玩家（让他们做出反应）
-        try:
-            reactions = await self.agent_manager.broadcast_speech(
-                speaker_id=character_id,
-                content=content,
-            )
-        except Exception as e:
-            reactions = {}
-
-        # 保存反应结果到数据库（更新PlayerState）
-        if db_session and reactions:
-            await self._save_reactions_to_db(reactions, character_id, db_session)
+        # ── 先更新队列和下一位发言者（持久化到DB），再做慢的reaction广播 ──
+        # 这样即使reaction期间页面刷新，DB中已有正确的next_speaker，不会卡死
 
         # 记录发言者
         self.scheduler.record_speech(character_id)
@@ -216,8 +240,23 @@ class GameFlowController:
                     },
                 )
 
-        # 根据当前阶段决定下一步
+        # 根据当前阶段决定下一步（会将 current_speaker 持久化到 DB）
         next_result = await self._determine_next_speaker(db_session)
+
+        # 广播给其他AI玩家（让他们做出反应）— 放在队列更新之后
+        reactions = {}
+        if not skip_reactions:
+            try:
+                reactions = await self.agent_manager.broadcast_speech(
+                    speaker_id=character_id,
+                    content=content,
+                )
+            except Exception:
+                reactions = {}
+
+        # 保存反应结果到数据库（更新PlayerState）
+        if db_session and reactions:
+            await self._save_reactions_to_db(reactions, character_id, db_session)
 
         return {
             "success": True,
@@ -529,6 +568,18 @@ class GameFlowController:
                 "stage_complete": False,
             }
         else:
+            # 阶段完成 — 清除 current_speaker，确保刷新后前端能正确判断状态
+            self.session.current_speaker = None
+            if db_session:
+                await db_session.execute(
+                    text(
+                        "UPDATE game_sessions SET current_speaker = NULL "
+                        "WHERE session_id = :session_id"
+                    ),
+                    {"session_id": self.session.session_id},
+                )
+                await db_session.commit()
+
             return {
                 "next_speaker": None,
                 "stage_complete": True,
@@ -633,91 +684,6 @@ class GameFlowController:
             for state in states
         ]
 
-    async def _compress_player_perspectives(self, db_session):
-        """
-        压缩各玩家的观点列表（阶段转换时调用）
-
-        当某玩家对某发言者的观点列表超过阈值时，使用LLM进行智能压缩。
-        压缩后保留：[LLM压缩摘要, 最新一条原始观点]
-        """
-        from sqlalchemy import select
-        from sqlalchemy.orm.attributes import flag_modified
-        from langchain_core.messages import HumanMessage
-
-        from app.core.llm_factory import create_summary_llm
-
-        COMPRESS_THRESHOLD = 3
-
-        result = await db_session.execute(
-            select(PlayerState).where(PlayerState.session_id == self.session.session_id)
-        )
-        states = result.scalars().all()
-
-        summary_llm = create_summary_llm()
-
-        for state in states:
-            if not state.player_perspectives:
-                continue
-
-            needs_compression = False
-            compressed_perspectives = {}
-
-            for speaker_id, perspectives in state.player_perspectives.items():
-                if (
-                    isinstance(perspectives, list)
-                    and len(perspectives) > COMPRESS_THRESHOLD
-                ):
-                    needs_compression = True
-
-                    # 过滤空项
-                    clean_items = [p.strip() for p in perspectives if p and p.strip()]
-                    if not clean_items:
-                        continue
-
-                    # 用LLM智能压缩
-                    try:
-                        prompt = (
-                            "请将以下多条玩家发言要点压缩为一段简洁但完整的总结，"
-                            "保留所有关键信息（指控、辩护、不在场证明、时间线、证据引用、关键问题等），"
-                            "用分号分隔不同要点。\n\n"
-                            "要点列表：\n"
-                            + "\n".join(
-                                f"{i+1}. {item}" for i, item in enumerate(clean_items)
-                            )
-                        )
-                        response = await summary_llm.ainvoke(
-                            [HumanMessage(content=prompt)]
-                        )
-                        raw_content = response.content
-                        compressed = (
-                            raw_content
-                            if isinstance(raw_content, str)
-                            else str(raw_content)
-                        ).strip()
-                    except Exception as e:
-                        # fallback: 简单拼接 + 截断
-                        compressed = "；".join(clean_items)
-                        if len(compressed) > 500:
-                            compressed = compressed[:500] + "..."
-
-                    # 保留最新一条原始观点 + 压缩后的历史
-                    recent = clean_items[-1]
-                    compressed_perspectives[speaker_id] = [compressed, recent]
-                else:
-                    compressed_perspectives[speaker_id] = perspectives
-
-            if needs_compression:
-                state.player_perspectives = compressed_perspectives
-                flag_modified(state, "player_perspectives")
-
-    async def _compress_player_perspectives_background(self, db_session):
-        """后台执行观点压缩，不阻塞阶段推进响应"""
-        try:
-            await self._compress_player_perspectives(db_session)
-            await db_session.commit()
-        except Exception as e:
-            pass
-
     async def advance_stage(self, db_session=None) -> StageTransition:
         """
         推进到下一阶段
@@ -779,29 +745,21 @@ class GameFlowController:
             next_stage_type, GameStage.INTRO.value
         )
 
-        # 构建发言队列
+        # 构建发言队列（保持剧本原始角色顺序）
+        queue = [c["character_id"] for c in self.characters]
+
         if next_stage_type == "advancement":
-            # 线索轮次：先线索分析，后自由讨论
             children = next_stage_config.get("children", [])
             if children:
                 self.session.current_stage = GameStage.CLUE_ANALYSIS.value
-                self.session.speech_queue = [c["character_id"] for c in self.characters]
-                # 设置当前发言者为队列第一位
-                self.session.current_speaker = (
-                    self.session.speech_queue[0] if self.session.speech_queue else None
-                )
-                # 重置所有玩家的发言标记（新的顺序发言阶段）
+                self.session.speech_queue = queue
+                self.session.current_speaker = queue[0] if queue else None
                 if db_session:
                     await self._reset_spoken_flags_for_all(db_session)
         elif next_stage_type == "vote":
-            # 投票阶段：先总结发言
             self.session.current_stage = GameStage.SUMMARY.value
-            self.session.speech_queue = [c["character_id"] for c in self.characters]
-            # 设置当前发言者为队列第一位
-            self.session.current_speaker = (
-                self.session.speech_queue[0] if self.session.speech_queue else None
-            )
-            # 重置所有玩家的发言标记（新的顺序发言阶段）
+            self.session.speech_queue = queue
+            self.session.current_speaker = queue[0] if queue else None
             if db_session:
                 await self._reset_spoken_flags_for_all(db_session)
         elif next_stage_type == "review":
@@ -809,17 +767,9 @@ class GameFlowController:
             self.session.current_stage = GameStage.REVIEW.value
             self.session.status = GameStatus.REVIEW.value
 
-        # 提交阶段变更（先提交，不阻塞在后续LLM压缩上）
+        # 提交阶段变更
         if db_session:
             await db_session.commit()
-
-        # 阶段转换后异步压缩观点（不阻塞返回）
-        if db_session:
-            import asyncio
-
-            asyncio.ensure_future(
-                self._compress_player_perspectives_background(db_session)
-            )
 
         # 获取系统通知（对于advancement类型，从children中获取）
         system_notice = ""
@@ -843,6 +793,11 @@ class GameFlowController:
                 system_notice = "总结发言阶段，请各位依次进行最终总结，阐述你的推理、指控理由、以及最终辩护。"
         else:
             system_notice = next_stage_config.get("system_notice", "")
+            # Fallback: if review stage has no system_notice, use full_truth
+            if not system_notice and next_stage_type == "review":
+                full_truth = self.script_data.get("full_truth", "")
+                if full_truth:
+                    system_notice = f"真相揭晓：\n\n{full_truth}"
             if system_notice:
                 audio_key = f"stage_{self.current_process_index}"
 
@@ -903,15 +858,39 @@ class GameFlowController:
         self.session.current_stage = GameStage.FREE_DISCUSSION.value
         self.session.speech_queue = []  # 自由讨论不使用固定队列
 
-        # 根据剧本难度计算每位玩家的发言次数
-        # 难度映射: 1=简单(2次), 2=中等(3次), 3=困难(4次)
-        difficulty = self.script_data.get("difficulty", 1)
-        speech_count = {1: 2, 2: 3, 3: 4}.get(difficulty, 2)
+        # 计算当前是第几个 advancement 阶段（用于索引 free_speech_limits）
+        advancement_index = sum(
+            1 for i in range(self.current_process_index)
+            if self.game_process[i].get("type") == "advancement"
+        )
+
+        # 优先从剧本 free_speech_limits 字段获取发言次数
+        # 格式: [2, 2] — 第 i 个元素对应第 i 个 advancement 阶段的自由讨论发言次数
+        speech_count = None
+        free_speech_limits = self.script_data.get("free_speech_limits")
+        if free_speech_limits:
+            try:
+                import json as _json
+                limits = _json.loads(free_speech_limits) if isinstance(free_speech_limits, str) else free_speech_limits
+                if isinstance(limits, list) and 0 <= advancement_index < len(limits):
+                    speech_count = limits[advancement_index]
+            except (ValueError, TypeError):
+                pass
+
+        # 回退策略：根据剧本难度决定发言次数
+        if speech_count is None:
+            difficulty = self.script_data.get("difficulty", 1)
+            speech_count = {1: 2, 2: 3, 3: 4}.get(difficulty, 2)
 
         # 重置所有玩家的状态
         if db_session:
             await self._reset_wait_rounds_for_all(db_session)
             await self._init_speech_count_for_all(db_session, speech_count)
+
+            # 选择第一位AI发言者（自由讨论阶段AI应主动发言，不必等真人）
+            first_speaker_result = await self._get_next_free_speaker(db_session)
+            if first_speaker_result.get("next_speaker"):
+                self.session.current_speaker = first_speaker_result["next_speaker"]
 
         return StageTransition(
             from_stage=from_stage,
@@ -988,6 +967,7 @@ class GameFlowController:
             StreamChunk,
             StreamToken,
             StreamProgress,
+            StreamError,
         )
 
         agent = self.agent_manager.get_agent(character_id)
@@ -1011,6 +991,11 @@ class GameFlowController:
                     "type": "progress",
                     "step": chunk.step,
                     "status": chunk.status,
+                }
+            elif isinstance(chunk, StreamError):
+                yield {
+                    "type": "error",
+                    "message": chunk.message,
                 }
 
     async def _build_game_state(self, character_id: str, db_session) -> Dict[str, Any]:

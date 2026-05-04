@@ -343,6 +343,11 @@ class GameService:
                         else None
                     ),
                     "character_script_summary": c.get("character_script_summary"),
+                    "system_prompt": (
+                        c.get("system_prompt")
+                        if c.get("character_id") == game_session.human_character_id
+                        else None
+                    ),
                 }
                 for c in characters
             ]
@@ -350,6 +355,9 @@ class GameService:
             # 确保字段名与前端一致
             if "current_speaker" in state:
                 state["current_speaker_id"] = state.pop("current_speaker")
+            # 返回投票状态（刷新恢复用）
+            state["votes"] = dict(game_session.votes or {})
+            state["vote_results"] = game_session.vote_result or None
             return state
 
         return {
@@ -379,10 +387,17 @@ class GameService:
                         else None
                     ),
                     "character_script_summary": c.get("character_script_summary"),
+                    "system_prompt": (
+                        c.get("system_prompt")
+                        if c.get("character_id") == game_session.human_character_id
+                        else None
+                    ),
                 }
                 for c in characters
             ],
             "speech_queue": game_session.speech_queue or [],
+            "votes": dict(game_session.votes or {}),
+            "vote_results": game_session.vote_result or None,
         }
 
     async def _get_player_states(self, session_id: str) -> List[Dict[str, Any]]:
@@ -494,9 +509,7 @@ class GameService:
 
         yield f"data: {_json.dumps({'type': 'done', 'next_speaker_id': result.get('next_speaker'), 'next_speaker_name': result.get('next_speaker_name', '')}, ensure_ascii=False)}\n\n"
 
-    async def process_ai_speech_stream(
-        self, session_id: str, character_id: str
-    ):
+    async def process_ai_speech_stream(self, session_id: str, character_id: str):
         """
         处理AI玩家发言（流式）
 
@@ -513,7 +526,6 @@ class GameService:
             str: SSE格式的数据行
         """
         import json
-        import asyncio
 
         flow_controller = await ensure_flow_controller(session_id, self.db)
         if not flow_controller:
@@ -523,6 +535,7 @@ class GameService:
         # 生成AI发言
         full_content = ""
         is_thinking = False
+        agent_error = False
 
         try:
             async for chunk in flow_controller.generate_ai_speech(
@@ -546,16 +559,47 @@ class GameService:
                         if status:
                             yield f"data: {json.dumps({'type': 'thinking', 'message': status}, ensure_ascii=False)}\n\n"
                             is_thinking = True
+
+                    elif chunk_type == "error":
+                        agent_error = True
+                        logger.error(
+                            f"Agent error for {character_id}: {chunk.get('message', '')}"
+                        )
         except Exception as e:
+            agent_error = True
             logger.error(f"AI speech stream error: {e}")
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
 
         # AI发言流结束，通知前端进入反应处理阶段
         yield f"data: {json.dumps({'type': 'speech_done'}, ensure_ascii=False)}\n\n"
 
-        # 记录发言
+        # 记录发言并确定下一位发言者
+        # 当 agent 出错或内容为空时，用兜底消息代替，确保流程继续推进
         next_speaker_info = {}
-        if full_content:
+        content_to_record = full_content
+        if agent_error or not full_content:
+            logger.warning(
+                f"Agent {character_id} produced no content (error={agent_error}), inserting fallback record"
+            )
+            content_to_record = "（系统提示：AI角色出现未知错误，暂时无法正常发言。）"
+            try:
+                result = await flow_controller.process_speech(
+                    character_id=character_id,
+                    content=content_to_record,
+                    is_human=False,
+                    db_session=self.db,
+                    skip_reactions=True,
+                )
+                next_speaker_info = {
+                    "next_speaker_id": result.get("next_speaker"),
+                    "next_speaker_name": result.get("next_speaker_name"),
+                    "stage_complete": result.get("stage_complete", False),
+                }
+            except Exception as e:
+                logger.error(f"process_speech failed after agent error: {e}")
+                next_speaker_info = {
+                    "error": str(e),
+                }
+        else:
             try:
                 result = await flow_controller.process_speech(
                     character_id=character_id,
@@ -612,7 +656,7 @@ class GameService:
                     "speaker": (
                         flow_controller.session.speech_queue[0]
                         if flow_controller.session.speech_queue
-                        else None
+                        else flow_controller.session.current_speaker
                     ),
                     "session_id": session_id,
                 },
@@ -775,31 +819,34 @@ class GameService:
         """
         session = db_session or self.db
         try:
-            # 使用speak方法（会触发工具调用）
-            # 投票阶段的提示词由agent_player._get_stage_prompt处理
-            async for _ in agent.speak(
-                {
-                    "session_id": flow_controller.session.session_id,
-                    "script_id": flow_controller.session.script_id,
-                    "character_id": character_id,
-                    "character_name": flow_controller.agent_manager.get_character_name(
-                        character_id
-                    ),
-                    "current_stage": "vote",
-                    "current_round": flow_controller.session.current_round,
-                    "db_session": session,
-                    "character_name_map": {
-                        c["character_id"]: c.get("name", "")
-                        for c in flow_controller.characters
+            import asyncio
+
+            # 带 per-agent 超时（90s），防止单个 agent 无限挂起
+            async def _run_vote():
+                async for _ in agent.speak(
+                    {
+                        "session_id": flow_controller.session.session_id,
+                        "script_id": flow_controller.session.script_id,
+                        "character_id": character_id,
+                        "character_name": flow_controller.agent_manager.get_character_name(
+                            character_id
+                        ),
+                        "current_stage": "vote",
+                        "current_round": flow_controller.session.current_round,
+                        "db_session": session,
+                        "character_name_map": {
+                            c["character_id"]: c.get("name", "")
+                            for c in flow_controller.characters
+                        },
+                        "character_names": [
+                            c.get("name", "") for c in flow_controller.characters
+                        ],
                     },
-                    "character_names": [
-                        c.get("name", "") for c in flow_controller.characters
-                    ],
-                },
-                "vote",
-            ):
-                # 消费流以触发工具调用
-                pass
+                    "vote",
+                ):
+                    pass
+
+            await asyncio.wait_for(_run_vote(), timeout=90)
 
             # 查询数据库获取投票结果
             from sqlalchemy import select
@@ -935,16 +982,26 @@ class GameService:
         2. 获取投票结果
         3. 构建复盘消息
         4. 推进到复盘阶段
-
-        Args:
-            session_id: 游戏会话ID
-
-        Returns:
-            Dict: 投票结果和阶段推进信息
         """
         flow_controller = _flow_controllers.get(session_id)
         if not flow_controller:
             return {"success": False, "error": "游戏会话不存在"}
+
+        # 幂等：如果已经推进到 review 阶段，直接返回已有结果
+        if flow_controller.session.current_stage == "review":
+            gs_result = await self.db.execute(
+                select(GameSession).where(GameSession.session_id == session_id)
+            )
+            game_session = gs_result.scalar_one_or_none()
+            return {
+                "success": True,
+                "vote_results": game_session.vote_result if game_session else None,
+                "transition": {
+                    "from_stage": "vote",
+                    "to_stage": "review",
+                    "message": "投票已统计完毕",
+                },
+            }
 
         # 1. 收集所有AI玩家的投票
         ai_agents = []
@@ -985,9 +1042,15 @@ class GameService:
                         await vote_session.rollback()
                         return {"success": False, "message": str(e)}
 
-            # 并发执行所有AI投票
+            # 并发执行所有AI投票，整体超时120秒
             tasks = [_collect_vote_task(cid, info) for cid, info in ai_agents]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+            try:
+                results = await asyncio.wait_for(
+                    asyncio.gather(*tasks, return_exceptions=True),
+                    timeout=120,
+                )
+            except asyncio.TimeoutError:
+                results = [TimeoutError("voting timeout")] * len(ai_agents)
 
             # 顺序处理失败（弃票）
             for (char_id, info), result in zip(ai_agents, results):
@@ -1038,7 +1101,33 @@ class GameService:
         # 推进到复盘阶段
         transition = await flow_controller.advance_stage(self.db)
 
-        # 推进阶段时 advance_stage 内部会 commit，这里确保复盘记录也被保存
+        # 持久化阶段变更到数据库（flow_controller.session 是 detached ORM 对象，
+        # 需要通过 raw SQL 确保写入）
+        from sqlalchemy import text as sql_text
+        import json as json_mod
+
+        await self.db.execute(
+            sql_text(
+                "UPDATE game_sessions SET current_stage = :stage, "
+                "current_round = :round, status = :status, "
+                "speech_queue = :queue, current_speaker = :speaker "
+                "WHERE session_id = :session_id"
+            ),
+            {
+                "stage": flow_controller.session.current_stage,
+                "round": flow_controller.session.current_round,
+                "status": flow_controller.session.status,
+                "queue": json_mod.dumps(flow_controller.session.speech_queue or []),
+                "speaker": (
+                    flow_controller.session.speech_queue[0]
+                    if flow_controller.session.speech_queue
+                    else flow_controller.session.current_speaker
+                ),
+                "session_id": session_id,
+            },
+        )
+
+        # 确保复盘记录和阶段变更都被保存
         await self.db.commit()
 
         return {
@@ -1084,7 +1173,7 @@ class GameService:
                 id_to_name[sid] = sname
 
         # 1. 投票结果汇总
-        lines.append("## 投票结果揭晓\n")
+        lines.append("## 投票结果收集如下\n")
         for _, vote_info in details.items():
             suspect_name = vote_info.get("suspect_name", "未知")
             reasoning = vote_info.get("reasoning", "")

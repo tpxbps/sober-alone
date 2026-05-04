@@ -3,6 +3,7 @@ RAG Retriever - ChromaDB向量检索器
 用于角色剧本记忆的语义检索
 """
 
+import asyncio
 from typing import List, Optional, Dict, Any, cast
 import chromadb
 from chromadb.config import Settings as ChromaSettings
@@ -86,21 +87,22 @@ class ChromaRetriever:
         collection_name = self._get_collection_name(script_id)
 
         try:
-            collection = self.client.get_collection(collection_name)
+            collection = await asyncio.to_thread(self.client.get_collection, collection_name)
         except Exception as e:
             print(f"Collection {collection_name} not found: {e}")
             return []
 
-        # 生成查询向量
-        query_embeddings = self._create_embeddings([query])
+        # 生成查询向量（同步 HTTP 调用 → 移到线程池）
+        query_embeddings = await asyncio.to_thread(self._create_embeddings, [query])
 
         # 构建过滤条件
         where_filter = None
         if character_id:
             where_filter = {"character_id": character_id}
 
-        # 执行检索
-        results = collection.query(
+        # 执行检索（同步 ChromaDB 磁盘 I/O → 移到线程池）
+        results = await asyncio.to_thread(
+            collection.query,
             query_embeddings=cast(Any, query_embeddings),
             n_results=top_k,
             where=cast(Any, where_filter),

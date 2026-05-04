@@ -14,7 +14,7 @@ export const useSettingsStore = create<SettingsState>()(
   persist(
     (set) => ({
       bgmEnabled: true,
-      bgmVolume: 0.15,
+      bgmVolume: 0.25,
       ttsEnabled: false,
       setBgmEnabled: (enabled) => set({ bgmEnabled: enabled }),
       setBgmVolume: (volume) => set({ bgmVolume: Math.max(0, Math.min(1, volume)) }),

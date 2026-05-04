@@ -56,7 +56,7 @@ class GameCreateResponse(BaseModel):
 class SpeechRequest(BaseModel):
     """发言请求"""
 
-    content: str = Field(..., min_length=1, description="发言内容")
+    content: str = Field(..., min_length=1, max_length=3000, description="发言内容")
 
 
 class AdvanceRequest(BaseModel):
@@ -70,7 +70,7 @@ class VoteRequest(BaseModel):
 
     suspect_id: str = Field(..., description="投票的嫌疑人角色ID")
     suspect_name: str = Field(..., description="投票的嫌疑人名称")
-    reasoning: str = Field(default="", description="投票理由（可选）")
+    reasoning: str = Field(default="", max_length=1000, description="投票理由（可选）")
 
 
 class TTSGenerateRequest(BaseModel):
@@ -424,9 +424,16 @@ async def list_scripts(db: AsyncSession = Depends(get_db)):
     """
     from sqlalchemy import text
 
+    # Ensure is_ai_generated column exists (migration for existing DBs)
+    try:
+        await db.execute(text("ALTER TABLE scripts ADD COLUMN is_ai_generated BOOLEAN DEFAULT 0"))
+        await db.commit()
+    except Exception:
+        await db.rollback()
+
     result = await db.execute(
         text(
-            "SELECT script_id, title, overview, tags, difficulty, player_count, cover_image_url FROM scripts"
+            "SELECT script_id, title, overview, tags, difficulty, player_count, cover_image_url, owner_uuid, is_ai_generated, estimated_duration FROM scripts"
         )
     )
     scripts = result.fetchall()
@@ -442,6 +449,9 @@ async def list_scripts(db: AsyncSession = Depends(get_db)):
                 "difficulty": row[4],
                 "player_count": row[5],
                 "cover_image_url": row[6],
+                "owner_uuid": row[7],
+                "is_ai_generated": bool(row[8]) if row[8] is not None else False,
+                "estimated_duration": row[9] if row[9] else 0,
             }
             for row in scripts
         ],

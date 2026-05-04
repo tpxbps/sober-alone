@@ -56,8 +56,12 @@ export function VotingModal({
         selectedChar.name,
         reasoning.trim() || undefined
       );
-    } catch (error) {
-      console.error("Failed to submit vote:", error);
+    } catch (error: unknown) {
+      // 重复投票（刷新后状态丢失但后端已记录）→ 关闭模态框
+      const msg = error instanceof Error ? error.message : String(error);
+      if (msg.includes("已经投过票") || msg.includes("already voted")) {
+        onClose();
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -124,7 +128,7 @@ export function VotingModal({
                 <div className="space-y-4">
                   {/* Vote count */}
                   <div className="space-y-2">
-                    {Object.entries(voteResults.vote_count)
+                    {Object.entries(voteResults.vote_count ?? {})
                       .filter(([charId]) => charId !== "null" && charId !== "")
                       .sort(([, a], [, b]) => b - a)
                       .map(([charId, count]) => {
@@ -192,7 +196,7 @@ export function VotingModal({
                     ) && (
                       <div className="p-3 rounded-lg bg-warning/10 border border-warning/30">
                         <p className="text-xs text-muted-foreground text-center">
-                          {Object.entries(voteResults.details)
+                          {Object.entries(voteResults.details ?? {})
                             .filter(
                               ([, d]) =>
                                 d.suspect_id === null ||
@@ -287,15 +291,21 @@ export function VotingModal({
                       投票理由{" "}
                       <span className="text-muted-foreground">(可选)</span>
                     </label>
-                    <textarea
-                      value={reasoning}
-                      onChange={(e) => setReasoning(e.target.value)}
-                      placeholder="请说明你投票给该角色的理由..."
-                      rows={3}
-                      className="w-full px-4 py-3 rounded-xl bg-secondary/30 border border-border/50
-                               focus:outline-none focus:ring-2 focus:ring-primary/50
-                               resize-none"
-                    />
+                    <div className="relative">
+                      <textarea
+                        value={reasoning}
+                        onChange={(e) => setReasoning(e.target.value)}
+                        placeholder="请说明你投票给该角色的理由..."
+                        rows={3}
+                        maxLength={1000}
+                        className="w-full pl-4 pr-14 py-3 rounded-xl bg-secondary/30 border border-border/50
+                                 focus:outline-none focus:ring-2 focus:ring-primary/50
+                                 resize-none"
+                      />
+                      <span className={`absolute top-1.5 right-3 text-[10px] leading-none pointer-events-none select-none ${reasoning.length > 800 ? 'text-destructive' : 'text-muted-foreground/40'}`}>
+                        {reasoning.length}/1000
+                      </span>
+                    </div>
                   </div>
 
                   {/* Warning */}

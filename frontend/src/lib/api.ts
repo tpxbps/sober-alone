@@ -45,7 +45,7 @@ export const gameApi = {
       ? Object.fromEntries(
           Object.entries(request.ai_models).map(([charId, modelId]) => [
             charId,
-            { provider: modelId.split('-')[0] || 'zhipuai', model: modelId },
+            { provider: modelId.split('-')[0] || 'stepfun', model: modelId },
           ])
         )
       : undefined;
@@ -181,7 +181,9 @@ export const voteApi = {
     review_message: string;
     transition: StageTransition;
   }> => {
-    const response = await api.post(`/game/${sessionId}/finalize-voting`);
+    const response = await api.post(`/game/${sessionId}/finalize-voting`, {}, {
+      timeout: 180000, // 3 minutes — AI agents vote in parallel, each may take ~30s
+    });
     return response.data;
   },
 };

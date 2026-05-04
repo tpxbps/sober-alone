@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Settings, RefreshCw } from "lucide-react";
+import { Settings, RefreshCw, PenTool } from "lucide-react";
 import { scriptApi } from "@/lib/api";
 import { ScriptCard } from "@/components/game/ScriptCard";
 import { ScriptDetailModal } from "@/components/game/ScriptDetailModal";
@@ -10,9 +10,10 @@ import type { Script } from "@/types/game";
 
 interface HomepageProps {
   onStartGame: (sessionId: string) => void;
+  onOpenEditor: () => void;
 }
 
-export function Homepage({ onStartGame }: HomepageProps) {
+export function Homepage({ onStartGame, onOpenEditor }: HomepageProps) {
   const [scripts, setScripts] = useState<Script[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedScript, setSelectedScript] = useState<Script | null>(null);
@@ -44,7 +45,7 @@ export function Homepage({ onStartGame }: HomepageProps) {
     if (!acc[key]) acc[key] = [];
     acc[key].push({
       ...script,
-      estimated_duration: script.estimated_duration || 20,
+      estimated_duration: script.estimated_duration ?? 0,
     });
     return acc;
   }, {} as Record<number, Script[]>);
@@ -73,6 +74,16 @@ export function Homepage({ onStartGame }: HomepageProps) {
 
             {/* Nav */}
             <nav className="flex items-center gap-4">
+              <button
+                onClick={onOpenEditor}
+                className="relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors text-sm font-medium"
+              >
+                <PenTool className="w-4 h-4" />
+                <span className="hidden sm:inline">创作工坊</span>
+                <span className="absolute -top-1.5 -right-1.5 px-1 py-0.5 rounded text-[9px] leading-none bg-violet-500 text-white">
+                  Beta
+                </span>
+              </button>
               <button
                 onClick={loadScripts}
                 disabled={isLoading}
@@ -112,7 +123,7 @@ export function Homepage({ onStartGame }: HomepageProps) {
             transition={{ delay: 0.1 }}
             className="text-muted-foreground max-w-xl mx-auto"
           >
-            选择一个剧本，开始你的推理之旅。与AI角色一起揭开真相。
+            选择一个剧本，开始你的推理之旅，与AI角色一起揭开真相。
           </motion.p>
         </div>
 
@@ -174,6 +185,7 @@ export function Homepage({ onStartGame }: HomepageProps) {
                         <ScriptCard
                           script={script}
                           onClick={() => setSelectedScript(script)}
+                          onDeleted={loadScripts}
                         />
                       </motion.div>
                     ))}
@@ -203,7 +215,9 @@ export function Homepage({ onStartGame }: HomepageProps) {
       {/* Footer */}
       <footer className="border-t border-border/30 py-6 mt-auto">
         <div className="container mx-auto px-6 text-center text-sm text-muted-foreground">
-          <p>© 2026 独醒 AI剧本杀 · 众人皆醉我独醒 · 同AI一起揭开真相</p>
+          <div className="flex flex-wrap items-center justify-center gap-1">
+            <p>© 2026 独醒 AI剧本杀 · 众人皆醉我独醒</p>
+          </div>
         </div>
       </footer>
 

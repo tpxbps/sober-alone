@@ -135,7 +135,7 @@ export function GameMessageMarkdown({
 
   return (
     <div
-      className={`markdown-content prose prose-sm dark:prose-invert max-w-none ${
+      className={`markdown-content max-w-none break-words overflow-hidden ${
         preserveWhitespace ? "whitespace-pre-wrap" : ""
       } ${className || ""}`}
     >

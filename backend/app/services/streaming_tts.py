@@ -106,6 +106,7 @@ class StreamingTTSSession:
     async def send_text(self, text: str):
         """
         发送文本片段到 TTS 服务
+        自动拆分超过 900 字的文本，避免触发 step-tts-mini 的 1000 字限制
 
         Args:
             text: 文本片段（通常是 LLM 生成的 token）
@@ -113,6 +114,21 @@ class StreamingTTSSession:
         if not self._connected or not self._ws:
             return
 
+        # 如果文本较短，直接发送
+        if len(text) <= 900:
+            await self._send_text_delta(text)
+            return
+
+        # 长文本拆分：按句子边界切割
+        from app.services.tts_service import split_text_for_tts, STEP_MAX_CHARS
+        chunks = split_text_for_tts(text, STEP_MAX_CHARS)
+        for chunk in chunks:
+            await self._send_text_delta(chunk)
+
+    async def _send_text_delta(self, text: str):
+        """发送单个文本片段"""
+        if not self._ws or not self._connected:
+            return
         try:
             event = {
                 "type": "tts.text.delta",

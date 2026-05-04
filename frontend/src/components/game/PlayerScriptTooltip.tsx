@@ -1,11 +1,15 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { BookOpen, X, Lightbulb } from "lucide-react";
+import { BookOpen, X, Lightbulb, Zap } from "lucide-react";
 import { SpeakerIcon, type SpeakerState } from "@/components/ui/SpeakerIcon";
+import { AudioSpeedButton } from "@/components/ui/AudioSpeedButton";
+import { Markdown } from "@/components/ui/Markdown";
 import { audioPlayerManager } from "@/lib/audioPlayerManager";
 
 interface PlayerScriptTooltipProps {
   scriptContent: string;
+  scriptSummary?: string;
+  keyInfo?: string;
   characterName?: string;
   sessionId?: string;
   scriptId?: string;
@@ -14,20 +18,16 @@ interface PlayerScriptTooltipProps {
   onOpenChange?: (open: boolean) => void;
 }
 
-function renderMarkdownText(text: string) {
-  let result = text.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-  result = result.replace(/\*(.+?)\*/g, "<em>$1</em>");
-  return result;
-}
-
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
-  return `${m}:${s.toString().padStart(2, '0')}`;
+  return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
 export function PlayerScriptTooltip({
   scriptContent,
+  scriptSummary,
+  keyInfo,
   characterName,
   sessionId,
   scriptId,
@@ -37,11 +37,12 @@ export function PlayerScriptTooltip({
 }: PlayerScriptTooltipProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [hasOpenedBefore, setHasOpenedBefore] = useState(false);
-  const [speakerState, setSpeakerState] = useState<SpeakerState>('off');
+  const [showQuickOverview, setShowQuickOverview] = useState(false);
+  const [speakerState, setSpeakerState] = useState<SpeakerState>("off");
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
   const isSeeking = useRef(false);
-  const isScriptAudio = useRef(false);  // 标记当前播放的是否为剧本音频
+  const isScriptAudio = useRef(false); // 标记当前播放的是否为剧本音频
   const unsubRef = useRef<(() => void) | null>(null);
 
   // Sync with external open prop
@@ -71,19 +72,21 @@ export function PlayerScriptTooltip({
 
   // Subscribe to audio player state changes — only track script audio
   useEffect(() => {
-    const unsub = audioPlayerManager.onStateChange((playing, currentTime, dur) => {
-      if (isSeeking.current) return;
-      if (!isScriptAudio.current) return;
-      setProgress(currentTime);
-      setDuration(dur);
-      // Only treat as ended when the audio source is actually gone (ended/error/stopped),
-      // NOT when merely paused. isAudioActive() returns false only after onended/onerror/stop
-      // clears the audio element reference.
-      if (!playing && !audioPlayerManager.isAudioActive()) {
-        isScriptAudio.current = false;
-        setSpeakerState('off');
+    const unsub = audioPlayerManager.onStateChange(
+      (playing, currentTime, dur) => {
+        if (isSeeking.current) return;
+        if (!isScriptAudio.current) return;
+        setProgress(currentTime);
+        setDuration(dur);
+        // Only treat as ended when the audio source is actually gone (ended/error/stopped),
+        // NOT when merely paused. isAudioActive() returns false only after onended/onerror/stop
+        // clears the audio element reference.
+        if (!playing && !audioPlayerManager.isAudioActive()) {
+          isScriptAudio.current = false;
+          setSpeakerState("off");
+        }
       }
-    });
+    );
     unsubRef.current = unsub;
     return unsub;
   }, []);
@@ -93,7 +96,7 @@ export function PlayerScriptTooltip({
     // If script audio is active (playing or paused) → toggle pause
     if (isScriptAudio.current && audioPlayerManager.isAudioActive()) {
       const resumed = audioPlayerManager.togglePause();
-      setSpeakerState(resumed ? 'playing' : 'off');
+      setSpeakerState(resumed ? "playing" : "off");
       return;
     }
 
@@ -103,21 +106,21 @@ export function PlayerScriptTooltip({
     }
 
     if (!scriptId || !characterId) {
-      setSpeakerState('error');
+      setSpeakerState("error");
       return;
     }
 
     const audioUrl = `/audio/scripts/${scriptId}/character_scripts/${characterId}.wav`;
     isScriptAudio.current = true;
-    setSpeakerState('loading');
+    setSpeakerState("loading");
 
     try {
       await audioPlayerManager.play(audioUrl);
-      setSpeakerState('playing');
+      setSpeakerState("playing");
       setProgress(0);
     } catch {
       isScriptAudio.current = false;
-      setSpeakerState('error');
+      setSpeakerState("error");
     }
   }, [scriptId, characterId]);
 
@@ -128,7 +131,7 @@ export function PlayerScriptTooltip({
         audioPlayerManager.stop();
         isScriptAudio.current = false;
       }
-      setSpeakerState('off');
+      setSpeakerState("off");
       setProgress(0);
       setDuration(0);
     }
@@ -141,14 +144,17 @@ export function PlayerScriptTooltip({
     setProgress(time);
     audioPlayerManager.seekTo(time);
     // Reset seeking flag after a short delay to resume progress updates
-    setTimeout(() => { isSeeking.current = false; }, 100);
+    setTimeout(() => {
+      isSeeking.current = false;
+    }, 100);
   };
 
   if (!scriptContent) return null;
 
   const showGlow = !hasOpenedBefore && !isOpen;
 
-  const showProgressBar = speakerState === 'playing' || (speakerState === 'off' && progress > 0);
+  const showProgressBar =
+    speakerState === "playing" || (speakerState === "off" && progress > 0);
 
   return (
     <>
@@ -196,7 +202,7 @@ export function PlayerScriptTooltip({
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="bg-card rounded-xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden"
+              className="bg-card rounded-xl shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col overflow-hidden"
               onClick={(e) => e.stopPropagation()}
             >
               {/* Header */}
@@ -206,6 +212,20 @@ export function PlayerScriptTooltip({
                   <h3 className="text-lg font-bold">
                     {characterName ? `${characterName}的剧本` : "我的剧本"}
                   </h3>
+                  {(scriptSummary || keyInfo) && (
+                    <button
+                      onClick={() => setShowQuickOverview((v) => !v)}
+                      className={`flex items-center gap-1 ml-2 px-2 py-0.5 rounded-md text-xs font-medium transition-colors
+                        ${
+                          showQuickOverview
+                            ? "bg-primary/20 text-primary"
+                            : "bg-secondary/50 text-muted-foreground hover:bg-secondary/70 hover:text-foreground"
+                        }`}
+                    >
+                      <Zap className="w-3 h-3" />
+                      快速了解
+                    </button>
+                  )}
                   <SpeakerIcon
                     state={speakerState}
                     onClick={handlePlayScriptAudio}
@@ -223,7 +243,45 @@ export function PlayerScriptTooltip({
                 </button>
               </div>
 
-              {/* Audio progress bar */}
+              {/* Quick overview panel */}
+              <AnimatePresence>
+                {showQuickOverview && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "100vh", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                    className="overflow-hidden border-b border-border/30 bg-secondary/20"
+                  >
+                    <div className="h-full overflow-y-auto scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
+                      <div className="px-4 py-3 space-y-3">
+                        {scriptSummary && (
+                          <div>
+                            <h4 className="text-sm font-bold text-primary mb-1">
+                              剧本摘要
+                            </h4>
+                            <p className="text-sm text-muted-foreground leading-relaxed">
+                              {scriptSummary}
+                            </p>
+                          </div>
+                        )}
+                        {keyInfo && (
+                          <div>
+                            <h4 className="text-sm font-bold text-primary mb-1">
+                              关键信息
+                            </h4>
+                            <Markdown className="text-sm text-muted-foreground leading-relaxed">
+                              {keyInfo}
+                            </Markdown>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Audio progress bar + speed control */}
               {showProgressBar && (
                 <div className="px-4 pt-2 pb-1 flex items-center gap-2">
                   <span className="text-[10px] text-muted-foreground tabular-nums w-8 text-right">
@@ -244,6 +302,7 @@ export function PlayerScriptTooltip({
                   <span className="text-[10px] text-muted-foreground tabular-nums w-8">
                     {formatTime(duration)}
                   </span>
+                  <AudioSpeedButton />
                 </div>
               )}
 
@@ -252,41 +311,14 @@ export function PlayerScriptTooltip({
                 <div className="flex items-start gap-2 p-3 rounded-lg bg-primary/5 border border-primary/10">
                   <Lightbulb className="w-4 h-4 text-primary shrink-0 mt-0.5" />
                   <p className="text-xs text-muted-foreground">
-                    这是你的角色剧本，包含你的身份、背景和秘密。在发言时请保持角色一致性，不要暴露关键信息。如果是凶手，请自然地隐藏身份。
+                    这是你的完整角色剧本，包含你的身份、背景和秘密。在发言时请保持角色一致性，不要暴露关键信息。如果是凶手，请自然地隐藏身份。
                   </p>
                 </div>
               </div>
 
               {/* Content */}
-              <div className="p-4 overflow-y-auto max-h-[calc(80vh-180px)] scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
-                <div className="prose prose-sm dark:prose-invert max-w-none">
-                  {scriptContent.split("\n").map((paragraph, index) => {
-                    if (!paragraph.trim()) return null;
-                    const isHeading = /^[【\[（(]/.test(paragraph.trim());
-
-                    if (isHeading) {
-                      return (
-                        <h4
-                          key={index}
-                          className="text-base font-bold text-foreground mt-4 mb-2 first:mt-0"
-                          dangerouslySetInnerHTML={{
-                            __html: renderMarkdownText(paragraph),
-                          }}
-                        />
-                      );
-                    }
-
-                    return (
-                      <p
-                        key={index}
-                        className="mb-3 text-muted-foreground leading-relaxed"
-                        dangerouslySetInnerHTML={{
-                          __html: renderMarkdownText(paragraph),
-                        }}
-                      />
-                    );
-                  })}
-                </div>
+              <div className="p-4 overflow-y-auto flex-1 min-h-0 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
+                <Markdown className="prose-sm">{scriptContent}</Markdown>
               </div>
             </motion.div>
           </motion.div>

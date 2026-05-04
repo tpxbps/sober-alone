@@ -24,14 +24,15 @@ from langchain.agents.middleware import (
     ModelRetryMiddleware,
     ToolRetryMiddleware,
 )
+from langchain_core.messages import SystemMessage
 
 from app.core.config import settings
 from app.core.llm_factory import create_llm, create_summary_llm, SupportedModel
 from app.agents.state import GameAgentState
 from app.agents.context import set_db_session, clear_db_session
 
-# deepseek v3.2: 128k
-SUMMARY_TRIGGER_TOKENS = 100000
+# 瓶颈 step-3.5-flash: 256K
+SUMMARY_TRIGGER_TOKENS = 200000
 
 
 # ========================================
@@ -57,8 +58,16 @@ class StreamProgress:
     status: str = ""  # 工具调用提示文案（如"正在回忆具体细节..."）
 
 
+@dataclass
+class StreamError:
+    """Agent流式输出错误 - 区别于正常文本token"""
+
+    type: str = "error"
+    message: str = ""
+
+
 # 流式输出的联合类型
-StreamChunk = Union[StreamToken, StreamProgress]
+StreamChunk = Union[StreamToken, StreamProgress, StreamError]
 
 
 # ========================================
@@ -200,7 +209,9 @@ class AgentPlayer:
         self._middleware = middleware or []
         self._checkpointer = checkpointer or InMemorySaver()
         self._agent: Any = None  # 主角色扮演Agent实例
-        self._reaction_agent: Any = None  # 上下文隔离：使用独立Agent处理其他玩家发言
+        self._reaction_structured: Any = (
+            None  # 结构化输出 LLM（直接 with_structured_output）
+        )
 
         # 创建Agent
         self._create_agent()
@@ -213,10 +224,15 @@ class AgentPlayer:
                 model=cast(SupportedModel, self.llm_model.lower()),
                 temperature=0.8,
                 api_key=settings.get_api_key(self.llm_provider.lower()),
+                timeout=90,
+                max_retries=2,
+                disable_thinking=True,
             )
         except Exception:
             # 如果初始化失败，使用默认模型
-            return create_llm(temperature=0.8)
+            return create_llm(
+                temperature=0.8, timeout=90, max_retries=2, disable_thinking=True
+            )
 
     def _init_summary_model(self):
         """初始化用于摘要的轻量级LLM模型"""
@@ -274,29 +290,25 @@ class AgentPlayer:
 
     def _create_reaction_agent(self):
         """
-        创建用于反应分析的Agent (使用 structured output)
+        创建用于反应分析的结构化输出 LLM。
+        兼容 deepseek-v4-flash 进行非结构化输出时需要使用非思考模式。
         """
-        # reaction_agent 统一使用 deepseek-chat，稳定快速且不限制高并发
         try:
             reaction_model = create_llm(
-                model="deepseek-chat",
+                model=cast(SupportedModel, self.llm_model.lower()),
                 temperature=0.5,
-                api_key=settings.get_api_key("deepseek"),
+                api_key=settings.get_api_key(self.llm_provider.lower()),
+                disable_thinking=True,
             )
         except Exception:
             reaction_model = self._init_model()
 
-        self._reaction_agent = create_agent(
-            model=reaction_model,
-            response_format=SpeechReaction,  # 使用 structured output
-            middleware=[
-                ModelRetryMiddleware(
-                    max_retries=3,
-                    backoff_factor=2.0,
-                    initial_delay=1.0,
-                ),
-            ],
-            system_prompt=f"""你是一个剧本杀游戏的AI角色。你扮演的角色关键设定如下：
+        self._reaction_structured = reaction_model.with_structured_output(
+            SpeechReaction,
+            method="function_calling",
+            tool_choice="auto",
+        )
+        self._reaction_system_prompt = f"""你是一个剧本杀游戏的AI角色。你扮演的角色关键设定如下：
 {self.system_prompt}
 
 
@@ -328,8 +340,7 @@ class AgentPlayer:
    - 向谁提出了什么关键问题？
    - 暗示或威胁了什么？
    - 其他重要的策略性发言（如转移话题、制造混乱、拉拢联盟等）
-""",
-        )
+"""
 
     def _build_system_prompt(self) -> str:
         """
@@ -434,14 +445,16 @@ PS：你的心理状态（怀疑图谱、被谁怀疑、其他玩家的关键发
 """,
             "vote": """
 【当前阶段：投票】
-现在是最终投票阶段。请直接调用 submit_final_vote 工具提交你的投票。
+这是投票阶段。你必须且只能调用 submit_final_vote 工具来投票。
 
-【必须执行】
-立即调用 submit_final_vote 工具，参数说明：
-- suspect_name: 你认为是凶手的角色全名
-- reasoning: 你的投票理由（1-2句话）
+调用方式：
+submit_final_vote(suspect_name="角色全名", reasoning="1-2句投票理由")
 
-请立即调用工具，不要输出任何文字。
+重要：
+- suspect_name 必须是完整的角色名（不是ID）
+- reasoning 简述为什么认为此人是凶手
+- 不要调用其他工具（如 recall_personal_script_memory），直接投票
+- 不要输出任何文字，只调用工具
 """,
             "review": """
 【当前阶段：复盘】
@@ -643,7 +656,7 @@ PS：你的心理状态（怀疑图谱、被谁怀疑、其他玩家的关键发
 
         except Exception as e:
             print(f"Error in stream: {e}")
-            yield StreamToken(text=f"[错误: {str(e)}]", node="error")
+            yield StreamError(message=str(e))
         finally:
             # 清除 db_session 上下文
             clear_db_session()
@@ -685,8 +698,7 @@ PS：你的心理状态（怀疑图谱、被谁怀疑、其他玩家的关键发
         Returns:
             SpeechReaction: 结构化的反应结果
         """
-        if self._reaction_agent is not None:
-            # 提示词：详细提取发言要点 + 更新怀疑图谱
+        if self._reaction_structured is not None:
             analysis_prompt = f"""你是角色「{self.character_name}」。
 
 请仔细分析以下发言：
@@ -697,7 +709,7 @@ PS：你的心理状态（怀疑图谱、被谁怀疑、其他玩家的关键发
 【任务】
 1. 提炼该发言的所有关键要点（main_perspective）：
 可以逐条梳理并且按编号列出（如"1.指控XX因为... 2.辩称自己... 3.不在场证明：..."）；
-可以从以下方面进行思考（如有涉及）：   
+可以从以下方面进行思考（如有涉及）：
     - 对谁提出了指控或怀疑？具体理由是什么？
     - 为自己做了什么辩护或解释？
     - 声明了什么不在场证明或时间线？
@@ -708,16 +720,16 @@ PS：你的心理状态（怀疑图谱、被谁怀疑、其他玩家的关键发
 3. 如果该发言在怀疑或攻击你，更新 my_suspected_by"""
 
             try:
-                input_state = {"messages": [HumanMessage(content=analysis_prompt)]}
-                result = await self._reaction_agent.ainvoke(input_state)
-                structured_response = result.get("structured_response")
-
-                if structured_response and isinstance(
-                    structured_response, SpeechReaction
-                ):
-                    return structured_response
-                elif isinstance(structured_response, dict):
-                    return SpeechReaction(**structured_response)
+                result = await self._reaction_structured.ainvoke(
+                    [
+                        SystemMessage(content=self._reaction_system_prompt),
+                        HumanMessage(content=analysis_prompt),
+                    ]
+                )
+                if result and isinstance(result, SpeechReaction):
+                    return result
+                elif isinstance(result, dict):
+                    return SpeechReaction(**result)
             except Exception as e:
                 print(f"Error analyzing speech with structured output: {e}")
 

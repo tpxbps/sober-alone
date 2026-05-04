@@ -1,33 +1,34 @@
 """
 LLM Factory - LangChain模型初始化统一管理
 
-支持的提供商:
-- zhipuai: GLM 系列 (智谱)
-- deepseek: DeepSeek (深度求索)
-- stepfun: StepFun (阶跃星辰)
-- alibaba: 通义千问 (阿里)
-- bytedance: 豆包 (字节跳动)
+当前接入的提供商:
+- deepseek: DeepSeek (深度求索) — 使用 ChatDeepSeek
+- stepfun: Step (阶跃星辰) — 使用 ChatOpenAI
+- alibaba: 千问 (阿里巴巴) — 使用 ChatOpenAI
+- bytedance: 豆包 (字节跳动) — 使用 ChatOpenAI
 
 规则:
-- DeepSeek 使用 ChatDeepSeek 构建
-- 其他提供商均使用 ChatOpenAI 构建 (兼容 OpenAI 协议)
+- deepseek 提供商统一使用 ChatDeepSeek
+- 其他提供商统一使用 ChatOpenAI（兼容 OpenAI 协议）
+- DeepSeek 思考模式在多轮场景（agent 工具调用、结构化输出）中会导致
+  reasoning_content 回传失败（API 返回 400），因此这些场景必须禁用思考模式。
+  传入 disable_thinking=True 即可。
 """
 
-from typing import Literal, Optional
+import logging
+from typing import Literal
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain.chat_models import init_chat_model
-from langchain_deepseek import ChatDeepSeek
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 
 from app.core.config import settings
 
+logger = logging.getLogger(__name__)
+
 # 支持的模型类型
 SupportedModel = Literal[
-    "glm-4.7",
-    "deepseek-chat",
-    "deepseek-reasoner",
+    "deepseek-v4-flash",
     "step-3.5-flash",
     "qwen3.5-flash-2026-02-23",
     "doubao-seed-2-0-mini-260215",
@@ -35,9 +36,7 @@ SupportedModel = Literal[
 
 # 模型 -> 提供商 映射
 MODEL_PROVIDER_MAP: dict[str, str] = {
-    "glm-4.7": "zhipuai",
-    "deepseek-chat": "deepseek",
-    "deepseek-reasoner": "deepseek",
+    "deepseek-v4-flash": "deepseek",
     "step-3.5-flash": "stepfun",
     "qwen3.5-flash-2026-02-23": "alibaba",
     "doubao-seed-2-0-mini-260215": "bytedance",
@@ -47,22 +46,20 @@ MODEL_PROVIDER_MAP: dict[str, str] = {
 def create_llm(
     model: SupportedModel = "step-3.5-flash",
     temperature: float = 0.8,
-    api_key: Optional[str] = None,
+    api_key: str | None = None,
+    timeout: int | None = None,
+    max_retries: int | None = None,
+    disable_thinking: bool = False,
 ) -> BaseChatModel:
-    """
-    创建LangChain聊天模型
+    """统一的 LLM 创建入口。
 
-    根据模型名称自动判断提供商，选择对应的构建方式:
-    - deepseek 系列 -> ChatDeepSeek
-    - 其他 -> ChatOpenAI (使用提供商的 base_url)
+    - deepseek 提供商: 使用 ChatDeepSeek
+    - 其他提供商: 使用 ChatOpenAI（兼容 OpenAI 协议）
 
     Args:
-        model: 模型名称
-        temperature: 温度参数
-        api_key: API密钥，不提供则从 settings 获取
-
-    Returns:
-        BaseChatModel: LangChain聊天模型实例
+        disable_thinking: 是否禁用 DeepSeek 思考模式。必须为 True 的场景：
+            1. agent 工具调用（create_agent）— 思考模式导致多轮 reasoning_content 回传失败
+            2. 结构化输出（with_structured_output）— 思考模式与 function_calling 不兼容
     """
     model_lower = model.lower()
     provider = MODEL_PROVIDER_MAP.get(model_lower)
@@ -73,48 +70,121 @@ def create_llm(
             f"支持的模型: {', '.join(sorted(MODEL_PROVIDER_MAP.keys()))}"
         )
 
-    # 获取 API Key
     resolved_key = api_key or settings.get_api_key(provider)
     if not resolved_key:
         raise ValueError(f"未配置 {provider} 的 API Key")
 
-    # DeepSeek 使用专用 ChatDeepSeek
-    if provider == "deepseek":
-        return ChatDeepSeek(
-            model=model_lower,
-            api_key=SecretStr(resolved_key),
-            api_base=settings.get_base_url("deepseek") or "",
-            temperature=temperature,
-        )
-
-    # 其他提供商使用 ChatOpenAI (均兼容 OpenAI 协议)
     base_url = settings.get_base_url(provider)
     if not base_url:
         raise ValueError(f"未配置 {provider} 的 API Base URL")
 
-    return ChatOpenAI(
-        model=model_lower,
-        api_key=SecretStr(resolved_key),
-        base_url=base_url,
-        temperature=temperature,
+    if provider == "deepseek":
+        return _create_deepseek(
+            model_lower,
+            resolved_key,
+            base_url,
+            temperature,
+            timeout,
+            max_retries,
+            disable_thinking,
+        )
+
+    return _create_openai_compatible(
+        model_lower,
+        resolved_key,
+        base_url,
+        temperature,
+        timeout,
+        max_retries,
     )
 
 
+def _create_deepseek(
+    model: str,
+    api_key: str,
+    base_url: str,
+    temperature: float,
+    timeout: int | None,
+    max_retries: int | None,
+    disable_thinking: bool,
+) -> BaseChatModel:
+    """使用 ChatDeepSeek 创建 DeepSeek 模型"""
+    try:
+        from langchain_deepseek import ChatDeepSeek
+    except ImportError:
+        logger.warning("langchain-deepseek not installed, falling back to ChatOpenAI")
+        return _create_openai_compatible(
+            model,
+            api_key,
+            base_url,
+            temperature,
+            timeout,
+            max_retries,
+        )
+
+    kwargs: dict = dict(
+        model=model,
+        api_key=api_key,
+        api_base=base_url,
+        temperature=temperature,
+    )
+    if disable_thinking:
+        kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+    if timeout is not None:
+        kwargs["timeout"] = timeout
+    if max_retries is not None:
+        kwargs["max_retries"] = max_retries
+
+    return ChatDeepSeek(**kwargs)
+
+
+def _create_openai_compatible(
+    model: str,
+    api_key: str,
+    base_url: str,
+    temperature: float,
+    timeout: int | None,
+    max_retries: int | None,
+) -> BaseChatModel:
+    """使用 ChatOpenAI 创建兼容 OpenAI 协议的模型"""
+    kwargs: dict = dict(
+        model=model,
+        api_key=SecretStr(api_key),
+        base_url=base_url,
+        temperature=temperature,
+    )
+    if timeout is not None:
+        kwargs["timeout"] = timeout
+    if max_retries is not None:
+        kwargs["max_retries"] = max_retries
+
+    return ChatOpenAI(**kwargs)  # type: ignore[arg-type]
+
+
+def create_chat_model_for_agent(
+    model: str = "deepseek-v4-flash",
+) -> BaseChatModel:
+    """创建用于 Agent（如创作小助手）的聊天模型。
+
+    DeepSeek 思考模式在多轮工具调用时会导致 reasoning_content 回传失败，
+    因此 agent 场景必须禁用思考模式。
+    """
+    return create_llm(model=model, temperature=0.7, disable_thinking=True)  # type: ignore[arg-type]
+
+
 def create_summary_llm() -> BaseChatModel:
-    """
-    创建用于摘要的轻量级模型, 默认采用 step-3.5-flash。
+    """创建用于快速摘要LLM（step-3.5-flash）"""
+    api_key = settings.get_api_key("stepfun")
+    base_url = settings.get_base_url("stepfun")
+    if not api_key or not base_url:
+        raise ValueError("未配置 stepfun 的 API Key 或 Base URL")
 
-    Returns:
-        BaseChatModel: 轻量级聊天模型
-    """
-
-    return init_chat_model(
+    return ChatOpenAI(
         model="step-3.5-flash",
-        model_provider="openai",
+        api_key=SecretStr(api_key),
+        base_url=base_url,
         temperature=0.3,
-        timeout=45,
-        max_retries=6,
-        max_tokens=100000,
-        api_key=settings.get_api_key("stepfun"),
-        base_url=settings.get_base_url("stepfun"),
+        timeout=90,
+        max_retries=2,
+        max_tokens=100000,  # type: ignore[arg-type]
     )

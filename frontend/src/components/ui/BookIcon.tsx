@@ -1,5 +1,5 @@
 /**
- * BookIcon — 静态展示duxing_icon图片
+ * BookIcon — 展示duxing_icon图片，带龙灵动效
  */
 interface BookIconProps {
   size?: number;
@@ -11,7 +11,7 @@ export function BookIcon({ size = 48, className = '' }: BookIconProps) {
     <img
       src="/duxing_icon.png"
       alt="独醒"
-      className={className}
+      className={`icon-dragon ${className}`}
       style={{ width: size, height: size, objectFit: 'contain' }}
       draggable={false}
     />

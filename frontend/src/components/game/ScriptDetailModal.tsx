@@ -226,7 +226,7 @@ export function ScriptDetailModal({
                     </div>
                     <div className="p-4 rounded-xl bg-secondary/30 text-center">
                       <div className="text-sm font-medium">
-                        {script.estimated_duration || 20}
+                        {script.estimated_duration ?? 20}
                       </div>
                       <div className="text-xs text-muted-foreground mt-1">
                         预计时长(分钟)

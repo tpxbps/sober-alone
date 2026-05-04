@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { FileEdit, BookOpen } from "lucide-react";
 
 import { useGameStore } from "@/stores/gameStore";
+import { useShallow } from "zustand/react/shallow";
 import { GameHeader } from "@/components/game/GameHeader";
 import { CharacterPanel } from "@/components/game/CharacterPanel";
 import { ChatArea } from "@/components/game/ChatArea";
@@ -11,6 +12,7 @@ import { StageTransitionOverlay } from "@/components/game/StageTransitionOverlay
 import { PlayerScriptTooltip } from "@/components/game/PlayerScriptTooltip";
 import { DraftNotebook } from "@/components/game/DraftNotebook";
 import { SettingsModal } from "@/components/SettingsModal";
+import { Markdown } from "@/components/ui/Markdown";
 import { useBGM } from "@/hooks/useBGM";
 import type { GameStage, GameRecord } from "@/types/game";
 
@@ -22,7 +24,6 @@ interface GamePageProps {
 export function GamePage({ sessionId, onExit }: GamePageProps) {
   const [showVotingModal, setShowVotingModal] = useState(false);
   const [showScriptModal, setShowScriptModal] = useState(false);
-  const [showCompletionModal, setShowCompletionModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showSpeechReminder, setShowSpeechReminder] = useState(false);
   const [speechReminderShown, setSpeechReminderShown] = useState(false);
@@ -68,7 +69,40 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
     addRecord,
     setPendingHumanSpeech,
     cancelActiveOperations,
-  } = useGameStore();
+  } = useGameStore(
+    useShallow((s) => ({
+      stage: s.stage,
+      currentRound: s.currentRound,
+      script: s.script,
+      characters: s.characters,
+      playerStates: s.playerStates,
+      records: s.records,
+      currentSpeakerId: s.currentSpeakerId,
+      humanCharacterId: s.humanCharacterId,
+      humanCharacterScript: s.humanCharacterScript,
+      isStreaming: s.isStreaming,
+      isProcessingReactions: s.isProcessingReactions,
+      isAdvancingStage: s.isAdvancingStage,
+      streamingSpeakerId: s.streamingSpeakerId,
+      showStageTransition: s.showStageTransition,
+      stageTransitionMessage: s.stageTransitionMessage,
+      voteResults: s.voteResults,
+      votes: s.votes,
+      agentLlmInfo: s.agentLlmInfo,
+      pendingHumanSpeech: s.pendingHumanSpeech,
+      initializeGame: s.initializeGame,
+      advanceStage: s.advanceStage,
+      humanSpeak: s.humanSpeak,
+      triggerAISpeak: s.triggerAISpeak,
+      submitVote: s.submitVote,
+      finalizeVoting: s.finalizeVoting,
+      endGame: s.endGame,
+      setStageTransition: s.setStageTransition,
+      addRecord: s.addRecord,
+      setPendingHumanSpeech: s.setPendingHumanSpeech,
+      cancelActiveOperations: s.cancelActiveOperations,
+    }))
+  );
 
   // Track script opened state for mobile toolbar badge
   useEffect(() => {
@@ -113,40 +147,23 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
 
   // Show voting modal when entering vote stage
   useEffect(() => {
-    if (stage === "vote" && !voteResults) {
+    const hasResults = voteResults && Object.keys(voteResults).length > 0;
+    if (stage === "vote" && !hasResults) {
       setShowVotingModal(true);
     } else {
       setShowVotingModal(false);
     }
   }, [stage, voteResults]);
 
-  // Show completion modal when game ends + auto-redirect countdown
-  const [completionCountdown, setCompletionCountdown] = useState(5);
-
+  // Show completion modal when game ends (removed - review stage has end button)
   useEffect(() => {
     if (stage === "completed") {
-      setShowCompletionModal(true);
-      setCompletionCountdown(5);
-    }
-  }, [stage]);
-
-  // Auto-redirect countdown
-  useEffect(() => {
-    if (!showCompletionModal) return;
-
-    if (completionCountdown <= 0) {
       onExit();
-      return;
     }
-
-    const timer = setTimeout(() => {
-      setCompletionCountdown((prev) => prev - 1);
-    }, 1000);
-
-    return () => clearTimeout(timer);
-  }, [showCompletionModal, completionCountdown, onExit]);
+  }, [stage, onExit]);
 
   // 自由发言阶段：真人玩家尚未发言时弹出提醒（每次阶段仅一次）
+  // 仅在所有AI角色用光发言次数、而真人一次都还没发言时触发
   useEffect(() => {
     if (stage !== "free_discussion") {
       setSpeechReminderShown(false);
@@ -166,7 +183,15 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
         humanState && (humanState.remaining_speech_count ?? 0) > 0;
       const humanNotSpoken = humanState && !humanState.has_spoken_this_round;
 
-      if (humanHasRemaining && humanNotSpoken) {
+      // 检查是否所有AI角色都已用光发言次数
+      const aiStates = playerStates.filter(
+        (p) => p.character_id !== humanCharacterId
+      );
+      const allAIExhausted =
+        aiStates.length > 0 &&
+        aiStates.every((p) => (p.remaining_speech_count ?? 0) <= 0);
+
+      if (humanHasRemaining && humanNotSpoken && allAIExhausted) {
         setShowSpeechReminder(true);
         setSpeechReminderShown(true);
       }
@@ -211,9 +236,11 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
       }
 
       // Small delay before AI starts speaking
+      // 自由讨论阶段留较长间隔，让玩家有机会点击"直接进入下一阶段"
+      const delay = stage === "free_discussion" ? 1500 : 500;
       const timer = setTimeout(() => {
         triggerAISpeak(currentSpeakerId);
-      }, 500);
+      }, delay);
       return () => clearTimeout(timer);
     }
   }, [
@@ -448,10 +475,16 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
 
       {/* Script Modal */}
       {showScriptModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-card rounded-xl p-6 max-w-lg">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setShowScriptModal(false)}>
+          <div className="bg-card rounded-xl p-6 max-w-lg w-full shadow-2xl"
+            onClick={(e) => e.stopPropagation()}>
             <h3 className="text-lg font-bold mb-4">{script?.title}</h3>
-            <p className="text-muted-foreground">{script?.description}</p>
+            {script?.description && (
+              <Markdown className="text-sm text-muted-foreground leading-relaxed">
+                {script.description}
+              </Markdown>
+            )}
             <button
               onClick={() => setShowScriptModal(false)}
               className="mt-4 px-4 py-2 rounded-lg bg-primary text-primary-foreground"
@@ -495,50 +528,26 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
         )}
       </AnimatePresence>
 
-      {/* Game Completion Modal */}
-      <AnimatePresence>
-        {showCompletionModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
-          >
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="bg-card rounded-xl p-8 max-w-md w-full text-center shadow-2xl"
-            >
-              <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-primary/20 flex items-center justify-center">
-                <span className="text-3xl">🎉</span>
-              </div>
-              <h3 className="text-2xl font-bold mb-2">游戏结束</h3>
-              <p className="text-muted-foreground mb-6">
-                感谢游玩「{script?.title || "剧本杀"}」！
-              </p>
-              <button
-                onClick={onExit}
-                className="w-full px-6 py-3 rounded-xl bg-primary text-primary-foreground font-medium
-                         hover:bg-primary/90 transition-colors"
-              >
-                返回首页 ({completionCountdown}s)
-              </button>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Game Completion Modal - removed: review stage already has end game button */}
 
       {/* Settings Modal */}
       <AnimatePresence>
         {showSettings && (
-          <SettingsModal onClose={() => setShowSettings(false)} />
+          <SettingsModal onClose={() => setShowSettings(false)} mode="game" />
         )}
       </AnimatePresence>
 
       {/* Player Script Tooltip */}
       <PlayerScriptTooltip
         scriptContent={humanCharacterScript}
+        scriptSummary={
+          characters.find((c) => c.character_id === humanCharacterId)
+            ?.character_script_summary
+        }
+        keyInfo={
+          characters.find((c) => c.character_id === humanCharacterId)
+            ?.system_prompt
+        }
         characterName={
           characters.find((c) => c.character_id === humanCharacterId)?.name
         }

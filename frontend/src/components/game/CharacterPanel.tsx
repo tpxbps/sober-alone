@@ -148,17 +148,15 @@ export function CharacterPanel({
             {/* Hover tooltip */}
             <div
               className={`absolute ${
-                side === "left" ? "left-full ml-3" : "right-full mr-3"
+                side === "left" ? "left-full" : "right-full"
               }
-                top-1/2 -translate-y-1/2 z-50 opacity-0 group-hover:opacity-100
-                transition-all duration-200 pointer-events-none
-                ${
-                  side === "left"
-                    ? "translate-x-0 group-hover:translate-x-1"
-                    : "translate-x-0 group-hover:-translate-x-1"
-                }`}
+                top-0 bottom-0 z-50
+                flex items-center opacity-0 group-hover:opacity-100
+                transition-opacity duration-200
+                pointer-events-none group-hover:pointer-events-auto
+                ${side === "left" ? "pl-2" : "pr-2"}`}
             >
-              <div className="p-4 rounded-xl bg-popover border border-border shadow-lg text-sm w-64">
+              <div className="p-4 rounded-xl bg-popover border border-border shadow-lg text-sm w-80">
                 <div className="flex items-center gap-2 mb-2">
                   <div
                     className="w-8 h-8 rounded-full overflow-hidden bg-gradient-to-br from-primary/30 to-accent/30
@@ -181,7 +179,7 @@ export function CharacterPanel({
                     </p>
                   </div>
                 </div>
-                <p className="text-xs text-muted-foreground line-clamp-6 leading-relaxed">
+                <p className="text-xs text-muted-foreground leading-relaxed max-h-32 overflow-y-auto scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
                   {character.profile ||
                     character.character_script_summary ||
                     "暂无角色简介"}

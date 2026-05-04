@@ -4,8 +4,7 @@ from typing import Optional
 
 # LLM提供商对应的默认模型
 DEFAULT_MODELS: dict[str, str] = {
-    "zhipuai": "glm-4.7",
-    "deepseek": "deepseek-reasoner",
+    "deepseek": "deepseek-v4-flash",
     "stepfun": "step-3.5-flash",
     "alibaba": "qwen3.5-flash-2026-02-23",
     "bytedance": "doubao-seed-2-0-mini-260215",
@@ -48,10 +47,11 @@ class Settings(BaseSettings):
     MIMO_API_BASE_URL: Optional[str] = "https://api.xiaomimimo.com/v1"
 
     # 默认LLM提供商
-    DEFAULT_LLM_PROVIDER: str = "stepfun"
+    DEFAULT_LLM_PROVIDER: str = "deepseek"
     DEFAULT_LLM_MODEL: Optional[str] = (
-        "step-3.5-flash"  # 为None时使用DEFAULT_MODELS中的默认值
+        "deepseek-v4-flash"  # 为None时使用DEFAULT_MODELS中的默认值
     )
+    SCRIPT_EDITOR_MODEL: Optional[str] = "deepseek-v4-flash"
 
     # Vector database
     CHROMA_PERSIST_DIR: str = "./data/chroma"
@@ -65,7 +65,7 @@ class Settings(BaseSettings):
         if self.DEFAULT_LLM_MODEL:
             return self.DEFAULT_LLM_MODEL
         provider = provider or self.DEFAULT_LLM_PROVIDER
-        return DEFAULT_MODELS.get(provider, "step-3.5-flash")
+        return DEFAULT_MODELS.get(provider, "deepseek-v4-flash")
 
     def get_api_key(self, provider: str) -> Optional[str]:
         """获取指定提供商的API Key"""

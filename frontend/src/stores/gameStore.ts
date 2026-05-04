@@ -118,6 +118,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
         is_human?: boolean;
         character_script?: string;
         character_script_summary?: string;
+        system_prompt?: string;
       }) => ({
         character_id: c.character_id,
         name: c.name,
@@ -129,6 +130,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
         is_human: c.is_human,
         character_script: c.character_script,
         character_script_summary: c.character_script_summary,
+        system_prompt: c.system_prompt,
       }));
 
       // Find human character ID and script
@@ -164,6 +166,9 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
         agentLlmInfo: state.agent_llm_info || (state.llm_configs ? Object.fromEntries(
           Object.entries(state.llm_configs).map(([k, v]) => [k, { ...v, is_human: false }])
         ) : {}),
+        // 恢复投票状态（刷新后仍可显示）
+        votes: state.votes || {},
+        voteResults: state.vote_results || null,
       });
 
       // Load history
@@ -226,6 +231,8 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
           speechQueue: state.speech_queue || [],
           playerStates: state.player_states || [],
           currentRound: state.current_round,
+          votes: state.votes || {},
+          voteResults: state.vote_results || null,
           isAdvancingStage: false,
         });
 
@@ -344,12 +351,37 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
             cancelAnimationFrame(rafId);
             rafId = null;
           }
-          set({
-            isStreaming: false,
-            streamingContent: fullContent, // Ensure final content is flushed
-            isProcessingReactions: true,
-            thinkingTip: '',
-          });
+
+          if (fullContent) {
+            // Normal case: keep streaming content visible during reactions
+            set({
+              isStreaming: false,
+              streamingContent: fullContent,
+              isProcessingReactions: true,
+              thinkingTip: '',
+            });
+          } else {
+            // Agent produced no content (error) — optimistically insert fallback record
+            const { records: curRecords, streamingSpeakerId: speakerId, characters: curChars, stage: curStage } = get();
+            const fallbackRecord: GameRecord = {
+              id: Date.now(),
+              session_id: sessionId,
+              speaker_id: speakerId || undefined,
+              speaker_name: curChars.find(c => c.character_id === speakerId)?.name || 'AI',
+              content: '（系统提示：AI角色出现未知错误，暂时无法正常发言。）',
+              record_type: 'speech',
+              stage: curStage,
+              created_at: new Date().toISOString(),
+            };
+            set({
+              isStreaming: false,
+              streamingContent: '',
+              streamingSpeakerId: null,
+              isProcessingReactions: true,
+              thinkingTip: '',
+              records: [...curRecords, fallbackRecord],
+            });
+          }
         } else if (message.type === 'done') {
           // Flush RAF buffer
           if (rafId !== null) {
@@ -460,8 +492,9 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
           });
           return;
         } else if (message.type === 'error') {
-          console.error('Stream error:', (message as unknown as { message?: string }).message || message);
-          break;
+          // Agent error — don't break, let the stream continue to speech_done/done
+          // so the game flow can advance to the next speaker with a fallback record
+          console.warn('Stream error (continuing):', (message as unknown as { message?: string }).message || message);
         }
       }
       // Clean up any remaining RAF
@@ -486,22 +519,18 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
     const { sessionId, humanCharacterId } = get();
     if (!sessionId || !humanCharacterId) return;
 
-    try {
-      await voteApi.submitVote(sessionId, suspectId, suspectName, reasoning);
-      // Update votes in store so VotingModal detects hasAlreadyVoted and triggers finalizeVoting
-      set((state) => ({
-        votes: {
-          ...state.votes,
-          [humanCharacterId]: {
-            suspect_id: suspectId,
-            suspect_name: suspectName,
-            reasoning: reasoning || '',
-          },
+    await voteApi.submitVote(sessionId, suspectId, suspectName, reasoning);
+    // Update votes in store so VotingModal detects hasAlreadyVoted and triggers finalizeVoting
+    set((state) => ({
+      votes: {
+        ...state.votes,
+        [humanCharacterId]: {
+          suspect_id: suspectId,
+          suspect_name: suspectName,
+          reasoning: reasoning || '',
         },
-      }));
-    } catch (error) {
-      console.error('Failed to submit vote:', error);
-    }
+      },
+    }));
   },
 
   finalizeVoting: async () => {
