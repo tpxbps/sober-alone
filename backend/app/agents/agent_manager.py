@@ -235,7 +235,7 @@ class AgentManager:
         agent: AgentPlayer,
         speaker_name: str,
         content: str,
-        timeout: float = 60.0,
+        timeout: float = 120.0,
     ) -> Dict[str, Any]:
         """
         带超时的获取单个Agent的反应

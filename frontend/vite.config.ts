@@ -11,6 +11,12 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src')
     }
   },
+  build: {
+    target: 'es2020',
+  },
+  esbuild: {
+    target: 'es2020',
+  },
   server: {
     proxy: {
       '/audio/scripts': {

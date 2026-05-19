@@ -40,12 +40,12 @@ function TruncatedText({ text }: { text: string }) {
         </Tooltip.Trigger>
         <Tooltip.Portal>
           <Tooltip.Content
-            className="max-w-xs px-3 py-2 text-xs bg-popover border border-border rounded-lg shadow-xl z-50"
+            className="max-w-xs px-3 py-2 text-xs bg-popover/95 backdrop-blur-sm border border-border rounded-lg shadow-xl shadow-primary/10 z-50"
             sideOffset={8}
             side="top"
           >
             <p className="text-popover-foreground leading-relaxed">{text}</p>
-            <Tooltip.Arrow className="fill-border" />
+            <Tooltip.Arrow className="fill-popover" />
           </Tooltip.Content>
         </Tooltip.Portal>
       </Tooltip.Root>
@@ -189,7 +189,7 @@ export function ScriptDetailModal({
             </div>
 
             {/* Content */}
-            <div className="flex-1 overflow-auto p-6">
+            <div className="flex-1 overflow-auto p-6 scrollbar-thin">
               <div className="grid md:grid-cols-[2.5fr_3fr] gap-8">
                 {/* Left: Script Info */}
                 <div className="space-y-6">
@@ -462,12 +462,12 @@ export function ScriptDetailModal({
                 {!selectedCharacter && !isCreating && (
                   <Tooltip.Portal>
                     <Tooltip.Content
-                      className="px-3 py-2 text-xs bg-popover border border-border rounded-lg shadow-xl z-50"
+                      className="px-3 py-2 text-xs bg-popover/95 backdrop-blur-sm border border-border rounded-lg shadow-xl shadow-primary/10 z-50"
                       sideOffset={8}
                       side="top"
                     >
                       <p className="text-popover-foreground">请先选择你要扮演的角色</p>
-                      <Tooltip.Arrow className="fill-border" />
+                      <Tooltip.Arrow className="fill-popover" />
                     </Tooltip.Content>
                   </Tooltip.Portal>
                 )}
