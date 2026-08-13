@@ -6,6 +6,8 @@ from pathlib import Path
 
 from app.seed import SAMPLE_SCRIPT_ID
 
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
+
 
 def test_init_is_idempotent(tmp_path: Path):
     database = tmp_path / "game.db"
@@ -20,6 +22,7 @@ def test_init_is_idempotent(tmp_path: Path):
         capture_output=True,
         text=True,
         env=env,
+        cwd=BACKEND_ROOT,
     )
     second = subprocess.run(
         [sys.executable, "-m", "app.cli", "init"],
@@ -27,6 +30,7 @@ def test_init_is_idempotent(tmp_path: Path):
         capture_output=True,
         text=True,
         env=env,
+        cwd=BACKEND_ROOT,
     )
 
     with sqlite3.connect(database) as connection:

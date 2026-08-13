@@ -184,7 +184,11 @@ test('大厅 → 选角 → 发言 → 推进 → 投票 → 复盘', async ({ p
 
   await page.getByPlaceholder('输入你的发言...').fill('我先说明停电时间。')
   await page.getByRole('button', { name: '完成发言' }).click()
-  await expect(page.getByText('我先说明停电时间。')).toBeVisible()
+  // The optimistic record and its authoritative replacement overlap briefly
+  // while AnimatePresence completes the exit animation. Assert convergence.
+  const humanSpeech = page.getByText('我先说明停电时间。', { exact: true })
+  await expect(humanSpeech).toHaveCount(1)
+  await expect(humanSpeech).toBeVisible()
   await page.getByRole('button', { name: '进入下一阶段' }).click()
 
   await expect(page.getByText('请投票指认真凶')).toBeVisible()
