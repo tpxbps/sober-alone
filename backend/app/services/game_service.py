@@ -14,7 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents import get_agent_manager, remove_agent_manager
 from app.db.models import GameRecord, GameSession, GameStage, GameStatus, PlayerState
 from app.game import GameFlowController
+from app.services.game_presenter import GameStatePresenter
 from app.services.game_runtime import FlowControllerRegistry, GameRuntimeRepository
+from app.services.game_speech import GameSpeechService
 from app.services.voting import VotingService
 
 logger = logging.getLogger(__name__)
@@ -30,8 +32,7 @@ def get_flow_controller(session_id: str) -> GameFlowController | None:
 
 def remove_flow_controller(session_id: str):
     """移除流程控制器（游戏结束时调用）"""
-    if session_id in _flow_controllers:
-        del _flow_controllers[session_id]
+    _flow_controllers.remove(session_id)
 
 
 async def ensure_flow_controller(
@@ -47,43 +48,33 @@ async def ensure_flow_controller(
     Returns:
         Optional[GameFlowController]: 流程控制器实例
     """
-    if session_id in _flow_controllers:
-        fc = _flow_controllers[session_id]
-        return fc
 
-    # 从数据库重建流程控制器
-    result = await db_session.execute(
-        select(GameSession).where(GameSession.session_id == session_id)
-    )
-    game_session = result.scalar_one_or_none()
+    async def restore() -> GameFlowController | None:
+        result = await db_session.execute(
+            select(GameSession).where(GameSession.session_id == session_id)
+        )
+        game_session = result.scalar_one_or_none()
+        if not game_session:
+            return None
 
-    if not game_session:
-        return None
+        script_data = await GameRuntimeRepository(db_session).load_script(game_session.script_id)
+        if not script_data:
+            return None
 
-    script_data = await GameRuntimeRepository(db_session).load_script(game_session.script_id)
-    if not script_data:
-        return None
+        agent_manager = get_agent_manager(session_id, game_session.script_id)
+        if not agent_manager.agents:
+            await agent_manager.initialize_agents(
+                script_data.get("characters", []),
+                game_session.human_character_id,
+            )
 
-    # 获取或创建 Agent 管理器
-    agent_manager = get_agent_manager(session_id, game_session.script_id)
-
-    # 如果 Agent 管理器中没有 agents，需要重新初始化
-    if not agent_manager.agents:
-        await agent_manager.initialize_agents(
-            script_data.get("characters", []),
-            game_session.human_character_id,
+        return GameFlowController(
+            game_session=game_session,
+            script_data=script_data,
+            agent_manager=agent_manager,
         )
 
-    # 创建流程控制器
-    flow_controller = GameFlowController(
-        game_session=game_session,
-        script_data=script_data,
-        agent_manager=agent_manager,
-    )
-
-    _flow_controllers[session_id] = flow_controller
-
-    return flow_controller
+    return await _flow_controllers.get_or_restore(session_id, restore)
 
 
 class GameService:
@@ -101,6 +92,7 @@ class GameService:
     def __init__(self, db_session: AsyncSession):
         self.db = db_session
         self.runtime_repository = GameRuntimeRepository(db_session)
+        self.speech_service = GameSpeechService(db_session, ensure_flow_controller)
         # 使用模块级别的缓存 _flow_controllers 而非实例变量
         # 以确保跨请求的状态持久化
 
@@ -161,7 +153,7 @@ class GameService:
             script_data=script_data,
             agent_manager=agent_manager,
         )
-        _flow_controllers[session_id] = flow_controller
+        _flow_controllers.put(session_id, flow_controller)
 
         # 开始游戏
         start_result = await flow_controller.start_game(self.db)
@@ -222,19 +214,10 @@ class GameService:
         script_data = await self._get_script_data(game_session.script_id)
         characters = script_data.get("characters", []) if script_data else []
 
-        # 构建剧本信息（用于前端显示）
-        script_info = None
-        if script_data:
-            script_info = {
-                "script_id": script_data.get("script_id"),
-                "title": script_data.get("title"),
-                "description": script_data.get("description"),
-                "overview": script_data.get("overview"),
-                "tags": script_data.get("tags"),
-                "difficulty": script_data.get("difficulty"),
-                "player_count": script_data.get("player_count"),
-                "cover_image_url": script_data.get("cover_image_url"),
-            }
+        script_info = GameStatePresenter.script(script_data)
+        presented_characters = GameStatePresenter.characters(
+            characters, game_session.human_character_id
+        )
 
         # 获取流程控制器
         flow_controller = _flow_controllers.get(session_id)
@@ -243,31 +226,7 @@ class GameService:
             state = flow_controller.get_game_state()
             state["player_states"] = player_states
             state["script"] = script_info
-            state["characters"] = [
-                {
-                    "character_id": c.get("character_id"),
-                    "name": c.get("name"),
-                    "gender": c.get("gender"),
-                    "age": c.get("age"),
-                    "occupation": c.get("occupation"),
-                    "profile": c.get("profile"),
-                    "avatar_url": c.get("avatar_url"),
-                    "voice_id": c.get("voice_id"),
-                    "is_human": c.get("character_id") == game_session.human_character_id,
-                    "character_script": (
-                        c.get("character_script")
-                        if c.get("character_id") == game_session.human_character_id
-                        else None
-                    ),
-                    "character_script_summary": c.get("character_script_summary"),
-                    "system_prompt": (
-                        c.get("system_prompt")
-                        if c.get("character_id") == game_session.human_character_id
-                        else None
-                    ),
-                }
-                for c in characters
-            ]
+            state["characters"] = presented_characters
             state["success"] = True
             # 确保字段名与前端一致
             if "current_speaker" in state:
@@ -287,30 +246,7 @@ class GameService:
             "human_character_id": game_session.human_character_id,
             "player_states": player_states,
             "script": script_info,
-            "characters": [
-                {
-                    "character_id": c.get("character_id"),
-                    "name": c.get("name"),
-                    "gender": c.get("gender"),
-                    "age": c.get("age"),
-                    "occupation": c.get("occupation"),
-                    "profile": c.get("profile"),
-                    "avatar_url": c.get("avatar_url"),
-                    "is_human": c.get("character_id") == game_session.human_character_id,
-                    "character_script": (
-                        c.get("character_script")
-                        if c.get("character_id") == game_session.human_character_id
-                        else None
-                    ),
-                    "character_script_summary": c.get("character_script_summary"),
-                    "system_prompt": (
-                        c.get("system_prompt")
-                        if c.get("character_id") == game_session.human_character_id
-                        else None
-                    ),
-                }
-                for c in characters
-            ],
+            "characters": presented_characters,
             "speech_queue": game_session.speech_queue or [],
             "votes": dict(game_session.votes or {}),
             "vote_results": game_session.vote_result or None,
@@ -368,165 +304,14 @@ class GameService:
         return result
 
     async def process_human_speech_stream(self, session_id: str, content: str):
-        """
-        处理真人玩家发言（流式SSE）
-
-        记录发言并触发AI反应，返回SSE格式流式数据。
-        """
-        import json as _json
-
-        flow_controller = await ensure_flow_controller(session_id, self.db)
-        if not flow_controller:
-            yield f"data: {_json.dumps({'type': 'error', 'message': '游戏会话不存在或已结束'})}\n\n"
-            return
-
-        human_character_id = flow_controller.session.human_character_id
-        current_speaker = flow_controller.session.current_speaker
-        current_stage = flow_controller.session.current_stage
-
-        # 自由发言阶段允许真人随时发言（调度器不将真人纳入轮次）
-        # 其他阶段（intro/summary等）需要轮到真人才能发言
-        if (
-            current_stage != GameStage.FREE_DISCUSSION.value
-            and current_speaker != human_character_id
-        ):
-            speaker_name = flow_controller.agent_manager.get_character_name(current_speaker)
-            yield f"data: {_json.dumps({'type': 'error', 'message': f'当前是{speaker_name}的发言回合'})}\n\n"
-            return
-
-        # 记录真人发言
-        yield f"data: {_json.dumps({'type': 'speech_recorded', 'message': '发言已记录'})}\n\n"
-
-        result = await flow_controller.process_speech(
-            character_id=human_character_id,
-            content=content,
-            is_human=True,
-            db_session=self.db,
-        )
-
-        if not result.get("success"):
-            yield f"data: {_json.dumps({'type': 'error', 'message': result.get('error', '处理失败')})}\n\n"
-            return
-
-        # 触发AI反应
-        reactions = result.get("reactions", [])
-        if reactions:
-            yield f"data: {_json.dumps({'type': 'thinking', 'message': '其他玩家正在反应...'})}\n\n"
-            for reaction in reactions:
-                char_name = flow_controller.agent_manager.get_character_name(
-                    reaction.get("character_id", "")
-                )
-                yield f"data: {_json.dumps({'type': 'reaction', 'character_name': char_name, 'content': reaction.get('content', '')}, ensure_ascii=False)}\n\n"
-            yield f"data: {_json.dumps({'type': 'reactions_done'}, ensure_ascii=False)}\n\n"
-
-        yield f"data: {_json.dumps({'type': 'done', 'next_speaker_id': result.get('next_speaker'), 'next_speaker_name': result.get('next_speaker_name', '')}, ensure_ascii=False)}\n\n"
+        """Preserve the historical human-speech streaming facade."""
+        async for event in self.speech_service.stream_human(session_id, content):
+            yield event
 
     async def process_ai_speech_stream(self, session_id: str, character_id: str):
-        """
-        处理AI玩家发言（流式）
-
-        返回SSE格式的流式数据，支持多种事件类型:
-        - token: LLM生成的文本片段（最终发言内容）
-        - thinking: AI正在思考/使用工具（不暴露工具内容）
-        - done: 流结束标记
-
-        Args:
-            session_id: 游戏会话ID
-            character_id: 角色ID
-
-        Yields:
-            str: SSE格式的数据行
-        """
-        import json
-
-        flow_controller = await ensure_flow_controller(session_id, self.db)
-        if not flow_controller:
-            yield f"data: {json.dumps({'type': 'error', 'message': '游戏会话不存在或已结束'})}\n\n"
-            return
-
-        # 生成AI发言
-        full_content = ""
-        is_thinking = False
-        agent_error = False
-
-        try:
-            async for chunk in flow_controller.generate_ai_speech(character_id, self.db):
-                # chunk 是 dict，包含 type 和相应字段
-                if isinstance(chunk, dict):
-                    chunk_type = chunk.get("type", "unknown")
-
-                    if chunk_type == "token":
-                        if is_thinking:
-                            is_thinking = False
-
-                        text = chunk.get("text", "")
-                        full_content += text
-                        # 发送文本token给前端
-                        yield f"data: {json.dumps({'type': 'token', 'text': text}, ensure_ascii=False)}\n\n"
-
-                    elif chunk_type == "progress":
-                        status = chunk.get("status", "")
-                        if status:
-                            yield f"data: {json.dumps({'type': 'thinking', 'message': status}, ensure_ascii=False)}\n\n"
-                            is_thinking = True
-
-                    elif chunk_type == "error":
-                        agent_error = True
-                        logger.error(f"Agent error for {character_id}: {chunk.get('message', '')}")
-        except Exception as e:
-            agent_error = True
-            logger.error(f"AI speech stream error: {e}")
-
-        # AI发言流结束，通知前端进入反应处理阶段
-        yield f"data: {json.dumps({'type': 'speech_done'}, ensure_ascii=False)}\n\n"
-
-        # 记录发言并确定下一位发言者
-        # 当 agent 出错或内容为空时，用兜底消息代替，确保流程继续推进
-        next_speaker_info = {}
-        content_to_record = full_content
-        if agent_error or not full_content:
-            logger.warning(
-                f"Agent {character_id} produced no content (error={agent_error}), inserting fallback record"
-            )
-            content_to_record = "（系统提示：AI角色出现未知错误，暂时无法正常发言。）"
-            try:
-                result = await flow_controller.process_speech(
-                    character_id=character_id,
-                    content=content_to_record,
-                    is_human=False,
-                    db_session=self.db,
-                    skip_reactions=True,
-                )
-                next_speaker_info = {
-                    "next_speaker_id": result.get("next_speaker"),
-                    "next_speaker_name": result.get("next_speaker_name"),
-                    "stage_complete": result.get("stage_complete", False),
-                }
-            except Exception as e:
-                logger.error(f"process_speech failed after agent error: {e}")
-                next_speaker_info = {
-                    "error": str(e),
-                }
-        else:
-            try:
-                result = await flow_controller.process_speech(
-                    character_id=character_id,
-                    content=full_content,
-                    is_human=False,
-                    db_session=self.db,
-                )
-                next_speaker_info = {
-                    "next_speaker_id": result.get("next_speaker"),
-                    "next_speaker_name": result.get("next_speaker_name"),
-                    "stage_complete": result.get("stage_complete", False),
-                }
-            except Exception as e:
-                next_speaker_info = {
-                    "error": str(e),
-                }
-
-        # 发送结束标记，包含下一位发言者信息
-        yield f"data: {json.dumps({'type': 'done', **next_speaker_info}, ensure_ascii=False)}\n\n"
+        """Preserve the historical AI-speech streaming facade."""
+        async for event in self.speech_service.stream_ai(session_id, character_id):
+            yield event
 
     async def advance_stage(self, session_id: str) -> dict[str, Any]:
         """

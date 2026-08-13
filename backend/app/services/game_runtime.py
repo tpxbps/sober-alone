@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from sqlalchemy import text
@@ -36,6 +37,26 @@ class FlowControllerRegistry:
     def get(self, session_id: str) -> Any | None:
         with self._lock:
             return self._controllers.get(session_id)
+
+    def put(self, session_id: str, controller: Any) -> None:
+        self[session_id] = controller
+
+    def remove(self, session_id: str) -> None:
+        with self._lock:
+            self._controllers.pop(session_id, None)
+
+    async def get_or_restore(
+        self,
+        session_id: str,
+        restore: Callable[[], Awaitable[Any | None]],
+    ) -> Any | None:
+        controller = self.get(session_id)
+        if controller is not None:
+            return controller
+        controller = await restore()
+        if controller is not None:
+            self.put(session_id, controller)
+        return controller
 
 
 class GameRuntimeRepository:
