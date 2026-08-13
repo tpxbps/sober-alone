@@ -4,7 +4,8 @@ import { X, Users, BookOpen, Cpu, Play, ChevronDown } from "lucide-react";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as Select from "@radix-ui/react-select";
 import * as Tooltip from "@radix-ui/react-tooltip";
-import { scriptApi, gameApi } from "@/lib/api";
+import { scriptApi, gameApi, systemApi } from "@/lib/api";
+import { configuredModels } from "@/lib/capabilityAdapter";
 import type { Script, Character } from "@/types/game";
 import { DIFFICULTY_COLORS, AI_MODELS } from "@/types/game";
 
@@ -22,9 +23,12 @@ function TruncatedText({ text }: { text: string }) {
   }, []);
 
   useEffect(() => {
-    checkTruncation();
+    const frame = requestAnimationFrame(checkTruncation);
     window.addEventListener("resize", checkTruncation);
-    return () => window.removeEventListener("resize", checkTruncation);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("resize", checkTruncation);
+    };
   }, [checkTruncation, text]);
 
   if (isTruncated) {
@@ -83,6 +87,10 @@ export function ScriptDetailModal({
   const [isLoading, setIsLoading] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [openSelectId, setOpenSelectId] = useState<string | null>(null);
+  const [availableModels, setAvailableModels] = useState<typeof AI_MODELS>([]);
+  const [modelCapabilityReason, setModelCapabilityReason] = useState(
+    "正在检查模型能力…"
+  );
 
   const difficultyInfo =
     DIFFICULTY_COLORS[script.difficulty] || DIFFICULTY_COLORS[1];
@@ -91,20 +99,29 @@ export function ScriptDetailModal({
   useEffect(() => {
     if (open && script.script_id) {
       setIsLoading(true);
-      scriptApi
-        .getScriptCharacters(script.script_id)
-        .then((response) => {
+      Promise.all([
+        scriptApi.getScriptCharacters(script.script_id),
+        systemApi.getCapabilities(),
+      ])
+        .then(([response, capabilities]) => {
+          const models = configuredModels(AI_MODELS, capabilities);
+          setAvailableModels(models);
+          setModelCapabilityReason(
+            models.length > 0 ? "" : "没有已配置的主模型，请先设置 DEEPSEEK_API_KEY"
+          );
           const chars = response.characters;
           setCharacters(chars);
-          // Set default AI models: random selection for variety
           const defaultModels: Record<string, string> = {};
           chars.forEach((char) => {
-            defaultModels[char.character_id] =
-              AI_MODELS[Math.floor(Math.random() * AI_MODELS.length)].id;
+            if (models[0]) defaultModels[char.character_id] = models[0].id;
           });
           setAiModels(defaultModels);
         })
-        .catch(console.error)
+        .catch((error) => {
+          console.error(error);
+          setAvailableModels([]);
+          setModelCapabilityReason("无法读取后端模型能力");
+        })
         .finally(() => setIsLoading(false));
     }
   }, [open, script.script_id]);
@@ -121,7 +138,7 @@ export function ScriptDetailModal({
 
   // Start game
   const handleStartGame = async () => {
-    if (!selectedCharacter) return;
+    if (!selectedCharacter || availableModels.length === 0) return;
 
     setIsCreating(true);
     try {
@@ -130,7 +147,7 @@ export function ScriptDetailModal({
       characters.forEach((char) => {
         if (char.character_id !== selectedCharacter) {
           aiModelConfig[char.character_id] =
-            aiModels[char.character_id] || AI_MODELS[0].id;
+            aiModels[char.character_id] || availableModels[0]?.id;
         }
       });
 
@@ -195,12 +212,15 @@ export function ScriptDetailModal({
                 <div className="space-y-6">
                   {/* Cover Image */}
                   {script.cover_image_url && (
-                    <div className="rounded-xl overflow-hidden bg-secondary/20">
+                    <div className="relative rounded-xl overflow-hidden bg-secondary/20">
                       <img
                         src={script.cover_image_url}
                         alt={script.title}
                         className="w-full h-auto max-h-64 object-contain"
                       />
+                      <span className="absolute bottom-2 right-2 px-2 py-0.5 rounded bg-black/70 text-white text-[10px]">
+                        AI 生成图片
+                      </span>
                     </div>
                   )}
 
@@ -295,7 +315,7 @@ export function ScriptDetailModal({
                                 {/* Avatar */}
                                 <div
                                   className="w-24 h-24 rounded-full bg-gradient-to-br from-primary/30 to-accent/30
-                                            flex items-center justify-center text-xl font-bold shrink-0 overflow-hidden"
+                                            flex items-center justify-center text-xl font-bold shrink-0 overflow-hidden relative"
                                 >
                                   {char.avatar_url ? (
                                     <img
@@ -305,6 +325,11 @@ export function ScriptDetailModal({
                                     />
                                   ) : (
                                     char.name[0]
+                                  )}
+                                  {char.avatar_url && (
+                                    <span className="absolute bottom-0 inset-x-0 bg-black/65 text-white text-[8px] text-center py-0.5">
+                                      AI 生成
+                                    </span>
                                   )}
                                 </div>
 
@@ -365,7 +390,7 @@ export function ScriptDetailModal({
                                     <Select.Root
                                       value={
                                         aiModels[char.character_id] ||
-                                        AI_MODELS[0].id
+                                        availableModels[0].id
                                       }
                                       onValueChange={(value: string) =>
                                         handleAIModelChange(
@@ -405,7 +430,7 @@ export function ScriptDetailModal({
                                           sideOffset={4}
                                         >
                                           <Select.Viewport className="p-1">
-                                            {AI_MODELS.map((model) => (
+                                            {availableModels.map((model) => (
                                               <Select.Item
                                                 key={model.id}
                                                 value={model.id}
@@ -441,7 +466,9 @@ export function ScriptDetailModal({
                 <Tooltip.Trigger asChild>
                   <button
                     onClick={handleStartGame}
-                    disabled={!selectedCharacter || isCreating}
+                    disabled={
+                      !selectedCharacter || isCreating || availableModels.length === 0
+                    }
                     className="w-full py-4 rounded-xl bg-primary text-primary-foreground font-medium
                              hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed
                              transition-all flex items-center justify-center gap-2 glow"
@@ -459,14 +486,18 @@ export function ScriptDetailModal({
                     )}
                   </button>
                 </Tooltip.Trigger>
-                {!selectedCharacter && !isCreating && (
+                {(!selectedCharacter || availableModels.length === 0) && !isCreating && (
                   <Tooltip.Portal>
                     <Tooltip.Content
                       className="px-3 py-2 text-xs bg-popover/95 backdrop-blur-sm border border-border rounded-lg shadow-xl shadow-primary/10 z-50"
                       sideOffset={8}
                       side="top"
                     >
-                      <p className="text-popover-foreground">请先选择你要扮演的角色</p>
+                      <p className="text-popover-foreground">
+                        {availableModels.length === 0
+                          ? modelCapabilityReason
+                          : "请先选择你要扮演的角色"}
+                      </p>
                       <Tooltip.Arrow className="fill-popover" />
                     </Tooltip.Content>
                   </Tooltip.Portal>

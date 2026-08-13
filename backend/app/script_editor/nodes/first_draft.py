@@ -2,12 +2,11 @@
 generate_first_draft node — 根据确认的大纲生成初稿
 """
 
-import json
 import re
 
-from app.script_editor.state import ScriptGenState, STEP_GENERATE_FIRST_DRAFT
-from app.script_editor.prompts.templates import get_prompt
 from app.script_editor.nodes.utils import call_llm
+from app.script_editor.prompts.templates import get_prompt
+from app.script_editor.state import STEP_GENERATE_FIRST_DRAFT, ScriptGenState
 
 
 async def generate_first_draft(state: ScriptGenState) -> dict:
@@ -17,10 +16,10 @@ async def generate_first_draft(state: ScriptGenState) -> dict:
     user_content = f"""以下是已确认的剧本大纲，请据此撰写完整初稿：
 
 ---
-{state.get('outline', '')}
+{state.get("outline", "")}
 ---
 
-玩家人数：{state.get('player_count', 4)}人
+玩家人数：{state.get("player_count", 4)}人
 """
 
     first_draft = await call_llm(system_prompt, user_content)
@@ -45,36 +44,40 @@ def _extract_characters(draft: str, player_count: int) -> list[dict]:
     # 尝试匹配常见的角色描述格式
     # 格式1: **姓名**：男，XX岁，职业...
     pattern1 = re.compile(
-        r'\*\*([^*]{2,10})\*\*[：:]\s*([男女])[^，,]*[，,]\s*(\d{1,3})\s*岁[，,]\s*([^。\n]+)',
+        r"\*\*([^*]{2,10})\*\*[：:]\s*([男女])[^，,]*[，,]\s*(\d{1,3})\s*岁[，,]\s*([^。\n]+)",
         re.MULTILINE,
     )
     for match in pattern1.finditer(draft):
         if len(characters) >= player_count:
             break
-        characters.append({
-            "name": match.group(1).strip(),
-            "gender": match.group(2),
-            "age": int(match.group(3)),
-            "occupation": match.group(4).strip()[:50],
-            "profile": "",
-            "appearance": "",
-        })
+        characters.append(
+            {
+                "name": match.group(1).strip(),
+                "gender": match.group(2),
+                "age": int(match.group(3)),
+                "occupation": match.group(4).strip()[:50],
+                "profile": "",
+                "appearance": "",
+            }
+        )
 
     # 如果没提取到，尝试格式2: 姓名（男/女，XX岁）
     if not characters:
         pattern2 = re.compile(
-            r'[\-\*]\s*([^\-\\*\(（\s]{2,10})\s*[\(（]\s*([男女])\s*[，,]\s*(\d{1,3})\s*岁\s*[\)）]'
+            r"[\-\*]\s*([^\-\\*\(（\s]{2,10})\s*[\(（]\s*([男女])\s*[，,]\s*(\d{1,3})\s*岁\s*[\)）]"
         )
         for match in pattern2.finditer(draft):
             if len(characters) >= player_count:
                 break
-            characters.append({
-                "name": match.group(1).strip(),
-                "gender": match.group(2),
-                "age": int(match.group(3)),
-                "occupation": "",
-                "profile": "",
-                "appearance": "",
-            })
+            characters.append(
+                {
+                    "name": match.group(1).strip(),
+                    "gender": match.group(2),
+                    "age": int(match.group(3)),
+                    "occupation": "",
+                    "profile": "",
+                    "appearance": "",
+                }
+            )
 
     return characters

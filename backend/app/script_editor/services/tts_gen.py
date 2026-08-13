@@ -7,8 +7,7 @@ TTS Generation Service — 为剧本生成语音资源
 import asyncio
 import logging
 import re
-from collections.abc import Coroutine
-from typing import Callable
+from collections.abc import Callable, Coroutine
 
 from app.services.tts_service import TTSService
 
@@ -183,10 +182,19 @@ async def generate_script_tts(
             notice = stage.get("system_notice", "")
             if notice:
                 task_id = f"tts_sys_{i}"
-                tasks.append((task_id, _generate_system_audio(
-                    script_id, f"stage_{i}", notice,
-                    SYSTEM_STYLE, SYSTEM_VOICE, results,
-                )))
+                tasks.append(
+                    (
+                        task_id,
+                        _generate_system_audio(
+                            script_id,
+                            f"stage_{i}",
+                            notice,
+                            SYSTEM_STYLE,
+                            SYSTEM_VOICE,
+                            results,
+                        ),
+                    )
+                )
 
         elif stage_type == "advancement":
             children = stage.get("children", [])
@@ -195,10 +203,19 @@ async def generate_script_tts(
                 if notice:
                     task_id = f"tts_sys_{i}_{j}"
                     style = get_system_style_for_stage("advancement", j)
-                    tasks.append((task_id, _generate_system_audio(
-                        script_id, f"stage_{i}_child_{j}", notice,
-                        style, SYSTEM_VOICE, results,
-                    )))
+                    tasks.append(
+                        (
+                            task_id,
+                            _generate_system_audio(
+                                script_id,
+                                f"stage_{i}_child_{j}",
+                                notice,
+                                style,
+                                SYSTEM_VOICE,
+                                results,
+                            ),
+                        )
+                    )
 
         elif stage_type == "vote":
             children = stage.get("children", [])
@@ -206,19 +223,37 @@ async def generate_script_tts(
                 notice = child.get("system_notice", "")
                 if notice:
                     task_id = f"tts_sys_{i}_{j}"
-                    tasks.append((task_id, _generate_system_audio(
-                        script_id, f"stage_{i}_child_{j}", notice,
-                        "以庄重的口吻朗读", SYSTEM_VOICE, results,
-                    )))
+                    tasks.append(
+                        (
+                            task_id,
+                            _generate_system_audio(
+                                script_id,
+                                f"stage_{i}_child_{j}",
+                                notice,
+                                "以庄重的口吻朗读",
+                                SYSTEM_VOICE,
+                                results,
+                            ),
+                        )
+                    )
 
         elif stage_type == "review":
             notice = stage.get("system_notice", "")
             if notice:
                 task_id = f"tts_sys_{i}"
-                tasks.append((task_id, _generate_system_audio(
-                    script_id, f"stage_{i}", notice,
-                    "以揭秘的口吻朗读，语气逐渐加重", SYSTEM_VOICE, results,
-                )))
+                tasks.append(
+                    (
+                        task_id,
+                        _generate_system_audio(
+                            script_id,
+                            f"stage_{i}",
+                            notice,
+                            "以揭秘的口吻朗读，语气逐渐加重",
+                            SYSTEM_VOICE,
+                            results,
+                        ),
+                    )
+                )
 
     # 2. 角色个人剧本任务
     for name, script_text in character_scripts.items():
@@ -229,10 +264,21 @@ async def generate_script_tts(
             continue
 
         tts_char_task_id = f"tts_{char_id}"
-        tasks.append((tts_char_task_id, _generate_char_audio(
-            script_id, name, char_id, script_text, voice=None, style=None,
-            gender=gender, results=results,
-        )))
+        tasks.append(
+            (
+                tts_char_task_id,
+                _generate_char_audio(
+                    script_id,
+                    name,
+                    char_id,
+                    script_text,
+                    voice=None,
+                    style=None,
+                    gender=gender,
+                    results=results,
+                ),
+            )
+        )
 
     # 3. 全量并行执行（带错开延迟，避免 API 限频）
     async def _run_with_callback(task_id: str, coro, delay: float = 0):

@@ -10,9 +10,14 @@ import type {
   StageTransition,
 } from '@/types/game';
 import { gameApi, speechApi, voteApi } from '@/lib/api';
+import { adaptGameState } from '@/lib/gameStateAdapter';
+import { OperationRegistry } from '@/lib/operationRegistry';
+import { runSpeechStream } from '@/lib/speechStreamRunner';
 
-// Active AbortControllers for cancelling in-flight SSE streams
-const _activeControllers = new Map<string, AbortController>();
+const operations = new OperationRegistry();
+
+const appliesToSession = (getState: () => GameState, sessionId: string) =>
+  getState().sessionId === sessionId;
 
 interface GameActions {
   // Session management
@@ -98,104 +103,33 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
 
   initializeGame: async (sessionId: string) => {
     // Full reset to prevent state pollution from previous sessions
-    for (const controller of _activeControllers.values()) {
-      try { controller.abort(); } catch { /* ignore */ }
-    }
-    _activeControllers.clear();
+    operations.abortAll();
     set({ ...initialState, sessionId, isLoading: true });
     try {
       const state = await gameApi.getGameState(sessionId);
 
-      // Extract characters from response
-      const characters: Character[] = (state.characters || []).map((c: {
-        character_id: string;
-        name: string;
-        gender?: string;
-        age?: number;
-        occupation?: string;
-        profile?: string;
-        avatar_url?: string;
-        is_human?: boolean;
-        character_script?: string;
-        character_script_summary?: string;
-        system_prompt?: string;
-      }) => ({
-        character_id: c.character_id,
-        name: c.name,
-        gender: c.gender || '未知',
-        age: c.age || 0,
-        occupation: c.occupation || '',
-        profile: c.profile || '',
-        avatar_url: c.avatar_url || '',
-        is_human: c.is_human,
-        character_script: c.character_script,
-        character_script_summary: c.character_script_summary,
-        system_prompt: c.system_prompt,
-      }));
-
-      // Find human character ID and script
-      const humanChar = state.characters?.find((c: { is_human?: boolean }) => c.is_human);
-      const humanCharacterId = state.human_character_id || humanChar?.character_id || null;
-      const humanCharacterScript = humanChar?.character_script || '';
-
-      // Extract script data
-      const script: Script | null = state.script ? {
-        script_id: state.script.script_id,
-        title: state.script.title,
-        description: state.script.description || '',
-        overview: state.script.overview || '',
-        tags: state.script.tags || '',
-        difficulty: state.script.difficulty || 1,
-        player_count: state.script.player_count || 0,
-        estimated_duration: 0,
-        cover_image_url: state.script.cover_image_url,
-      } : null;
-
-      set({
-        status: state.status as GameState['status'],
-        stage: state.current_stage,
-        currentRound: state.current_round,
-        playerStates: state.player_states || [],
-        currentSpeakerId: state.current_speaker_id || null,
-        speechQueue: state.speech_queue || [],
-        characters,
-        humanCharacterId,
-        humanCharacterScript,
-        script,
-        scriptId: script?.script_id || '',
-        agentLlmInfo: state.agent_llm_info || (state.llm_configs ? Object.fromEntries(
-          Object.entries(state.llm_configs).map(([k, v]) => [k, { ...v, is_human: false }])
-        ) : {}),
-        // 恢复投票状态（刷新后仍可显示）
-        votes: state.votes || {},
-        voteResults: state.vote_results || null,
-      });
+      if (!appliesToSession(get, sessionId)) return;
+      set(adaptGameState(state));
 
       // Load history
       const historyResponse = await gameApi.getGameHistory(sessionId);
-      set({ records: historyResponse.records || [] });
+      if (appliesToSession(get, sessionId)) set({ records: historyResponse.records || [] });
     } catch (error) {
       console.error('Failed to initialize game:', error);
     } finally {
-      set({ isLoading: false });
+      if (appliesToSession(get, sessionId)) set({ isLoading: false });
     }
   },
 
   reset: () => {
     // Abort all in-flight SSE streams before resetting state
-    for (const controller of _activeControllers.values()) {
-      try { controller.abort(); } catch { /* ignore */ }
-    }
-    _activeControllers.clear();
+    operations.abortAll();
     set(initialState);
   },
 
   cancelActiveOperations: () => {
     // Abort all in-flight SSE streams
-    for (const controller of _activeControllers.values()) {
-      try { controller.abort(); } catch { /* ignore */ }
-    }
-    _activeControllers.clear();
+    operations.abortAll();
     // Reset UI flags that could block the next session
     set({
       isStreaming: false,
@@ -255,8 +189,8 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
     if (!sessionId) return;
 
     // Register AbortController for this SSE stream
-    const controller = new AbortController();
-    _activeControllers.set('human-speak', controller);
+    const operationKey = 'human-speak';
+    const controller = operations.start(operationKey);
 
     // 设置正在处理反应状态
     set({ isProcessingReactions: true });
@@ -267,21 +201,28 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
 
       let nextSpeakerId: string | null = null;
 
-      for await (const message of stream) {
-
-        if (message.type === 'thinking') {
-          // 更新thinking提示
-          set({ thinkingTip: message.message || '' });
-        } else if (message.type === 'reactions_done') {
-          // Reactions完成
-          set({ thinkingTip: '' });
-        } else if (message.type === 'done') {
-          // 全部完成
-          nextSpeakerId = message.next_speaker_id || null;
-        } else if (message.type === 'error') {
-          throw new Error(message.message || '发言失败');
-        }
-      }
+      await runSpeechStream(
+        stream,
+        {
+          thinking: (message) => {
+            if (operations.isCurrent(operationKey, controller) && appliesToSession(get, sessionId)) {
+              set({ thinkingTip: message.message || '' });
+            }
+          },
+          reactions_done: () => {
+            if (operations.isCurrent(operationKey, controller) && appliesToSession(get, sessionId)) {
+              set({ thinkingTip: '' });
+            }
+          },
+          done: (message) => {
+            nextSpeakerId = message.next_speaker_id || null;
+          },
+          error: (message) => {
+            throw new Error(message.message || '发言失败');
+          },
+        },
+        controller.signal,
+      );
 
       // 重新加载状态
       const [historyResponse, state] = await Promise.all([
@@ -289,6 +230,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
         gameApi.getGameState(sessionId),
       ]);
 
+      if (!operations.isCurrent(operationKey, controller) || !appliesToSession(get, sessionId)) return;
       set({
         records: historyResponse.records,
         currentSpeakerId: nextSpeakerId || state.current_speaker_id || null,
@@ -300,9 +242,9 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
     } catch (error: unknown) {
       if (error instanceof DOMException && error.name === 'AbortError') return;
       console.error('Failed to send message:', error);
-      set({ isProcessingReactions: false, thinkingTip: '' });
+      if (appliesToSession(get, sessionId)) set({ isProcessingReactions: false, thinkingTip: '' });
     } finally {
-      _activeControllers.delete('human-speak');
+      operations.finish(operationKey, controller);
     }
   },
 
@@ -311,8 +253,8 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
     if (!sessionId) return;
 
     // Register AbortController for this SSE stream
-    const controller = new AbortController();
-    _activeControllers.set(`ai-speak-${characterId}`, controller);
+    const operationKey = `ai-speak-${characterId}`;
+    const controller = operations.start(operationKey);
 
     set({ isStreaming: true, streamingContent: '', streamingSpeakerId: characterId, thinkingTip: '' });
 
@@ -332,45 +274,48 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
         }
       };
 
-      for await (const message of stream) {
-        // Handle different message types from backend
-        if (message.type === 'token') {
-          // Backend sends {type: "token", text: "..."}
-          const token = (message as unknown as { text?: string }).text || '';
-          fullContent += token;
-          if (rafId === null) {
-            rafId = requestAnimationFrame(flushContent);
-          }
-        } else if (message.type === 'thinking') {
-          // AI is thinking/using tools - show thinking tip ABOVE streaming content
-          const thinkingMessage = message?.message || '正在思考...';
-          set({ thinkingTip: thinkingMessage });
-        } else if (message.type === 'speech_done') {
-          // Flush any pending RAF buffer before transitioning state
-          if (rafId !== null) {
-            cancelAnimationFrame(rafId);
-            rafId = null;
-          }
-
-          if (fullContent) {
-            // Normal case: keep streaming content visible during reactions
-            set({
-              isStreaming: false,
-              streamingContent: fullContent,
-              isProcessingReactions: true,
-              thinkingTip: '',
-            });
-          } else {
-            // Agent produced no content (error) — optimistically insert fallback record
-            const { records: curRecords, streamingSpeakerId: speakerId, characters: curChars, stage: curStage } = get();
+      await runSpeechStream(
+        stream,
+        {
+          token: (message) => {
+            if (!operations.isCurrent(operationKey, controller) || !appliesToSession(get, sessionId)) return;
+            fullContent += message.text || '';
+            if (rafId === null) rafId = requestAnimationFrame(flushContent);
+          },
+          thinking: (message) => {
+            if (operations.isCurrent(operationKey, controller) && appliesToSession(get, sessionId)) {
+              set({ thinkingTip: message.message || '正在思考...' });
+            }
+          },
+          speech_done: () => {
+            if (!operations.isCurrent(operationKey, controller) || !appliesToSession(get, sessionId)) return;
+            if (rafId !== null) {
+              cancelAnimationFrame(rafId);
+              rafId = null;
+            }
+            if (fullContent) {
+              set({
+                isStreaming: false,
+                streamingContent: fullContent,
+                isProcessingReactions: true,
+                thinkingTip: '',
+              });
+              return;
+            }
+            const {
+              records: currentRecords,
+              streamingSpeakerId: speakerId,
+              characters: currentCharacters,
+              stage: currentStage,
+            } = get();
             const fallbackRecord: GameRecord = {
               id: Date.now(),
               session_id: sessionId,
               speaker_id: speakerId || undefined,
-              speaker_name: curChars.find(c => c.character_id === speakerId)?.name || 'AI',
+              speaker_name: currentCharacters.find((character) => character.character_id === speakerId)?.name || 'AI',
               content: '（系统提示：AI角色出现未知错误，暂时无法正常发言。）',
               record_type: 'speech',
-              stage: curStage,
+              stage: currentStage,
               created_at: new Date().toISOString(),
             };
             set({
@@ -379,124 +324,118 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
               streamingSpeakerId: null,
               isProcessingReactions: true,
               thinkingTip: '',
-              records: [...curRecords, fallbackRecord],
+              records: [...currentRecords, fallbackRecord],
             });
-          }
-        } else if (message.type === 'done') {
-          // Flush RAF buffer
-          if (rafId !== null) {
-            cancelAnimationFrame(rafId);
-            rafId = null;
-          }
-          // All processing complete (speech + reactions broadcast)
-          let nextSpeakerId = message?.next_speaker_id || null;
-
-          // 检查是否有待发送的真人发言（自由发言阶段）
-          const { pendingHumanSpeech, stage, streamingContent: aiFinalContent, streamingSpeakerId: aiSpeakerId, records: currentRecords, humanCharacterId } = get();
-
-          if (stage === 'free_discussion' && pendingHumanSpeech) {
-            // 有待发送的真人发言
-
-            // 0. 乐观更新：立即将AI的最后发言和真人的发言添加到records
-            const optimisticRecords = [...currentRecords];
-            // 添加AI的最后一段发言
-            if (aiFinalContent && aiSpeakerId) {
-              const aiCharName = get().characters.find(c => c.character_id === aiSpeakerId)?.name || 'AI';
-              optimisticRecords.push({
-                id: Date.now(),
-                session_id: sessionId,
-                speaker_id: aiSpeakerId,
-                speaker_name: aiCharName,
-                content: aiFinalContent,
-                record_type: 'speech',
-                stage: stage,
-                created_at: new Date().toISOString(),
-              });
+          },
+          done: async (message) => {
+            if (rafId !== null) {
+              cancelAnimationFrame(rafId);
+              rafId = null;
             }
-            // 添加真人的发言
-            if (humanCharacterId) {
-              const humanCharName = get().characters.find(c => c.character_id === humanCharacterId)?.name || '你';
-              optimisticRecords.push({
-                id: Date.now() + 1,
-                session_id: sessionId,
-                speaker_id: humanCharacterId,
-                speaker_name: humanCharName,
-                content: pendingHumanSpeech,
-                record_type: 'speech',
-                stage: stage,
-                created_at: new Date().toISOString(),
+            if (!operations.isCurrent(operationKey, controller) || !appliesToSession(get, sessionId)) return;
+            let nextSpeakerId = message.next_speaker_id || null;
+            const {
+              pendingHumanSpeech,
+              stage,
+              streamingContent: aiFinalContent,
+              streamingSpeakerId: aiSpeakerId,
+              records: currentRecords,
+              humanCharacterId,
+            } = get();
+
+            if (stage === 'free_discussion' && pendingHumanSpeech) {
+              const optimisticRecords = [...currentRecords];
+              if (aiFinalContent && aiSpeakerId) {
+                const aiName = get().characters.find((character) => character.character_id === aiSpeakerId)?.name || 'AI';
+                optimisticRecords.push({
+                  id: Date.now(),
+                  session_id: sessionId,
+                  speaker_id: aiSpeakerId,
+                  speaker_name: aiName,
+                  content: aiFinalContent,
+                  record_type: 'speech',
+                  stage,
+                  created_at: new Date().toISOString(),
+                });
+              }
+              if (humanCharacterId) {
+                const humanName = get().characters.find((character) => character.character_id === humanCharacterId)?.name || '你';
+                optimisticRecords.push({
+                  id: Date.now() + 1,
+                  session_id: sessionId,
+                  speaker_id: humanCharacterId,
+                  speaker_name: humanName,
+                  content: pendingHumanSpeech,
+                  record_type: 'speech',
+                  stage,
+                  created_at: new Date().toISOString(),
+                });
+              }
+              set({
+                pendingHumanSpeech: null,
+                currentSpeakerId: null,
+                isStreaming: false,
+                streamingContent: '',
+                streamingSpeakerId: null,
+                isProcessingReactions: true,
+                thinkingTip: '',
+                records: optimisticRecords,
               });
-            }
 
-            // 1. 清除待发送状态和流式状态，设置reaction状态
-            set({
-              pendingHumanSpeech: null,
-              currentSpeakerId: null,
-              isStreaming: false,
-              streamingContent: '',
-              streamingSpeakerId: null,
-              isProcessingReactions: true,
-              thinkingTip: '',
-              records: optimisticRecords,
-            });
-
-            // 2. 发送真人发言（流式）
-            try {
-              const humanResponse = await speechApi.humanSpeakStream(sessionId, pendingHumanSpeech);
-              const humanStream = speechApi.processSSEStream(humanResponse);
-
-              for await (const humanMsg of humanStream) {
-                if (humanMsg.type === 'thinking') {
-                  set({ thinkingTip: humanMsg.message || '' });
-                } else if (humanMsg.type === 'done') {
-                  nextSpeakerId = humanMsg.next_speaker_id || null;
+              try {
+                const humanResponse = await speechApi.humanSpeakStream(
+                  sessionId,
+                  pendingHumanSpeech,
+                  controller.signal,
+                );
+                const humanStream = speechApi.processSSEStream(humanResponse, controller.signal);
+                await runSpeechStream(
+                  humanStream,
+                  {
+                    thinking: (humanMessage) => {
+                      if (operations.isCurrent(operationKey, controller) && appliesToSession(get, sessionId)) {
+                        set({ thinkingTip: humanMessage.message || '' });
+                      }
+                    },
+                    done: (humanMessage) => {
+                      nextSpeakerId = humanMessage.next_speaker_id || null;
+                    },
+                    error: (humanMessage) => {
+                      throw new Error(humanMessage.message || '待发送的真人发言失败');
+                    },
+                  },
+                  controller.signal,
+                );
+              } catch (error) {
+                if (!(error instanceof DOMException && error.name === 'AbortError')) {
+                  console.error('[ERROR] Pending human speech failed:', error);
                 }
               }
-            } catch (e) {
-              console.error('[ERROR] Pending human speech failed:', e);
             }
 
-            // 3. 重新加载状态
             const [historyResponse, state] = await Promise.all([
               gameApi.getGameHistory(sessionId),
               gameApi.getGameState(sessionId),
             ]);
+            if (!operations.isCurrent(operationKey, controller) || !appliesToSession(get, sessionId)) return;
             set({
               records: historyResponse.records,
+              currentSpeakerId: nextSpeakerId || state.current_speaker_id || null,
               speechQueue: state.speech_queue,
               playerStates: state.player_states,
-              currentSpeakerId: nextSpeakerId || state.current_speaker_id || null,
+              isStreaming: false,
+              streamingContent: '',
+              streamingSpeakerId: null,
+              isProcessingReactions: false,
+              thinkingTip: '',
             });
-            return;
-          }
-
-          // 正常处理：更新当前发言者为下一位
-          set({
-            currentSpeakerId: nextSpeakerId,
-            isStreaming: false,
-            streamingContent: '',
-            streamingSpeakerId: null,
-            isProcessingReactions: false,
-            thinkingTip: '',
-          });
-
-          // Reload history and state in background
-          const [historyResponse, state] = await Promise.all([
-            gameApi.getGameHistory(sessionId),
-            gameApi.getGameState(sessionId),
-          ]);
-          set({
-            records: historyResponse.records,
-            speechQueue: state.speech_queue,
-            playerStates: state.player_states,
-          });
-          return;
-        } else if (message.type === 'error') {
-          // Agent error — don't break, let the stream continue to speech_done/done
-          // so the game flow can advance to the next speaker with a fallback record
-          console.warn('Stream error (continuing):', (message as unknown as { message?: string }).message || message);
-        }
-      }
+          },
+          error: (message) => {
+            console.warn('Stream error (continuing):', message.message || message);
+          },
+        },
+        controller.signal,
+      );
       // Clean up any remaining RAF
       if (rafId !== null) {
         cancelAnimationFrame(rafId);
@@ -507,9 +446,9 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
       if (error instanceof DOMException && error.name === 'AbortError') return;
       console.error('Failed to trigger AI speak:', error);
     } finally {
-      _activeControllers.delete(`ai-speak-${characterId}`);
+      operations.finish(operationKey, controller);
       // Only update state if this controller wasn't aborted (i.e. still the active session)
-      if (!controller.signal.aborted) {
+      if (!controller.signal.aborted && appliesToSession(get, sessionId)) {
         set({ isStreaming: false, streamingContent: '', streamingSpeakerId: null, isProcessingReactions: false, thinkingTip: '' });
       }
     }

@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { STAGE_NAMES, type GameStage } from '@/types/game';
 
 interface StageTransitionOverlayProps {
@@ -36,22 +36,19 @@ export function StageTransitionOverlay({
   onComplete,
   autoDismissMs = 2000,
 }: StageTransitionOverlayProps) {
-  const [isVisible, setIsVisible] = useState(show);
-
   // 自动关闭
   useEffect(() => {
     if (show) {
-      setIsVisible(true);
       const timer = setTimeout(() => {
-        setIsVisible(false);
+        onComplete();
       }, autoDismissMs);
       return () => clearTimeout(timer);
     }
-  }, [show, autoDismissMs]);
+  }, [show, autoDismissMs, onComplete]);
 
   // 点击关闭
   const handleClick = () => {
-    setIsVisible(false);
+    onComplete();
   };
 
   // 动画完成后调用 onComplete
@@ -61,7 +58,7 @@ export function StageTransitionOverlay({
 
   return (
     <AnimatePresence onExitComplete={handleExitComplete}>
-      {isVisible && show && (
+      {show && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}

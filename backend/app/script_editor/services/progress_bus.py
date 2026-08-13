@@ -4,7 +4,6 @@ Progress Event Bus — SSE 进度推送
 """
 
 import asyncio
-import json
 import logging
 from typing import Any
 
@@ -20,7 +19,9 @@ def subscribe(thread_id: str) -> asyncio.Queue:
     if thread_id not in _subscribers:
         _subscribers[thread_id] = []
     _subscribers[thread_id].append(queue)
-    logger.debug(f"SSE subscriber added for thread {thread_id}, total: {len(_subscribers[thread_id])}")
+    logger.debug(
+        f"SSE subscriber added for thread {thread_id}, total: {len(_subscribers[thread_id])}"
+    )
     return queue
 
 

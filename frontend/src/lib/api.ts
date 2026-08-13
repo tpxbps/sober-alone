@@ -11,8 +11,9 @@ import type {
   StreamingMessage,
   LLMConfig,
 } from '@/types/game';
+import type { SystemCapabilities } from '@/types/capabilities';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+const API_BASE_URL = import.meta.env.VITE_API_URL || '/api/v1';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -20,6 +21,13 @@ const api = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+export const systemApi = {
+  getCapabilities: async (): Promise<SystemCapabilities> => {
+    const response = await api.get('/system/capabilities');
+    return response.data;
+  },
+};
 
 // ============ Script APIs ============
 export const scriptApi = {
@@ -43,10 +51,18 @@ export const gameApi = {
     // Convert ai_models to llm_configs format for backend
     const llmConfigs: Record<string, LLMConfig> | undefined = request.ai_models
       ? Object.fromEntries(
-          Object.entries(request.ai_models).map(([charId, modelId]) => [
-            charId,
-            { provider: modelId.split('-')[0] || 'stepfun', model: modelId },
-          ])
+          Object.entries(request.ai_models).map(([charId, modelId]) => {
+            const providerByModel: Record<string, string> = {
+              'deepseek-v4-flash': 'deepseek',
+              'step-3.5-flash': 'stepfun',
+              'qwen3.5-flash-2026-02-23': 'alibaba',
+              'doubao-seed-2-0-mini-260215': 'bytedance',
+            };
+            return [
+              charId,
+              { provider: providerByModel[modelId] || 'deepseek', model: modelId },
+            ];
+          })
         )
       : undefined;
 

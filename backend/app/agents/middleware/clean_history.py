@@ -11,9 +11,7 @@ from langgraph.runtime import Runtime
 
 
 @after_agent
-def clear_irrelevant_history_messages(
-    state: AgentState, runtime: Runtime
-) -> dict[str, Any] | None:
+def clear_irrelevant_history_messages(state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
     """
     清理Agent历史记录的中间件
 

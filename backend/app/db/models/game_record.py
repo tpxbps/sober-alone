@@ -5,11 +5,11 @@ GameRecord model - 游戏记录数据模型
 
 from __future__ import annotations
 
-from enum import Enum
 from datetime import datetime
-from typing import Optional, TYPE_CHECKING
+from enum import Enum
+from typing import TYPE_CHECKING
 
-from sqlalchemy import String, Integer, Text, ForeignKey, DateTime
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -38,41 +38,35 @@ class GameRecord(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     session_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("game_sessions.session_id"), nullable=False
+        String(36), ForeignKey("game_sessions.session_id", ondelete="CASCADE"), nullable=False
     )
 
     # 记录类型
-    record_type: Mapped[str] = mapped_column(
-        String(20), default=lambda: RecordType.SPEECH.value
-    )
+    record_type: Mapped[str] = mapped_column(String(20), default=lambda: RecordType.SPEECH.value)
 
     # 所属阶段和轮次
-    stage: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    stage: Mapped[str | None] = mapped_column(String(30), nullable=True)
     round_num: Mapped[int] = mapped_column(Integer, default=0)
 
     # 发言者信息 (不使用外键，直接存储ID和名称)
-    speaker_character_id: Mapped[Optional[str]] = mapped_column(
-        String(36), nullable=True
-    )
-    speaker_name: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    speaker_character_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    speaker_name: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     # 内容
-    raw_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    summary_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    raw_content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    summary_content: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # 额外元数据 (注意: 不能使用 'metadata' 作为列名，SQLAlchemy保留字)
-    extra_data: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    extra_data: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     # TTS 音频 URL（按需生成的音频文件路径）
-    audio_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    audio_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     # 时间戳
     timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
     # 关系
-    session: Mapped["GameSession"] = relationship(
-        "GameSession", back_populates="records"
-    )
+    session: Mapped[GameSession] = relationship("GameSession", back_populates="records")
 
     def __repr__(self):
         return f"<GameRecord(id={self.id}, type={self.record_type}, speaker={self.speaker_name})>"
@@ -90,9 +84,7 @@ class GameRecord(Base):
             "raw_content": self.raw_content,
             "summary_content": self.summary_content,
             "audio_url": self.audio_url,
-            "timestamp": (
-                self.timestamp.isoformat() if self.timestamp is not None else None
-            ),
+            "timestamp": (self.timestamp.isoformat() if self.timestamp is not None else None),
         }
 
     def to_display_dict(self):
@@ -116,7 +108,5 @@ class GameRecord(Base):
             ),
             "content": self.raw_content,
             "audio_url": self.audio_url,
-            "timestamp": (
-                self.timestamp.isoformat() if self.timestamp is not None else None
-            ),
+            "timestamp": (self.timestamp.isoformat() if self.timestamp is not None else None),
         }

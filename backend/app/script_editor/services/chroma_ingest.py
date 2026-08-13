@@ -4,7 +4,6 @@ ChromaDB Ingestion Service — 将角色剧本向量化存入 ChromaDB
 
 import logging
 import uuid
-from typing import List, Dict
 
 import chromadb
 from chromadb.config import Settings as ChromaSettings
@@ -78,12 +77,14 @@ def ingest_script(
             doc_id = f"{char_id}_chunk_{i}"
             all_ids.append(doc_id)
             all_documents.append(chunk)
-            all_metadatas.append({
-                "character_id": char_id,
-                "character_name": name,
-                "chunk_index": i,
-                "total_chunks": len(chunks),
-            })
+            all_metadatas.append(
+                {
+                    "character_id": char_id,
+                    "character_name": name,
+                    "chunk_index": i,
+                    "total_chunks": len(chunks),
+                }
+            )
 
     if not all_documents:
         logger.warning(f"No documents to ingest for script {script_id}")
@@ -127,12 +128,16 @@ async def ingest_script_async(
 ):
     """Async wrapper — runs ingest_script in a thread pool to avoid blocking the event loop."""
     import asyncio
+
     await asyncio.to_thread(
-        ingest_script, script_id, characters, character_scripts,
+        ingest_script,
+        script_id,
+        characters,
+        character_scripts,
     )
 
 
-def _chunk_text(text: str, chunk_size: int, overlap: int) -> List[str]:
+def _chunk_text(text: str, chunk_size: int, overlap: int) -> list[str]:
     """将文本按段落和大小分块"""
     chunks = []
 
@@ -153,7 +158,7 @@ def _chunk_text(text: str, chunk_size: int, overlap: int) -> List[str]:
             # 如果单个段落超过 chunk_size，进一步切分
             if len(para) > chunk_size:
                 for j in range(0, len(para), chunk_size - overlap):
-                    chunks.append(para[j:j + chunk_size])
+                    chunks.append(para[j : j + chunk_size])
                 current_chunk = ""
             else:
                 current_chunk = para

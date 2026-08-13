@@ -2,9 +2,9 @@
 review_by_llm node — 独立 LLM 审稿（自动步骤，无需用户确认）
 """
 
-from app.script_editor.state import ScriptGenState, STEP_REVIEW_BY_LLM
-from app.script_editor.prompts.templates import get_prompt
 from app.script_editor.nodes.utils import call_llm
+from app.script_editor.prompts.templates import get_prompt
+from app.script_editor.state import STEP_REVIEW_BY_LLM, ScriptGenState
 
 
 async def review_by_llm(state: ScriptGenState) -> dict:
@@ -20,7 +20,7 @@ async def review_by_llm(state: ScriptGenState) -> dict:
 
 ## 剧本大纲
 ---
-{state.get('outline', '')}
+{state.get("outline", "")}
 ---
 
 ## 角色列表
@@ -28,7 +28,7 @@ async def review_by_llm(state: ScriptGenState) -> dict:
 
 ## 初稿全文
 ---
-{state.get('first_draft', '')}
+{state.get("first_draft", "")}
 ---
 
 请从叙事质量、逻辑严谨性、角色设计、游戏性等维度给出详细审稿意见。

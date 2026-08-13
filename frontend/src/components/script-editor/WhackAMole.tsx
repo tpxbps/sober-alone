@@ -76,6 +76,7 @@ export function WhackAMole({ onClose, isModal = true }: WhackAMoleProps) {
   // Refs for latest state (avoid stale closures in interval)
   const molesRef = useRef(moles);
   const scoreRef = useRef(score);
+  const hitsRef = useRef(hits);
 
   // Keep refs in sync
   useEffect(() => {
@@ -84,6 +85,9 @@ export function WhackAMole({ onClose, isModal = true }: WhackAMoleProps) {
   useEffect(() => {
     scoreRef.current = score;
   }, [score]);
+  useEffect(() => {
+    hitsRef.current = hits;
+  }, [hits]);
 
   // Main game tick — single interval handles countdown, mole spawning, hiding, emoji cleanup
   useEffect(() => {
@@ -140,7 +144,7 @@ export function WhackAMole({ onClose, isModal = true }: WhackAMoleProps) {
           const activeCount = prev.filter((t) => t > 0).length;
           if (activeCount >= maxActive) return prev;
           const inactive = prev
-            .map((t, i) => (t === 0 && !hits[i] ? i : -1))
+            .map((t, i) => (t === 0 && !hitsRef.current[i] ? i : -1))
             .filter((i) => i >= 0);
           if (inactive.length === 0) return prev;
           const idx = inactive[Math.floor(Math.random() * inactive.length)];

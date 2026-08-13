@@ -412,6 +412,9 @@ export function ChatArea({
                           <span className="text-xs text-primary/60 font-medium">
                             系统消息
                           </span>
+                          <span className="text-[9px] text-muted-foreground/70">
+                            AI 生成语音
+                          </span>
                           <SpeakerIcon
                             state={sysSpeakerState}
                             onClick={() => handlePlaySystemAudio(record)}
@@ -532,6 +535,11 @@ export function ChatArea({
                             )
                           </span>
                         )
+                      )}
+                      {isAI && ttsEnabled && (
+                        <span className="ml-1 text-[9px] text-muted-foreground/60">
+                          AI 生成语音
+                        </span>
                       )}
                     </span>
                     <div

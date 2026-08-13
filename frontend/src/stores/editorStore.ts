@@ -55,7 +55,7 @@ function reconstructInterruptInfo(
     characters: (state.characters || []) as EditorInterruptInfo['characters'],
     character_scripts: state.character_scripts || {},
     review_opinion: state.review_opinion || '',
-    game_data_sections: state.game_data_sections || ({} as any),
+    game_data_sections: state.game_data_sections || {},
     prompt_used: '',
     rejected: step === 'safety_check' && !state.safety_passed,
   };
@@ -78,7 +78,6 @@ function reconstructInterruptInfo(
 
 interface EditorSession {
   threadId: string;
-  ownerUuid: string;
 }
 
 function loadSession(): EditorSession | null {
@@ -100,7 +99,6 @@ function clearSession() {
 interface EditorState {
   // Workflow state
   threadId: string | null;
-  ownerUuid: string | null;
   scriptId: string | null;
   scriptTitle: string;
   currentStep: string;
@@ -153,7 +151,6 @@ let _sseClose: (() => void) | null = null;
 
 export const useEditorStore = create<EditorState>((set, get) => ({
   threadId: null,
-  ownerUuid: null,
   scriptId: null,
   scriptTitle: '',
   currentStep: '',
@@ -173,19 +170,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     try {
       const result = await editorApi.startWorkflow(params);
 
-      // Save owner UUID to localStorage
-      if (result.owner_uuid) {
-        saveOwnerUuid(result.owner_uuid);
-      }
-
       // Persist session
-      if (result.thread_id && result.owner_uuid) {
-        saveSession({ threadId: result.thread_id, ownerUuid: result.owner_uuid });
+      if (result.thread_id) {
+        saveSession({ threadId: result.thread_id });
       }
 
       set({
         threadId: result.thread_id,
-        ownerUuid: result.owner_uuid,
         scriptId: result.script_id,
         scriptTitle: result.script_title,
         currentStep: result.current_step,
@@ -245,8 +236,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
       // Check if convert/asset progress has incomplete tasks — keep SSE open for retries
       const { convertProgress: cp, assetProgress: ap } = get();
-      const convertHasIncomplete = cp?.phases?.some((p) => p.tasks?.some((t) => t.status !== "complete"));
-      const assetHasIncomplete = ap?.phases?.some((p) => p.tasks?.some((t) => t.status !== "complete"));
+      const convertHasIncomplete = cp?.phases?.some((p) => p.tasks?.some((t) => !["complete", "skipped"].includes(t.status)));
+      const assetHasIncomplete = ap?.phases?.some((p) => p.tasks?.some((t) => !["complete", "skipped"].includes(t.status)));
 
       if (convertHasIncomplete || assetHasIncomplete) {
         // Re-open SSE with completion-handling callbacks so retries can trigger state transitions
@@ -293,7 +284,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const session = loadSession();
     if (!session) return false;
 
-    set({ threadId: session.threadId, ownerUuid: session.ownerUuid });
+    set({ threadId: session.threadId });
 
     try {
       const result = await editorApi.getState(session.threadId);
@@ -319,7 +310,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return true;
     } catch {
       clearSession();
-      set({ threadId: null, ownerUuid: null });
+      set({ threadId: null });
       return false;
     }
   },
@@ -437,7 +428,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     clearSession();
     set({
       threadId: null,
-      ownerUuid: null,
       scriptId: null,
       scriptTitle: '',
       currentStep: '',
@@ -577,29 +567,3 @@ const OPTIMISTIC_STEP_MAP: Record<string, string> = {
   review_game_data: "generate_assets",
   safety_check: "generate_assets",
 };
-
-// === localStorage helpers for owner UUIDs ===
-
-const OWNER_UUID_KEY = 'scriptOwnerIds';
-
-function saveOwnerUuid(uuid: string) {
-  const existing: string[] = JSON.parse(localStorage.getItem(OWNER_UUID_KEY) || '[]');
-  if (!existing.includes(uuid)) {
-    existing.push(uuid);
-    localStorage.setItem(OWNER_UUID_KEY, JSON.stringify(existing));
-  }
-}
-
-export function getOwnerUuids(): string[] {
-  return JSON.parse(localStorage.getItem(OWNER_UUID_KEY) || '[]');
-}
-
-export function removeOwnerUuid(uuid: string) {
-  const existing: string[] = JSON.parse(localStorage.getItem(OWNER_UUID_KEY) || '[]');
-  const updated = existing.filter((id) => id !== uuid);
-  localStorage.setItem(OWNER_UUID_KEY, JSON.stringify(updated));
-}
-
-export function addOwnerUuid(uuid: string) {
-  saveOwnerUuid(uuid);
-}

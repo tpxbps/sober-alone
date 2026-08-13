@@ -7,8 +7,6 @@ import { GamePage } from '@/screens/GamePage';
 import { ScriptEditorPage } from '@/screens/ScriptEditorPage';
 import { useGameStore } from '@/stores/gameStore';
 import { gameApi } from '@/lib/api';
-import { useBGM } from '@/hooks/useBGM';
-import { initClickSound } from '@/lib/clickSound';
 
 type AppScreen = 'home' | 'game' | 'editor';
 
@@ -21,13 +19,7 @@ function App() {
   const [isRestoring, setIsRestoring] = useState(false);
 
   const { reset, initializeGame } = useGameStore();
-  const { playLobby, stop } = useBGM();
   const [searchParams, setSearchParams] = useSearchParams();
-
-  // Initialize click sound effect (once)
-  useEffect(() => {
-    initClickSound();
-  }, []);
 
   // Try to restore session from URL or localStorage on mount
   useEffect(() => {
@@ -69,23 +61,15 @@ function App() {
     restoreSession();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Play lobby BGM when on home screen
-  useEffect(() => {
-    if (currentScreen === 'home' && !isRestoring) {
-      playLobby();
-    }
-  }, [currentScreen, isRestoring, playLobby]);
-
   // Handle starting a new game from homepage
   const handleStartGame = useCallback((newSessionId: string) => {
-    stop(); // stop lobby BGM, GamePage will play stage BGM
     setSessionId(newSessionId);
     setCurrentScreen('game');
     // Update URL
     setSearchParams({ session: newSessionId });
     // Save to localStorage
     localStorage.setItem(STORAGE_KEY, newSessionId);
-  }, [setSearchParams, stop]);
+  }, [setSearchParams]);
 
   // Handle opening script editor
   const handleOpenEditor = useCallback(() => {

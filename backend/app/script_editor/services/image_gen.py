@@ -13,7 +13,7 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 # 图片存储目录
-IMAGE_ROOT = Path(__file__).parent.parent.parent.parent / "data" / "images" / "scripts"
+IMAGE_ROOT = settings.image_dir / "scripts"
 
 
 def _get_doubao_client() -> AsyncOpenAI:
@@ -24,8 +24,7 @@ def _get_doubao_client() -> AsyncOpenAI:
 
 
 ATMOSPHERE = (
-    "整体视觉氛围：偏暗冷色调，营造神秘悬疑感，光线昏暗朦胧，"
-    "凸显迷茫与未知意味，电影级画面质感。"
+    "整体视觉氛围：偏暗冷色调，营造神秘悬疑感，光线昏暗朦胧，凸显迷茫与未知意味，电影级画面质感。"
 )
 
 
@@ -119,7 +118,7 @@ async def _generate_image(
             prompt=prompt,
             size=size,  # type: ignore[arg-type]
             response_format="url",
-            extra_body={"watermark": False},
+            extra_body={"watermark": True},
         )
 
         if not response.data:

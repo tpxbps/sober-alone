@@ -3,17 +3,18 @@ TTSService - TTS 语音合成服务
 提供静态音频合成（mimo-v2.5-tts）和按需合成（step-tts-mini）
 """
 
-import httpx
 import logging
 import struct
 from pathlib import Path
+
+import httpx
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 # 音频文件存储根目录
-AUDIO_ROOT = Path(__file__).parent.parent.parent / "data" / "audio"
+AUDIO_ROOT = settings.audio_dir
 
 # === 文本分块工具 ===
 
@@ -89,10 +90,7 @@ def concatenate_wav(wav_chunks: list[bytes], silence_ms: int = 300) -> bytes:
 
     # 解析第一个 chunk 的 WAV 头获取格式参数
     header = wav_chunks[0][:44]
-    num_channels = struct.unpack_from("<H", header, 22)[0]
     sample_rate = struct.unpack_from("<I", header, 24)[0]
-    bits_per_sample = struct.unpack_from("<H", header, 34)[0]
-    byte_rate = struct.unpack_from("<I", header, 28)[0]
     block_align = struct.unpack_from("<H", header, 32)[0]
 
     # 提取所有 chunk 的 PCM 数据（跳过 44 字节 WAV 头）
@@ -197,16 +195,12 @@ class TTSService:
             return None
 
         if len(chunks) == 1:
-            return await _mimo_single_call(
-                chunks[0], style_prompt, voice, base_url, api_key
-            )
+            return await _mimo_single_call(chunks[0], style_prompt, voice, base_url, api_key)
 
         # 多块：逐块生成，然后拼接 WAV
         wav_parts: list[bytes] = []
         for i, chunk in enumerate(chunks):
-            logger.info(
-                f"synthesize_static: chunk {i + 1}/{len(chunks)} ({len(chunk)} chars)"
-            )
+            logger.info(f"synthesize_static: chunk {i + 1}/{len(chunks)} ({len(chunk)} chars)")
             wav = await _mimo_single_call(chunk, style_prompt, voice, base_url, api_key)
             if wav is None:
                 logger.error(f"synthesize_static: chunk {i + 1}/{len(chunks)} failed")
@@ -247,9 +241,7 @@ class TTSService:
         for i, chunk in enumerate(chunks):
             mp3 = await _step_single_call(chunk, voice_id, base_url, api_key)
             if mp3 is None:
-                logger.error(
-                    f"synthesize_on_demand: chunk {i + 1}/{len(chunks)} failed"
-                )
+                logger.error(f"synthesize_on_demand: chunk {i + 1}/{len(chunks)} failed")
                 return None
             mp3_parts.append(mp3)
 
@@ -317,7 +309,11 @@ class TTSService:
             actual_duration = get_wav_duration(file_path)
             expected_duration = estimate_tts_duration(text)
             max_duration = expected_duration * 4
-            if actual_duration is not None and actual_duration > max_duration and actual_duration > 30:
+            if (
+                actual_duration is not None
+                and actual_duration > max_duration
+                and actual_duration > 30
+            ):
                 logger.warning(
                     f"Existing audio has abnormal duration {actual_duration:.1f}s "
                     f"(expected ~{expected_duration:.1f}s). Regenerating: {file_path}"
@@ -362,9 +358,7 @@ async def _mimo_single_call(
     if style_prompt:
         messages.append({"role": "user", "content": style_prompt})
     else:
-        messages.append(
-            {"role": "user", "content": "请自然地朗读以下内容，语速适中，语气自然。"}
-        )
+        messages.append({"role": "user", "content": "请自然地朗读以下内容，语速适中，语气自然。"})
     messages.append({"role": "assistant", "content": text})
 
     # 长文本生成耗时更久，按字符数动态调整超时
@@ -404,24 +398,18 @@ async def _mimo_single_call(
             elif isinstance(audio_obj, str):
                 return _b64.b64decode(audio_obj)
             else:
-                logger.warning(
-                    f"Unexpected mimo-v2.5-tts audio field: {type(audio_obj)}"
-                )
+                logger.warning(f"Unexpected mimo-v2.5-tts audio field: {type(audio_obj)}")
                 return None
 
     except httpx.HTTPStatusError as e:
-        logger.error(
-            f"MiMo TTS HTTP error: {e.response.status_code} - {e.response.text}"
-        )
+        logger.error(f"MiMo TTS HTTP error: {e.response.status_code} - {e.response.text}")
         return None
     except Exception as e:
         logger.error(f"MiMo TTS error: {e}")
         return None
 
 
-async def _step_single_call(
-    text: str, voice_id: str, base_url: str, api_key: str
-) -> bytes | None:
+async def _step_single_call(text: str, voice_id: str, base_url: str, api_key: str) -> bytes | None:
     """单次 step-tts-mini HTTP API 调用"""
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
@@ -444,9 +432,7 @@ async def _step_single_call(
             return None
 
     except httpx.HTTPStatusError as e:
-        logger.error(
-            f"StepFun TTS HTTP error: {e.response.status_code} - {e.response.text}"
-        )
+        logger.error(f"StepFun TTS HTTP error: {e.response.status_code} - {e.response.text}")
         return None
     except Exception as e:
         logger.error(f"StepFun TTS error: {e}")

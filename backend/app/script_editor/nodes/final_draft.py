@@ -2,9 +2,9 @@
 generate_final_draft node — 根据审稿意见生成终稿
 """
 
-from app.script_editor.state import ScriptGenState, STEP_GENERATE_FINAL_DRAFT
-from app.script_editor.prompts.templates import get_prompt
 from app.script_editor.nodes.utils import call_llm
+from app.script_editor.prompts.templates import get_prompt
+from app.script_editor.state import STEP_GENERATE_FINAL_DRAFT, ScriptGenState
 
 
 async def generate_final_draft(state: ScriptGenState) -> dict:
@@ -15,12 +15,14 @@ async def generate_final_draft(state: ScriptGenState) -> dict:
     characters_summary = ""
     for c in state.get("characters", []):
         name = c.get("name", "?")
-        characters_summary += f"- {name}: {c.get('gender', '?')}, {c.get('age', '?')}岁, {c.get('occupation', '?')}\n"
+        characters_summary += (
+            f"- {name}: {c.get('gender', '?')}, {c.get('age', '?')}岁, {c.get('occupation', '?')}\n"
+        )
 
     # 构建审稿意见部分（AI + 人类）
     review_section = f"""## AI审稿意见
 ---
-{state.get('review_opinion', '')}
+{state.get("review_opinion", "")}
 ---"""
 
     human_review = state.get("human_review", "")
@@ -36,7 +38,7 @@ async def generate_final_draft(state: ScriptGenState) -> dict:
 
 ## 剧本大纲
 ---
-{state.get('outline', '')}
+{state.get("outline", "")}
 ---
 
 ## 角色列表
@@ -44,7 +46,7 @@ async def generate_final_draft(state: ScriptGenState) -> dict:
 
 ## 初稿全文
 ---
-{state.get('first_draft', '')}
+{state.get("first_draft", "")}
 ---
 
 {review_section}

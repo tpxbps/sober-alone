@@ -7,13 +7,13 @@ submit_final_vote tool
 """
 
 import asyncio
-from pydantic import BaseModel, Field
 from datetime import datetime
 
-from langchain.tools import tool, ToolRuntime
+from langchain.tools import ToolRuntime, tool
 from langgraph.config import get_stream_writer
-from app.agents.context import get_db_session
+from pydantic import BaseModel, Field
 
+from app.agents.context import get_db_session
 
 # 允许调用此工具的阶段
 ALLOWED_STAGES = ["vote"]
@@ -30,9 +30,7 @@ class VoteInput(BaseModel):
 
 
 @tool(args_schema=VoteInput)
-async def submit_final_vote(
-    suspect_name: str, reasoning: str, runtime: ToolRuntime
-) -> str:
+async def submit_final_vote(suspect_name: str, reasoning: str, runtime: ToolRuntime) -> str:
     """
     提交最终投票。
 
@@ -80,7 +78,7 @@ async def submit_final_vote(
         print(f"投票失败：找不到名为「{suspect_name}」的角色。请确认角色名称正确。")
         return f"投票失败：找不到名为「{suspect_name}」的角色。请确认角色名称正确。"
 
-    from app.db.models import PlayerState, GameSession, GameRecord, RecordType
+    from app.db.models import GameRecord, GameSession, PlayerState, RecordType
 
     # 使用 per-session 锁确保并发投票的 DB 读写安全
     lock = _vote_locks.setdefault(session_id, asyncio.Lock())

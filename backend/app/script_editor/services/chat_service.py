@@ -6,7 +6,8 @@ Chat Service — AI 助手聊天服务
 
 import json
 import logging
-from typing import Any, AsyncGenerator
+from collections.abc import AsyncGenerator
+from typing import Any
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import (
@@ -228,7 +229,7 @@ def get_game_data_overview() -> str:
         for i, stage in enumerate(game_flow):
             t = stage.get("type", "?")
             title = stage.get("stage_title", t)
-            flow.append(f"  {i+1}. {title} ({t})")
+            flow.append(f"  {i + 1}. {title} ({t})")
         parts.append(f"【游戏流程】({len(game_flow)}个阶段)\n" + "\n".join(flow))
     if gds.get("truth_reveal"):
         parts.append(f"【真相揭晓】{gds['truth_reveal'][:500]}")
@@ -306,7 +307,7 @@ async def stream_chat_response(
     model: str = "deepseek-v4-flash",
     chat_session_id: str = "default",
     workflow_state: dict | None = None,
-) -> AsyncGenerator[str, None]:
+) -> AsyncGenerator[str]:
     """
     流式生成聊天回复（使用 create_agent + checkpointer 自动管理历史）
 
@@ -398,7 +399,5 @@ async def stream_chat_response(
         yield 'data: {"type": "done"}\n\n'
     except Exception as e:
         logger.error(f"Chat streaming error: {e}", exc_info=True)
-        error_data = json.dumps(
-            {"type": "error", "message": str(e)}, ensure_ascii=False
-        )
+        error_data = json.dumps({"type": "error", "message": str(e)}, ensure_ascii=False)
         yield f"data: {error_data}\n\n"

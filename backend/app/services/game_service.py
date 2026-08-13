@@ -4,34 +4,26 @@ GameService - 游戏服务层
 """
 
 import logging
-from typing import Dict, List, Optional, Any
-from datetime import datetime
 import uuid
-
-logger = logging.getLogger(__name__)
+from datetime import datetime
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import (
-    GameSession,
-    GameStatus,
-    GameStage,
-    PlayerState,
-    GameRecord,
-)
-from app.agents import (
-    get_agent_manager,
-    remove_agent_manager,
-)
+from app.agents import get_agent_manager, remove_agent_manager
+from app.db.models import GameRecord, GameSession, GameStage, GameStatus, PlayerState
 from app.game import GameFlowController
+from app.services.game_runtime import FlowControllerRegistry, GameRuntimeRepository
+from app.services.voting import VotingService
 
+logger = logging.getLogger(__name__)
 
 # 全局流程控制器缓存 (解决跨请求状态持久化问题)
-_flow_controllers: Dict[str, GameFlowController] = {}
+_flow_controllers = FlowControllerRegistry()
 
 
-def get_flow_controller(session_id: str) -> Optional[GameFlowController]:
+def get_flow_controller(session_id: str) -> GameFlowController | None:
     """获取流程控制器"""
     return _flow_controllers.get(session_id)
 
@@ -44,7 +36,7 @@ def remove_flow_controller(session_id: str):
 
 async def ensure_flow_controller(
     session_id: str, db_session: AsyncSession
-) -> Optional[GameFlowController]:
+) -> GameFlowController | None:
     """
     确保流程控制器存在，如果不存在则从数据库重建
 
@@ -68,41 +60,9 @@ async def ensure_flow_controller(
     if not game_session:
         return None
 
-    # 获取剧本数据
-    from sqlalchemy import text
-    import json
-
-    script_result = await db_session.execute(
-        text("SELECT * FROM scripts WHERE script_id = :script_id"),
-        {"script_id": game_session.script_id},
-    )
-    script_row = script_result.fetchone()
-    if not script_row:
+    script_data = await GameRuntimeRepository(db_session).load_script(game_session.script_id)
+    if not script_data:
         return None
-
-    script_data = dict(script_row._mapping) if hasattr(script_row, "_mapping") else {}
-
-    # 获取角色数据
-    char_result = await db_session.execute(
-        text("SELECT * FROM characters WHERE script_id = :script_id"),
-        {"script_id": game_session.script_id},
-    )
-    character_rows = char_result.fetchall()
-    script_data["characters"] = [
-        dict(char._mapping) if hasattr(char, "_mapping") else {}
-        for char in character_rows
-    ]
-
-    # 解析 JSON 字段
-    if "game_full_process" in script_data and isinstance(
-        script_data["game_full_process"], str
-    ):
-        try:
-            script_data["game_full_process"] = json.loads(
-                script_data["game_full_process"]
-            )
-        except json.JSONDecodeError:
-            script_data["game_full_process"] = []
 
     # 获取或创建 Agent 管理器
     agent_manager = get_agent_manager(session_id, game_session.script_id)
@@ -140,6 +100,7 @@ class GameService:
 
     def __init__(self, db_session: AsyncSession):
         self.db = db_session
+        self.runtime_repository = GameRuntimeRepository(db_session)
         # 使用模块级别的缓存 _flow_controllers 而非实例变量
         # 以确保跨请求的状态持久化
 
@@ -147,8 +108,8 @@ class GameService:
         self,
         script_id: str,
         human_character_id: str,
-        llm_configs: Optional[Dict[str, Dict[str, Optional[str]]]] = None,
-    ) -> Dict[str, Any]:
+        llm_configs: dict[str, dict[str, str | None]] | None = None,
+    ) -> dict[str, Any]:
         """
         创建新游戏
 
@@ -182,8 +143,7 @@ class GameService:
             human_character_id=human_character_id,
             player_threads={},
             player_types={
-                cid: ("human" if cid == human_character_id else "ai")
-                for cid in character_ids
+                cid: ("human" if cid == human_character_id else "ai") for cid in character_ids
             },
             speech_queue=[],
             votes={},
@@ -193,9 +153,7 @@ class GameService:
 
         # 初始化Agent管理器（传入LLM配置）
         agent_manager = get_agent_manager(session_id, script_id)
-        await agent_manager.initialize_agents(
-            characters, human_character_id, llm_configs
-        )
+        await agent_manager.initialize_agents(characters, human_character_id, llm_configs)
 
         # 创建流程控制器
         flow_controller = GameFlowController(
@@ -235,51 +193,11 @@ class GameService:
             },
         }
 
-    async def _get_script_data(self, script_id: str) -> Optional[Dict[str, Any]]:
+    async def _get_script_data(self, script_id: str) -> dict[str, Any] | None:
         """获取剧本数据"""
-        # 从game_data.db读取
-        import json
-        from sqlalchemy import text
+        return await self.runtime_repository.load_script(script_id)
 
-        result = await self.db.execute(
-            text("SELECT * FROM scripts WHERE script_id = :script_id"),
-            {"script_id": script_id},
-        )
-        script_row = result.fetchone()
-
-        if not script_row:
-            return None
-
-        # 获取角色数据
-        result = await self.db.execute(
-            text("SELECT * FROM characters WHERE script_id = :script_id"),
-            {"script_id": script_id},
-        )
-        character_rows = result.fetchall()
-
-        # 转换为字典
-        script_data = (
-            dict(script_row._mapping) if hasattr(script_row, "_mapping") else {}
-        )
-        script_data["characters"] = [
-            dict(char._mapping) if hasattr(char, "_mapping") else {}
-            for char in character_rows
-        ]
-
-        # 解析 JSON 字段
-        if "game_full_process" in script_data and isinstance(
-            script_data["game_full_process"], str
-        ):
-            try:
-                script_data["game_full_process"] = json.loads(
-                    script_data["game_full_process"]
-                )
-            except json.JSONDecodeError:
-                script_data["game_full_process"] = []
-
-        return script_data
-
-    async def get_game_state(self, session_id: str) -> Dict[str, Any]:
+    async def get_game_state(self, session_id: str) -> dict[str, Any]:
         """
         获取游戏状态
 
@@ -335,8 +253,7 @@ class GameService:
                     "profile": c.get("profile"),
                     "avatar_url": c.get("avatar_url"),
                     "voice_id": c.get("voice_id"),
-                    "is_human": c.get("character_id")
-                    == game_session.human_character_id,
+                    "is_human": c.get("character_id") == game_session.human_character_id,
                     "character_script": (
                         c.get("character_script")
                         if c.get("character_id") == game_session.human_character_id
@@ -379,8 +296,7 @@ class GameService:
                     "occupation": c.get("occupation"),
                     "profile": c.get("profile"),
                     "avatar_url": c.get("avatar_url"),
-                    "is_human": c.get("character_id")
-                    == game_session.human_character_id,
+                    "is_human": c.get("character_id") == game_session.human_character_id,
                     "character_script": (
                         c.get("character_script")
                         if c.get("character_id") == game_session.human_character_id
@@ -400,7 +316,7 @@ class GameService:
             "vote_results": game_session.vote_result or None,
         }
 
-    async def _get_player_states(self, session_id: str) -> List[Dict[str, Any]]:
+    async def _get_player_states(self, session_id: str) -> list[dict[str, Any]]:
         """获取所有玩家状态"""
         result = await self.db.execute(
             select(PlayerState).where(PlayerState.session_id == session_id)
@@ -408,9 +324,7 @@ class GameService:
         states = result.scalars().all()
         return [s.to_dict() for s in states]
 
-    async def process_human_speech(
-        self, session_id: str, content: str
-    ) -> Dict[str, Any]:
+    async def process_human_speech(self, session_id: str, content: str) -> dict[str, Any]:
         """
         处理真人玩家发言
 
@@ -476,9 +390,7 @@ class GameService:
             current_stage != GameStage.FREE_DISCUSSION.value
             and current_speaker != human_character_id
         ):
-            speaker_name = flow_controller.agent_manager.get_character_name(
-                current_speaker
-            )
+            speaker_name = flow_controller.agent_manager.get_character_name(current_speaker)
             yield f"data: {_json.dumps({'type': 'error', 'message': f'当前是{speaker_name}的发言回合'})}\n\n"
             return
 
@@ -538,9 +450,7 @@ class GameService:
         agent_error = False
 
         try:
-            async for chunk in flow_controller.generate_ai_speech(
-                character_id, self.db
-            ):
+            async for chunk in flow_controller.generate_ai_speech(character_id, self.db):
                 # chunk 是 dict，包含 type 和相应字段
                 if isinstance(chunk, dict):
                     chunk_type = chunk.get("type", "unknown")
@@ -562,9 +472,7 @@ class GameService:
 
                     elif chunk_type == "error":
                         agent_error = True
-                        logger.error(
-                            f"Agent error for {character_id}: {chunk.get('message', '')}"
-                        )
+                        logger.error(f"Agent error for {character_id}: {chunk.get('message', '')}")
         except Exception as e:
             agent_error = True
             logger.error(f"AI speech stream error: {e}")
@@ -620,7 +528,7 @@ class GameService:
         # 发送结束标记，包含下一位发言者信息
         yield f"data: {json.dumps({'type': 'done', **next_speaker_info}, ensure_ascii=False)}\n\n"
 
-    async def advance_stage(self, session_id: str) -> Dict[str, Any]:
+    async def advance_stage(self, session_id: str) -> dict[str, Any]:
         """
         推进游戏流程
 
@@ -638,8 +546,9 @@ class GameService:
             transition = await flow_controller.advance_stage(self.db)
 
             # 持久化游戏会话状态变更到数据库
-            from sqlalchemy import text
             import json
+
+            from sqlalchemy import text
 
             await self.db.execute(
                 text(
@@ -699,7 +608,7 @@ class GameService:
 
     async def submit_vote(
         self, session_id: str, suspect_id: str, suspect_name: str, reasoning: str = ""
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         提交真人玩家投票
 
@@ -730,9 +639,11 @@ class GameService:
             return {"success": False, "error": "当前不是投票阶段"}
 
         try:
-            from sqlalchemy import select
-            from app.db.models import PlayerState, GameSession, GameRecord, RecordType
             from datetime import datetime
+
+            from sqlalchemy import select
+
+            from app.db.models import GameRecord, GameSession, PlayerState, RecordType
 
             # 检查是否已投票
             result = await self.db.execute(
@@ -777,9 +688,7 @@ class GameService:
             voter_name = ""
             fc = _flow_controllers.get(session_id)
             if fc:
-                voter_name = (
-                    fc.agent_manager.get_character_name(human_character_id) or ""
-                )
+                voter_name = fc.agent_manager.get_character_name(human_character_id) or ""
             record = GameRecord(
                 session_id=session_id,
                 record_type=RecordType.VOTE.value,
@@ -804,7 +713,7 @@ class GameService:
 
     async def _collect_single_ai_vote(
         self, flow_controller, character_id: str, agent, db_session=None
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         收集单个AI玩家的投票
 
@@ -835,12 +744,9 @@ class GameService:
                         "current_round": flow_controller.session.current_round,
                         "db_session": session,
                         "character_name_map": {
-                            c["character_id"]: c.get("name", "")
-                            for c in flow_controller.characters
+                            c["character_id"]: c.get("name", "") for c in flow_controller.characters
                         },
-                        "character_names": [
-                            c.get("name", "") for c in flow_controller.characters
-                        ],
+                        "character_names": [c.get("name", "") for c in flow_controller.characters],
                     },
                     "vote",
                 ):
@@ -850,6 +756,7 @@ class GameService:
 
             # 查询数据库获取投票结果
             from sqlalchemy import select
+
             from app.db.models import PlayerState
 
             result = await session.execute(
@@ -872,7 +779,7 @@ class GameService:
         except Exception as e:
             return {"success": False, "message": str(e)}
 
-    async def get_vote_results(self, session_id: str) -> Dict[str, Any]:
+    async def get_vote_results(self, session_id: str) -> dict[str, Any]:
         """
         获取投票结果统计
 
@@ -883,6 +790,7 @@ class GameService:
             dict: 投票结果统计，包含每位玩家的投票详情
         """
         from sqlalchemy import select
+
         from app.db.models import GameSession
 
         try:
@@ -894,33 +802,7 @@ class GameService:
             if not game_session or not game_session.votes:
                 return {}
 
-            # 统计票数 - 以 suspect_id (character_id) 为 key
-            vote_count = {}
-            for _, vote_info in game_session.votes.items():
-                suspect_id = vote_info.get("suspect_id")
-                if suspect_id:
-                    vote_count[suspect_id] = vote_count.get(suspect_id, 0) + 1
-
-            # 找出最高票（支持平票）
-            max_votes = 0
-            tied_suspects: list[str] = []
-            for sid, count in vote_count.items():
-                if count > max_votes:
-                    max_votes = count
-                    tied_suspects = [sid]
-                elif count == max_votes and count > 0:
-                    tied_suspects.append(sid)
-
-            final_suspect = tied_suspects[0] if tied_suspects else None
-
-            return {
-                "vote_count": vote_count,
-                "total_votes": len(game_session.votes),
-                "final_suspect": final_suspect,
-                "final_suspect_votes": max_votes,
-                "tied_suspects": tied_suspects,
-                "details": game_session.votes,
-            }
+            return VotingService.summarize(game_session.votes)
 
         except Exception:
             return {}
@@ -928,7 +810,8 @@ class GameService:
     async def _record_abstain(self, flow_controller, character_id: str, db_session):
         """将AI玩家记录为弃票"""
         from sqlalchemy.orm.attributes import flag_modified
-        from app.db.models import GameSession, GameRecord, RecordType
+
+        from app.db.models import GameRecord, GameSession, RecordType
 
         char_name = flow_controller.agent_manager.get_character_name(character_id)
         try:
@@ -974,7 +857,7 @@ class GameService:
         except Exception:
             await db_session.rollback()
 
-    async def finalize_voting(self, session_id: str) -> Dict[str, Any]:
+    async def finalize_voting(self, session_id: str) -> dict[str, Any]:
         """
         完成投票并推进到复盘阶段
 
@@ -1011,6 +894,7 @@ class GameService:
 
         if ai_agents:
             import asyncio
+
             from app.db.session import AsyncSessionLocal
 
             async def _collect_vote_task(char_id: str, info):
@@ -1019,18 +903,13 @@ class GameService:
                     # 检查该AI是否已经投票
                     ps_result = await vote_session.execute(
                         select(PlayerState).where(
-                            PlayerState.session_id
-                            == flow_controller.session.session_id,
+                            PlayerState.session_id == flow_controller.session.session_id,
                             PlayerState.character_id == char_id,
                         )
                     )
                     player_state = ps_result.scalar_one_or_none()
                     if player_state and player_state.has_voted:
                         return {"success": True}
-
-                    char_name = flow_controller.agent_manager.get_character_name(
-                        char_id
-                    )
 
                     try:
                         result = await self._collect_single_ai_vote(
@@ -1049,7 +928,7 @@ class GameService:
                     asyncio.gather(*tasks, return_exceptions=True),
                     timeout=120,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 results = [TimeoutError("voting timeout")] * len(ai_agents)
 
             # 顺序处理失败（弃票）
@@ -1084,9 +963,7 @@ class GameService:
         await self.db.commit()
 
         # 4. 构建复盘消息
-        review_message = self._build_review_message(
-            vote_results, flow_controller.script_data
-        )
+        review_message = self._build_review_message(vote_results, flow_controller.script_data)
 
         # 将复盘消息持久化到数据库，确保刷新后仍可显示
         review_record = GameRecord(
@@ -1103,8 +980,9 @@ class GameService:
 
         # 持久化阶段变更到数据库（flow_controller.session 是 detached ORM 对象，
         # 需要通过 raw SQL 确保写入）
-        from sqlalchemy import text as sql_text
         import json as json_mod
+
+        from sqlalchemy import text as sql_text
 
         await self.db.execute(
             sql_text(
@@ -1143,7 +1021,7 @@ class GameService:
         }
 
     def _build_review_message(
-        self, vote_results: Dict[str, Any], script_data: Dict[str, Any]
+        self, vote_results: dict[str, Any], script_data: dict[str, Any]
     ) -> str:
         """
         构建复盘阶段的消息
@@ -1198,9 +1076,7 @@ class GameService:
             if final_suspect_votes == total_votes:
                 lines.append(f"\n最终，大家一致指认「{final_suspect_name}」为凶手。")
             elif len(tied_suspects) > 1:
-                tied_names = "」和「".join(
-                    id_to_name.get(sid, sid) for sid in tied_suspects
-                )
+                tied_names = "」和「".join(id_to_name.get(sid, sid) for sid in tied_suspects)
                 lines.append(
                     f"\n最终，「{tied_names}」以 {final_suspect_votes} 票平票，共同成为最大嫌疑人。"
                 )
@@ -1216,9 +1092,7 @@ class GameService:
 
         return "\n\n".join(lines)
 
-    async def get_game_records(
-        self, session_id: str, limit: int = 50
-    ) -> List[Dict[str, Any]]:
+    async def get_game_records(self, session_id: str, limit: int = 50) -> list[dict[str, Any]]:
         """
         获取游戏记录
 
@@ -1239,13 +1113,13 @@ class GameService:
 
         return [d for r in records if (d := r.to_display_dict()) is not None]
 
-    async def abandon_session(self, session_id: str) -> Dict[str, Any]:
+    async def abandon_session(self, session_id: str) -> dict[str, Any]:
         """放弃游戏会话（用户中途退出时调用，清理资源）"""
         remove_agent_manager(session_id)
         remove_flow_controller(session_id)
         return {"success": True, "message": "游戏会话已放弃"}
 
-    async def end_game(self, session_id: str) -> Dict[str, Any]:
+    async def end_game(self, session_id: str) -> dict[str, Any]:
         """
         结束游戏
 

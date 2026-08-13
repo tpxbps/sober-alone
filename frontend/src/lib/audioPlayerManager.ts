@@ -322,7 +322,7 @@ class AudioPlayerManager {
     }
     if (this.mediaSource) {
       if (this.mediaSource.readyState === 'open') {
-        try { this.mediaSource.endOfStream(); } catch {}
+        try { this.mediaSource.endOfStream(); } catch { /* already closed */ }
       }
       this.mediaSource = null;
     }

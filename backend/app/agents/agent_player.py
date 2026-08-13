@@ -12,24 +12,26 @@ AgentPlayer - AI角色扮演智能体核心类
 7. 使用 structured output 进行反应分析
 """
 
-from typing import Optional, AsyncIterator, Dict, Any, List, Union, cast
-from pydantic import BaseModel, Field
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from typing import Any, Union, cast
 
 from langchain.agents import create_agent
-from langchain.messages import HumanMessage, AIMessageChunk, AIMessage
-from langgraph.checkpoint.memory import InMemorySaver
 from langchain.agents.middleware import (
-    SummarizationMiddleware,
     ModelRetryMiddleware,
+    SummarizationMiddleware,
     ToolRetryMiddleware,
 )
+from langchain.messages import AIMessageChunk, HumanMessage
 from langchain_core.messages import SystemMessage
+from langgraph.checkpoint.memory import InMemorySaver
 
-from app.core.config import settings
-from app.core.llm_factory import create_llm, create_summary_llm, SupportedModel
+from app.agents.agent_prompts import build_role_system_prompt
+from app.agents.context import clear_db_session, set_db_session
+from app.agents.reaction import SpeechReaction, build_reaction_system_prompt
 from app.agents.state import GameAgentState
-from app.agents.context import set_db_session, clear_db_session
+from app.core.config import settings
+from app.core.llm_factory import SupportedModel, create_llm, create_summary_llm
 
 # 瓶颈 step-3.5-flash: 256K
 SUMMARY_TRIGGER_TOKENS = 200000
@@ -68,70 +70,6 @@ class StreamError:
 
 # 流式输出的联合类型
 StreamChunk = Union[StreamToken, StreamProgress, StreamError]
-
-
-# ========================================
-# Structured Output Models
-# ========================================
-
-
-class SuspicionValue(BaseModel):
-    """怀疑值结构"""
-
-    score: float = Field(
-        default=0.0,
-        ge=0.0,
-        le=1.0,
-        description="怀疑程度 0.0-1.0",
-    )
-    reason: str = Field(
-        default="",
-        description="怀疑理由",
-    )
-
-
-class SuspectedByValue(BaseModel):
-    """被怀疑值结构"""
-
-    score: float = Field(
-        default=0.0,
-        ge=0.0,
-        le=1.0,
-        description="被怀疑程度 0.0-1.0",
-    )
-    reason: str = Field(
-        default="",
-        description="被怀疑理由",
-    )
-    need_response: bool = Field(
-        default=False,
-        description="是否需要回应",
-    )
-
-
-class SpeechReaction(BaseModel):
-    """
-    对其他玩家发言的反应分析结果
-
-    注意: 角色名称必须是当前剧本中存在的角色名称
-    """
-
-    my_suspicion_graph: Dict[str, SuspicionValue] = Field(
-        default_factory=dict,
-        description="你对其他玩家的怀疑，key为角色名称(必须为剧本中的角色)，value包含score和reason",
-    )
-    my_suspected_by: Dict[str, SuspectedByValue] = Field(
-        default_factory=dict,
-        description="谁怀疑了你，key为角色名称(必须为剧本中的角色)，value包含score、reason和need_response",
-    )
-    main_perspective: str = Field(
-        default="",
-        description=(
-            "对该发言的详细要点提取。关注并返回发言中的所有关键信息，可能包括以下方面："
-            "1)对其他玩家的指控或怀疑 2)为自己辩护的论点 3)提供的不在场证明或时间线声明 "
-            "4)引用的线索或证据 5)提出的关键问题 6)其他值得注意的策略性发言。"
-        ),
-    )
 
 
 class AgentPlayer:
@@ -173,10 +111,11 @@ class AgentPlayer:
         script_id: str,
         session_id: str,
         character_name: str = "",
-        llm_provider: Optional[str] = None,
-        llm_model: Optional[str] = None,
-        middleware: Optional[List[Any]] = None,
-        checkpointer: Optional[Any] = None,
+        personal_script: str = "",
+        llm_provider: str | None = None,
+        llm_model: str | None = None,
+        middleware: list[Any] | None = None,
+        checkpointer: Any | None = None,
     ):
         """
         初始化AgentPlayer
@@ -197,6 +136,8 @@ class AgentPlayer:
         self.script_id = script_id
         self.session_id = session_id
         self.system_prompt = system_prompt
+        self.personal_script = personal_script
+        self.rag_enabled = bool(settings.ZHIPUAI_API_KEY)
 
         # LLM配置
         self.llm_provider = llm_provider or settings.DEFAULT_LLM_PROVIDER
@@ -209,9 +150,7 @@ class AgentPlayer:
         self._middleware = middleware or []
         self._checkpointer = checkpointer or InMemorySaver()
         self._agent: Any = None  # 主角色扮演Agent实例
-        self._reaction_structured: Any = (
-            None  # 结构化输出 LLM（直接 with_structured_output）
-        )
+        self._reaction_structured: Any = None  # 结构化输出 LLM（直接 with_structured_output）
 
         # 创建Agent
         self._create_agent()
@@ -230,9 +169,7 @@ class AgentPlayer:
             )
         except Exception:
             # 如果初始化失败，使用默认模型
-            return create_llm(
-                temperature=0.8, timeout=90, max_retries=2, disable_thinking=True
-            )
+            return create_llm(temperature=0.8, timeout=90, max_retries=2, disable_thinking=True)
 
     def _init_summary_model(self):
         """初始化用于摘要的轻量级LLM模型"""
@@ -246,8 +183,7 @@ class AgentPlayer:
         """
         创建主LangChain Agent
         """
-        from app.agents.tools import ALL_TOOLS
-        from app.agents.middleware import clear_irrelevant_history_messages
+        from app.agents.tools import get_tools
 
         model = self._init_model()
         summary_model = self._init_summary_model()
@@ -281,7 +217,7 @@ class AgentPlayer:
         # 创建Agent，使用 state_schema
         self._agent = create_agent(
             model=model,
-            tools=ALL_TOOLS,
+            tools=get_tools(rag_enabled=self.rag_enabled),
             middleware=middleware,
             checkpointer=self._checkpointer,
             system_prompt=full_system_prompt,
@@ -341,6 +277,9 @@ class AgentPlayer:
    - 暗示或威胁了什么？
    - 其他重要的策略性发言（如转移话题、制造混乱、拉拢联盟等）
 """
+        self._reaction_system_prompt = build_reaction_system_prompt(
+            self.system_prompt, self.personal_script
+        )
 
     def _build_system_prompt(self) -> str:
         """
@@ -349,47 +288,7 @@ class AgentPlayer:
         Returns:
             str: 完整的系统提示词
         """
-        role_base_prompt = self.system_prompt
-
-        # 添加工具使用说明
-        full_system_prompt = f"""
-现在，你将作为一名剧本杀角色进行一场完整的剧本杀游戏游戏。你的目标是根据你的角色设定和当前游戏阶段，做出合理的发言和反应，以达到你的游戏目标。
-你扮演的角色关键设定如下：
-
-{role_base_prompt}
-
-【工具使用说明】
-你可以使用以下工具来辅助你的游戏：
-
-1. recall_personal_script_memory(query) - 检索你的剧本记忆
-   当你需要回忆时间线、人物关系、不在场证明或其他关键细节等具体个人剧本细节时使用
-   所有阶段可用
-
-2. update_role_reaction(suspicion_updates) - 更新心理反应
-   在线索分析阶段分析系统推送的线索，同时传入你对其他玩家的怀疑程度更新（如果有）
-   仅在线索分析阶段可用
-
-3. submit_final_vote(suspect_name, reasoning) - 提交投票
-   仅在投票阶段使用，指认凶手并说明理由
-
-PS：你的心理状态（怀疑图谱、被谁怀疑、其他玩家的关键发言等）会在每次发言前自动注入到提示词中。
-
-
-注意（重要）：
-1. 始终保持在角色中，不要跳出角色
-2. 你的发言应该符合角色的身份、背景和动机
-3. 如果你是凶手，要自然地隐藏自己的身份
-4. 发言要有策略性，为自己的目标服务
-
-【发言风格要求】
-你是一位经验丰富的剧本杀玩家，发言请遵循以下原则：
-1. 语言简洁有力，**每段发言需要尽量控制字数**，拒绝长篇大论
-2. 直击要点，避免空洞铺垫、自我重复和冗余陈述
-3. 保持必要的观点表达、局势分析、怀疑/辩解等核心要素——精简不等于缺失
-4. 必须回应他人关键观点，不要自说自话；如果有人怀疑你，要有针对性地回应
-5. 使用口语化表达，像真人玩家那样自然交流，避免书面化长句和过度修饰
-"""
-        return full_system_prompt
+        return build_role_system_prompt(self.system_prompt, self.personal_script, self.rag_enabled)
 
     def _get_stage_prompt(self, stage: str) -> str:
         """
@@ -464,7 +363,7 @@ submit_final_vote(suspect_name="角色全名", reasoning="1-2句投票理由")
         }
         return stage_prompts.get(stage, "")
 
-    async def _build_knowledge_context(self, game_state: Dict[str, Any]) -> str:
+    async def _build_knowledge_context(self, game_state: dict[str, Any]) -> str:
         """
         构建玩家知识上下文，用于注入到发言提示词中
 
@@ -487,6 +386,7 @@ submit_final_vote(suspect_name="角色全名", reasoning="1-2句投票理由")
 
         try:
             from sqlalchemy import select
+
             from app.db.models import PlayerState
 
             # 获取当前玩家的状态
@@ -513,9 +413,7 @@ submit_final_vote(suspect_name="角色全名", reasoning="1-2句投票理由")
                 for target_name, data in suspicion_graph.items():
                     score = data.get("score", 0)
                     reason = data.get("reason", "")
-                    suspicion_lines.append(
-                        f"  - {target_name}: 怀疑度 {score:.1f}，理由: {reason}"
-                    )
+                    suspicion_lines.append(f"  - {target_name}: 怀疑度 {score:.1f}，理由: {reason}")
                 parts.append("【我怀疑的人】\n" + "\n".join(suspicion_lines))
 
             # 2. 被怀疑记录
@@ -540,9 +438,7 @@ submit_final_vote(suspect_name="角色全名", reasoning="1-2句投票理由")
                     if perspective:
                         perspective_lines.append(f"  - {speaker_name}: {perspective}\n")
                 if perspective_lines:
-                    parts.append(
-                        "【其他玩家发言要点】\n" + "\n".join(perspective_lines)
-                    )
+                    parts.append("【其他玩家发言要点】\n" + "\n".join(perspective_lines))
 
             if parts:
                 return "【你的心理状态记录】\n" + "\n\n".join(parts)
@@ -553,9 +449,7 @@ submit_final_vote(suspect_name="角色全名", reasoning="1-2句投票理由")
             print(f"Error building knowledge context: {e}")
             return ""
 
-    async def speak(
-        self, game_state: Dict[str, Any], stage: str
-    ) -> AsyncIterator[StreamChunk]:
+    async def speak(self, game_state: dict[str, Any], stage: str) -> AsyncIterator[StreamChunk]:
         """
         推送系统消息，让AI角色发言(流式输出)
 
@@ -637,9 +531,7 @@ submit_final_vote(suspect_name="角色全名", reasoning="1-2句投票理由")
                         # 处理 content_blocks - 只提取 text 类型的内容
                         if hasattr(token, "content_blocks") and token.content_blocks:
                             text_blocks = [
-                                b
-                                for b in token.content_blocks
-                                if b.get("type") == "text"
+                                b for b in token.content_blocks if b.get("type") == "text"
                             ]
                             for block in text_blocks:
                                 text_content = block.get("text", "")
@@ -739,7 +631,7 @@ submit_final_vote(suspect_name="角色全名", reasoning="1-2句投票理由")
             main_perspective="",
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
         return {
             "character_id": self.character_id,

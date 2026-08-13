@@ -5,22 +5,24 @@ Review (interrupt) nodes — 用户确认/编辑各步骤内容
 from langgraph.types import interrupt
 
 from app.script_editor.state import (
-    ScriptGenState,
-    STEP_REVIEW_OUTLINE,
-    STEP_REVIEW_FIRST_DRAFT,
     STEP_REVIEW_FINAL,
+    STEP_REVIEW_FIRST_DRAFT,
     STEP_REVIEW_GAME_DATA,
+    STEP_REVIEW_OUTLINE,
+    ScriptGenState,
 )
 
 
 def review_outline(state: ScriptGenState) -> dict:
     """用户审阅大纲 (interrupt)"""
-    user_response = interrupt({
-        "step": STEP_REVIEW_OUTLINE,
-        "step_label": "大纲审阅",
-        "generated_content": state.get("outline", ""),
-        "prompt_used": state.get("prompts", {}).get("generate_outline", ""),
-    })
+    user_response = interrupt(
+        {
+            "step": STEP_REVIEW_OUTLINE,
+            "step_label": "大纲审阅",
+            "generated_content": state.get("outline", ""),
+            "prompt_used": state.get("prompts", {}).get("generate_outline", ""),
+        }
+    )
 
     action = user_response.get("action", "confirm")
     content = user_response.get("content", state.get("outline", ""))
@@ -34,13 +36,15 @@ def review_outline(state: ScriptGenState) -> dict:
 
 def review_first_draft(state: ScriptGenState) -> dict:
     """用户审阅初稿 (interrupt)"""
-    user_response = interrupt({
-        "step": STEP_REVIEW_FIRST_DRAFT,
-        "step_label": "初稿审阅",
-        "generated_content": state.get("first_draft", ""),
-        "characters": state.get("characters", []),
-        "prompt_used": state.get("prompts", {}).get("generate_first_draft", ""),
-    })
+    user_response = interrupt(
+        {
+            "step": STEP_REVIEW_FIRST_DRAFT,
+            "step_label": "初稿审阅",
+            "generated_content": state.get("first_draft", ""),
+            "characters": state.get("characters", []),
+            "prompt_used": state.get("prompts", {}).get("generate_first_draft", ""),
+        }
+    )
 
     action = user_response.get("action", "confirm")
     content = user_response.get("content", state.get("first_draft", ""))
@@ -56,13 +60,15 @@ def review_first_draft(state: ScriptGenState) -> dict:
 
 def review_final(state: ScriptGenState) -> dict:
     """用户审阅终稿 (interrupt) — 展示AI审稿意见+真人审稿+终稿"""
-    user_response = interrupt({
-        "step": STEP_REVIEW_FINAL,
-        "step_label": "审稿修订",
-        "generated_content": state.get("final_draft", ""),
-        "review_opinion": state.get("review_opinion", ""),
-        "prompt_used": state.get("prompts", {}).get("generate_final_draft", ""),
-    })
+    user_response = interrupt(
+        {
+            "step": STEP_REVIEW_FINAL,
+            "step_label": "审稿修订",
+            "generated_content": state.get("final_draft", ""),
+            "review_opinion": state.get("review_opinion", ""),
+            "prompt_used": state.get("prompts", {}).get("generate_final_draft", ""),
+        }
+    )
 
     action = user_response.get("action", "confirm")
     content = user_response.get("content", state.get("final_draft", ""))

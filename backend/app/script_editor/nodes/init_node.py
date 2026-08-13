@@ -4,11 +4,11 @@ init_workflow node — 初始化工作流状态
 
 import uuid
 
-from app.script_editor.state import (
-    ScriptGenState,
-    STEP_INIT,
-)
 from app.script_editor.prompts.defaults import DEFAULT_PROMPTS
+from app.script_editor.state import (
+    STEP_INIT,
+    ScriptGenState,
+)
 
 
 def init_workflow(state: ScriptGenState) -> dict:
@@ -16,7 +16,6 @@ def init_workflow(state: ScriptGenState) -> dict:
     初始化工作流：设置默认值和 UUID
     """
     script_id = str(uuid.uuid4())
-    owner_uuid = str(uuid.uuid4())
 
     # 加载默认提示词
     default_prompts = dict(DEFAULT_PROMPTS)
@@ -27,7 +26,6 @@ def init_workflow(state: ScriptGenState) -> dict:
 
     return {
         "script_id": script_id,
-        "owner_uuid": owner_uuid,
         "current_step": STEP_INIT,
         "prompts": merged_prompts,
         "player_count": state.get("player_count", 4),

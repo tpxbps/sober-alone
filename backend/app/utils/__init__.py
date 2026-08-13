@@ -3,8 +3,8 @@
 """
 
 from app.utils.web_logger import (
-    get_api_logger,
     APICallLogger,
+    get_api_logger,
 )
 
 __all__ = [

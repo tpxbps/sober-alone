@@ -3,9 +3,9 @@ AgentManager - 多Agent管理器
 管理游戏中所有AI角色的Agent实例
 """
 
-from typing import Dict, List, Optional, Any, cast
-from dataclasses import dataclass
 import asyncio
+from dataclasses import dataclass
+from typing import Any, cast
 
 from app.agents.agent_player import AgentPlayer
 from app.core.config import settings
@@ -17,10 +17,10 @@ class AgentInfo:
 
     character_id: str
     character_name: str
-    agent: Optional[AgentPlayer]
+    agent: AgentPlayer | None
     is_human: bool = False
-    llm_provider: Optional[str] = None
-    llm_model: Optional[str] = None
+    llm_provider: str | None = None
+    llm_model: str | None = None
 
 
 class AgentManager:
@@ -45,15 +45,15 @@ class AgentManager:
         """
         self.session_id = session_id
         self.script_id = script_id
-        self.agents: Dict[str, AgentInfo] = {}
-        self.human_character_id: Optional[str] = None
+        self.agents: dict[str, AgentInfo] = {}
+        self.human_character_id: str | None = None
 
     async def initialize_agents(
         self,
-        characters: List[Dict[str, Any]],
+        characters: list[dict[str, Any]],
         human_character_id: str,
-        llm_configs: Optional[Dict[str, Dict[str, Optional[str]]]] = None,
-    ) -> Dict[str, AgentPlayer]:
+        llm_configs: dict[str, dict[str, str | None]] | None = None,
+    ) -> dict[str, AgentPlayer]:
         """
         初始化所有Agent
 
@@ -79,10 +79,11 @@ class AgentManager:
 
             # 获取该角色的LLM配置
             char_llm_config = llm_configs.get(character_id, {})
-            llm_provider = char_llm_config.get(
-                "provider", settings.DEFAULT_LLM_PROVIDER
-            )
+            llm_provider = char_llm_config.get("provider", settings.DEFAULT_LLM_PROVIDER)
             llm_model = char_llm_config.get("model")
+            if not llm_provider or not settings.get_api_key(llm_provider):
+                llm_provider = settings.DEFAULT_LLM_PROVIDER
+                llm_model = settings.get_llm_model_name(llm_provider)
 
             if not is_human:
                 # 创建AI Agent
@@ -92,6 +93,7 @@ class AgentManager:
                     script_id=self.script_id,
                     session_id=self.session_id,
                     character_name=character_name,
+                    personal_script=char.get("character_script", ""),
                     llm_provider=llm_provider,
                     llm_model=llm_model,
                 )
@@ -117,7 +119,7 @@ class AgentManager:
 
         return {cid: info.agent for cid, info in self.agents.items() if info.agent}
 
-    def get_agent(self, character_id: str) -> Optional[AgentPlayer]:
+    def get_agent(self, character_id: str) -> AgentPlayer | None:
         """
         获取指定角色的Agent实例
 
@@ -132,7 +134,7 @@ class AgentManager:
             return info.agent
         return None
 
-    def get_all_ai_agents(self) -> List[AgentPlayer]:
+    def get_all_ai_agents(self) -> list[AgentPlayer]:
         """
         获取所有AI Agent实例
 
@@ -167,7 +169,7 @@ class AgentManager:
         info = self.agents.get(character_id)
         return info.is_human if info else False
 
-    def get_llm_info(self, character_id: str) -> Dict[str, Optional[str]]:
+    def get_llm_info(self, character_id: str) -> dict[str, str | None]:
         """
         获取角色的LLM配置信息
 
@@ -186,7 +188,7 @@ class AgentManager:
         self,
         speaker_id: str,
         content: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         广播发言给所有其他AI Agent
 
@@ -209,9 +211,7 @@ class AgentManager:
             if char_id != speaker_id and info.agent:
                 agent_ids.append(char_id)
                 agent_tasks.append(
-                    self._get_reaction_with_timeout(
-                        char_id, info.agent, speaker_name, content
-                    )
+                    self._get_reaction_with_timeout(char_id, info.agent, speaker_name, content)
                 )
 
         if agent_tasks:
@@ -236,7 +236,7 @@ class AgentManager:
         speaker_name: str,
         content: str,
         timeout: float = 120.0,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         带超时的获取单个Agent的反应
 
@@ -257,22 +257,20 @@ class AgentManager:
             )
             # 将 SpeechReaction 转换为 dict
             if hasattr(result, "model_dump"):
-                return cast(Dict[str, Any], result.model_dump())
+                return cast(dict[str, Any], result.model_dump())
             elif hasattr(result, "dict"):
-                return cast(Dict[str, Any], result.dict())
+                return cast(dict[str, Any], result.dict())
             elif isinstance(result, dict):
                 return result
             else:
                 # 最后的兜底：尝试转换为dict
-                return cast(Dict[str, Any], dict(result))
-        except asyncio.TimeoutError:
+                return cast(dict[str, Any], dict(result))
+        except TimeoutError:
             return {"error": f"Reaction timed out after {timeout}s"}
         except Exception as e:
             return {"error": str(e)}
 
-    async def make_ai_speak(
-        self, character_id: str, game_state: Dict[str, Any], stage: str
-    ):
+    async def make_ai_speak(self, character_id: str, game_state: dict[str, Any], stage: str):
         """
         让指定AI角色发言
 
@@ -295,7 +293,7 @@ class AgentManager:
             async for chunk in agent.speak(game_state, stage):
                 yield chunk
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
         return {
             "session_id": self.session_id,
@@ -315,7 +313,7 @@ class AgentManager:
 
 
 # 全局Agent管理器缓存
-_agent_managers: Dict[str, AgentManager] = {}
+_agent_managers: dict[str, AgentManager] = {}
 
 
 def get_agent_manager(session_id: str, script_id: str | None = None) -> AgentManager:

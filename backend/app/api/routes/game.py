@@ -3,15 +3,15 @@ Game API routes
 游戏相关API端点
 """
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.services.game_service import GameService
-
 
 router = APIRouter(prefix="/game", tags=["game"])
 
@@ -22,11 +22,11 @@ router = APIRouter(prefix="/game", tags=["game"])
 class LLMConfig(BaseModel):
     """单个角色的LLM配置"""
 
-    provider: Optional[str] = Field(
+    provider: str | None = Field(
         None,
         description="LLM提供商 (stepfun/deepseek/alibaba/bytedance)，为空时使用默认提供商",
     )
-    model: Optional[str] = Field(None, description="模型名称，为空时使用默认值")
+    model: str | None = Field(None, description="模型名称，为空时使用默认值")
 
 
 class GameCreateRequest(BaseModel):
@@ -34,7 +34,7 @@ class GameCreateRequest(BaseModel):
 
     script_id: str = Field(..., description="剧本ID")
     human_character_id: str = Field(..., description="真人玩家选择的角色ID")
-    llm_configs: Optional[Dict[str, LLMConfig]] = Field(
+    llm_configs: dict[str, LLMConfig] | None = Field(
         None,
         description="可选的角色LLM配置，格式: {character_id: {provider: str, model: str}}",
     )
@@ -44,13 +44,13 @@ class GameCreateResponse(BaseModel):
     """创建游戏响应"""
 
     success: bool
-    session_id: Optional[str] = None
-    status: Optional[str] = None
-    current_stage: Optional[str] = None
-    current_speaker: Optional[str] = None
-    characters: Optional[List[Dict[str, Any]]] = None
-    llm_configs: Optional[Dict[str, Dict[str, Optional[str]]]] = None
-    error: Optional[str] = None
+    session_id: str | None = None
+    status: str | None = None
+    current_stage: str | None = None
+    current_speaker: str | None = None
+    characters: list[dict[str, Any]] | None = None
+    llm_configs: dict[str, dict[str, str | None]] | None = None
+    error: str | None = None
 
 
 class SpeechRequest(BaseModel):
@@ -120,9 +120,7 @@ async def get_game_state(session_id: str, db: AsyncSession = Depends(get_db)):
     result = await game_service.get_game_state(session_id)
 
     if not result.get("success"):
-        raise HTTPException(
-            status_code=404, detail=result.get("error", "游戏会话不存在")
-        )
+        raise HTTPException(status_code=404, detail=result.get("error", "游戏会话不存在"))
 
     return result
 
@@ -179,9 +177,7 @@ async def ai_speech(
     game_service = GameService(db)
 
     async def generate():
-        async for chunk in game_service.process_ai_speech_stream(
-            session_id, character_id
-        ):
+        async for chunk in game_service.process_ai_speech_stream(session_id, character_id):
             yield chunk
 
     return StreamingResponse(generate(), media_type="text/event-stream")
@@ -211,9 +207,7 @@ async def advance_stage(
 
 
 @router.post("/{session_id}/vote")
-async def submit_vote(
-    session_id: str, request: VoteRequest, db: AsyncSession = Depends(get_db)
-):
+async def submit_vote(session_id: str, request: VoteRequest, db: AsyncSession = Depends(get_db)):
     """
     提交真人玩家投票
 
@@ -258,9 +252,7 @@ async def finalize_voting(session_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{session_id}/records")
-async def get_game_records(
-    session_id: str, limit: int = 50, db: AsyncSession = Depends(get_db)
-):
+async def get_game_records(session_id: str, limit: int = 50, db: AsyncSession = Depends(get_db)):
     """
     获取游戏记录
 
@@ -335,14 +327,14 @@ async def stream_tts_audio(
     - **session_id**: 游戏会话 ID
     - **record_id**: 游戏记录 ID
     """
-    from sqlalchemy import select, text as sql_text
+    from sqlalchemy import select
+    from sqlalchemy import text as sql_text
+
     from app.db.models import GameRecord
     from app.services.streaming_tts import StreamingTTSSession
 
     # 获取记录
-    result = await db.execute(
-        select(GameRecord).where(GameRecord.id == request.record_id)
-    )
+    result = await db.execute(select(GameRecord).where(GameRecord.id == request.record_id))
     record = result.scalar_one_or_none()
 
     if not record:
@@ -361,9 +353,7 @@ async def stream_tts_audio(
     voice_id = default_male_voice
     if record.speaker_character_id:
         char_result = await db.execute(
-            sql_text(
-                "SELECT voice_id, gender FROM characters WHERE character_id = :cid"
-            ),
+            sql_text("SELECT voice_id, gender FROM characters WHERE character_id = :cid"),
             {"cid": record.speaker_character_id},
         )
         char_row = char_result.fetchone()
@@ -404,6 +394,7 @@ async def stream_tts_audio(
 
         except Exception as e:
             import logging
+
             logging.getLogger(__name__).error(f"TTS stream error: {e}")
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
         finally:
@@ -424,16 +415,9 @@ async def list_scripts(db: AsyncSession = Depends(get_db)):
     """
     from sqlalchemy import text
 
-    # Ensure is_ai_generated column exists (migration for existing DBs)
-    try:
-        await db.execute(text("ALTER TABLE scripts ADD COLUMN is_ai_generated BOOLEAN DEFAULT 0"))
-        await db.commit()
-    except Exception:
-        await db.rollback()
-
     result = await db.execute(
         text(
-            "SELECT script_id, title, overview, tags, difficulty, player_count, cover_image_url, owner_uuid, is_ai_generated, estimated_duration FROM scripts"
+            "SELECT script_id, title, overview, tags, difficulty, player_count, cover_image_url, is_ai_generated, estimated_duration FROM scripts"
         )
     )
     scripts = result.fetchall()
@@ -449,9 +433,8 @@ async def list_scripts(db: AsyncSession = Depends(get_db)):
                 "difficulty": row[4],
                 "player_count": row[5],
                 "cover_image_url": row[6],
-                "owner_uuid": row[7],
-                "is_ai_generated": bool(row[8]) if row[8] is not None else False,
-                "estimated_duration": row[9] if row[9] else 0,
+                "is_ai_generated": bool(row[7]) if row[7] is not None else False,
+                "estimated_duration": row[8] if row[8] else 0,
             }
             for row in scripts
         ],

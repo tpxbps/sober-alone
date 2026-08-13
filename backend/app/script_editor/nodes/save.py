@@ -5,10 +5,11 @@ generate_assets node — 生成图片、语音、向量数据（带细粒度进�
 
 import json
 import logging
-import threading
 import uuid
 
-from app.script_editor.state import ScriptGenState, STEP_GENERATE_ASSETS, STEP_SAVE
+from app.core.config import settings
+from app.script_editor.services.progress_registry import asset_progress_registry
+from app.script_editor.state import STEP_GENERATE_ASSETS, STEP_SAVE, ScriptGenState
 
 logger = logging.getLogger(__name__)
 
@@ -25,65 +26,38 @@ def _calc_estimated_duration(state: ScriptGenState) -> int:
 
 # === 细粒度进度跟踪 ===
 
-_asset_progress: dict[str, dict] = {}
-_progress_lock = threading.Lock()
-# Map script_id -> thread_id for SSE publishing
-_script_thread_map: dict[str, str] = {}
-
 
 def register_script_thread(script_id: str, thread_id: str):
     """由 API 层调用，注册 script_id → thread_id 映射"""
-    _script_thread_map[script_id] = thread_id
+    asset_progress_registry.register_thread(script_id, thread_id)
 
 
 def _init_asset_progress(script_id: str, phases: list[dict]):
     """初始化任务树，所有任务为 pending 状态"""
-    with _progress_lock:
-        _asset_progress[script_id] = {
-            "phases": phases,
-            "isComplete": False,
-        }
+    asset_progress_registry.init(script_id, phases)
     _publish_asset_progress(script_id)
 
 
-def _update_task_status(script_id: str, task_id: str, status: str):
+def _update_task_status(script_id: str, task_id: str, status: str, reason: str = ""):
     """更新单个任务状态"""
-    with _progress_lock:
-        progress = _asset_progress.get(script_id)
-        if not progress:
-            return
-        for phase in progress["phases"]:
-            for task in phase.get("tasks", []):
-                if task["id"] == task_id:
-                    task["status"] = status
-                    break
+    asset_progress_registry.update_task(script_id, task_id, status, reason)
     _publish_asset_progress(script_id)
 
 
 def _mark_progress_complete(script_id: str):
     """标记所有进度为完成"""
-    with _progress_lock:
-        if script_id in _asset_progress:
-            _asset_progress[script_id]["isComplete"] = True
+    asset_progress_registry.mark_complete(script_id)
     _publish_asset_progress(script_id)
 
 
 def get_asset_progress(script_id: str) -> dict | None:
     """获取资产生成进度"""
-    with _progress_lock:
-        return _asset_progress.get(script_id)
+    return asset_progress_registry.snapshot(script_id)
 
 
 def _publish_asset_progress(script_id: str):
     """通过 SSE 发布 asset 进度"""
-    thread_id = _script_thread_map.get(script_id)
-    if not thread_id:
-        return
-    from app.script_editor.services.progress_bus import publish
-
-    with _progress_lock:
-        progress = _asset_progress.get(script_id)
-    publish(thread_id, "asset_progress", progress)
+    asset_progress_registry.publish(script_id)
 
 
 # === save_to_database (先于 generate_assets，在安全审查通过后) ===
@@ -92,7 +66,9 @@ def _publish_asset_progress(script_id: str):
 async def save_to_database(state: ScriptGenState) -> dict:
     """将最终数据保存到数据库"""
     import re
+
     import aiosqlite
+
     from app.core.config import settings
 
     script_id = state.get("script_id", str(uuid.uuid4()))
@@ -102,9 +78,7 @@ async def save_to_database(state: ScriptGenState) -> dict:
     game_data_sections = state.get("game_data_sections", {})
 
     # 优先使用 game_data_sections 中的数据（用户可能编辑过）
-    game_full_process = game_data_sections.get(
-        "game_flow", state.get("game_full_process", [])
-    )
+    game_full_process = game_data_sections.get("game_flow", state.get("game_full_process", []))
     full_truth = game_data_sections.get("full_truth", state.get("full_truth", ""))
     free_speech_limits = game_data_sections.get(
         "free_speech_limits", state.get("free_speech_limits", [2, 2])
@@ -138,16 +112,6 @@ async def save_to_database(state: ScriptGenState) -> dict:
     # tags: 使用 AI 生成的标签
     tags = game_data_sections.get("tags", "AI创作,剧本杀")
 
-    # 确保 is_ai_generated 列存在
-    try:
-        async with aiosqlite.connect(db_path) as db:
-            await db.execute(
-                "ALTER TABLE scripts ADD COLUMN is_ai_generated BOOLEAN DEFAULT 0"
-            )
-            await db.commit()
-    except Exception:
-        pass  # 列已存在
-
     try:
         async with aiosqlite.connect(db_path) as db:
             # 插入 scripts 记录
@@ -155,8 +119,8 @@ async def save_to_database(state: ScriptGenState) -> dict:
                 """INSERT OR REPLACE INTO scripts
                 (script_id, title, overview, description, tags, difficulty, player_count,
                  estimated_duration, game_full_process, full_truth, cover_image_url,
-                 free_speech_limits, owner_uuid, is_ai_generated)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 free_speech_limits, is_ai_generated)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     script_id,
                     state.get("script_title", "未命名剧本"),
@@ -170,7 +134,6 @@ async def save_to_database(state: ScriptGenState) -> dict:
                     full_truth,
                     state.get("cover_image_url", ""),
                     json.dumps(free_speech_limits),
-                    state.get("owner_uuid", ""),
                     1,  # is_ai_generated
                 ),
             )
@@ -203,16 +166,12 @@ async def save_to_database(state: ScriptGenState) -> dict:
                 system_prompt = cd.get("system_prompt", system_prompts.get(name, ""))
                 script_summary = cd.get("script_summary", "")
 
-                char_script = character_scripts.get(name, "") or cd.get(
-                    "character_script", ""
-                )
+                char_script = character_scripts.get(name, "") or cd.get("character_script", "")
 
                 if not script_summary and char_script:
                     script_summary = char_script[:200]
 
-                voice_id = cd.get(
-                    "step_voice_id", ""
-                ) or character_voice_ids.get(char_id, "")
+                voice_id = cd.get("step_voice_id", "") or character_voice_ids.get(char_id, "")
 
                 await db.execute(
                     """INSERT OR REPLACE INTO characters
@@ -363,16 +322,33 @@ async def generate_assets(state: ScriptGenState) -> dict:
         "character_avatars": {},
     }
 
-    def tts_task_callback(task_id: str, status: str):
-        _update_task_status(script_id, task_id, status)
+    def tts_task_callback(task_id: str, status: str, reason: str = ""):
+        _update_task_status(script_id, task_id, status, reason)
 
-    # 并行运行三个阶段
-    results = await asyncio.gather(
-        _run_vectorize(script_id, state, characters),
-        _run_images(script_id, state, characters),
-        _run_tts(script_id, state, characters, tts_task_callback),
-        return_exceptions=True,
-    )
+    phase_jobs = []
+    if settings.ZHIPUAI_API_KEY:
+        phase_jobs.append(_run_vectorize(script_id, state, characters))
+    else:
+        _update_task_status(script_id, "vectorize_all", "skipped", "未配置 ZHIPUAI_API_KEY")
+
+    image_task_ids = [
+        "cover",
+        *[f"avatar_{c.get('character_id', str(i))}" for i, c in enumerate(characters)],
+    ]
+    if settings.DOUBAO_API_KEY:
+        phase_jobs.append(_run_images(script_id, state, characters))
+    else:
+        for task_id in image_task_ids:
+            _update_task_status(script_id, task_id, "skipped", "未配置 DOUBAO_API_KEY")
+
+    tts_task_ids = [task["id"] for task in phases[2]["tasks"]]
+    if settings.MIMO_API_KEY:
+        phase_jobs.append(_run_tts(script_id, state, characters, tts_task_callback, tts_task_ids))
+    else:
+        for task_id in tts_task_ids:
+            _update_task_status(script_id, task_id, "skipped", "未配置 MIMO_API_KEY")
+
+    results = await asyncio.gather(*phase_jobs, return_exceptions=True)
 
     # 收集结果
     for r in results:
@@ -384,11 +360,7 @@ async def generate_assets(state: ScriptGenState) -> dict:
     cover_url = ""
     avatars = {}
     try:
-        from pathlib import Path
-
-        img_root = (
-            Path(__file__).parent.parent.parent.parent / "data" / "images" / "scripts"
-        )
+        img_root = settings.image_dir / "scripts"
         cover_path = img_root / script_id / "cover.png"
         if cover_path.exists() and cover_path.stat().st_size > 0:
             cover_url = f"/images/scripts/{script_id}/cover.png"
@@ -397,9 +369,7 @@ async def generate_assets(state: ScriptGenState) -> dict:
             if char_id:
                 avatar_path = img_root / script_id / "avatars" / f"{char_id}.png"
                 if avatar_path.exists() and avatar_path.stat().st_size > 0:
-                    avatars[char_id] = (
-                        f"/images/scripts/{script_id}/avatars/{char_id}.png"
-                    )
+                    avatars[char_id] = f"/images/scripts/{script_id}/avatars/{char_id}.png"
     except Exception as e:
         logger.warning(f"Failed to collect image URLs: {e}")
 
@@ -407,19 +377,16 @@ async def generate_assets(state: ScriptGenState) -> dict:
     updates["character_avatars"] = avatars
 
     # Check if any tasks failed — don't mark complete if so
-    with _progress_lock:
-        progress = _asset_progress.get(script_id)
-        has_failed = False
-        if progress:
-            for phase in progress.get("phases", []):
-                for task in phase.get("tasks", []):
-                    if task.get("status") == "failed":
-                        has_failed = True
-                        break
-                if has_failed:
-                    break
+    progress = get_asset_progress(script_id)
+    task_statuses = [
+        task.get("status")
+        for phase in (progress or {}).get("phases", [])
+        for task in phase.get("tasks", [])
+    ]
+    has_failed = "failed" in task_statuses
+    has_incomplete = any(status not in ("complete", "skipped") for status in task_statuses)
 
-    if not has_failed:
+    if not has_failed and not has_incomplete:
         _mark_progress_complete(script_id)
     else:
         logger.warning(
@@ -495,20 +462,21 @@ async def _run_images(script_id: str, state: ScriptGenState, characters: list):
     await asyncio.gather(*tasks, return_exceptions=True)
 
 
-async def _run_single_image(
-    script_id: str, task_id: str, func_name: str, func_kwargs: dict
-):
+async def _run_single_image(script_id: str, task_id: str, func_name: str, func_kwargs: dict):
     """包装单个图片生成协程，带进度跟踪"""
     _update_task_status(script_id, task_id, "running")
     try:
         from app.script_editor.services import image_gen
 
         func = getattr(image_gen, func_name)
-        await func(**func_kwargs)
-        _update_task_status(script_id, task_id, "complete")
+        result = await func(**func_kwargs)
+        if result:
+            _update_task_status(script_id, task_id, "complete")
+        else:
+            _update_task_status(script_id, task_id, "failed", "供应商未返回有效图片")
     except Exception as e:
         logger.error(f"Image task {task_id} failed: {e}")
-        _update_task_status(script_id, task_id, "failed")
+        _update_task_status(script_id, task_id, "failed", str(e))
 
 
 async def _run_tts(
@@ -516,6 +484,7 @@ async def _run_tts(
     state: ScriptGenState,
     characters: list,
     task_callback,
+    task_ids: list[str],
 ):
     """TTS 生成阶段"""
     try:
@@ -530,13 +499,22 @@ async def _run_tts(
         )
     except Exception as e:
         logger.error(f"TTS generation failed: {e}")
+        for task_id in task_ids:
+            progress = get_asset_progress(script_id)
+            matching = [
+                task
+                for phase in (progress or {}).get("phases", [])
+                for task in phase.get("tasks", [])
+                if task.get("id") == task_id
+            ]
+            if matching and matching[0].get("status") in ("pending", "running"):
+                _update_task_status(script_id, task_id, "failed", str(e))
 
 
-async def _update_asset_urls(
-    script_id: str, cover_url: str, avatars: dict, state: ScriptGenState
-):
+async def _update_asset_urls(script_id: str, cover_url: str, avatars: dict, state: ScriptGenState):
     """资源生成完成后，更新数据库中的图片 URL"""
     import aiosqlite
+
     from app.core.config import settings
 
     db_path = settings.DATABASE_URL.replace("sqlite+aiosqlite:///", "")
@@ -582,16 +560,8 @@ async def _update_asset_urls(
 
 def _check_and_mark_asset_complete(script_id: str):
     """Check if all asset tasks are complete; if so, mark progress as done."""
-    with _progress_lock:
-        progress = _asset_progress.get(script_id)
-        if not progress:
-            return
-        for phase in progress.get("phases", []):
-            for task in phase.get("tasks", []):
-                if task.get("status") != "complete":
-                    return
-    # All tasks complete
-    _mark_progress_complete(script_id)
+    if asset_progress_registry.complete_if_all(script_id, {"complete", "skipped"}):
+        _publish_asset_progress(script_id)
 
 
 def _delete_tts_audio(script_id: str, task_id: str):
@@ -609,7 +579,7 @@ def _delete_tts_audio(script_id: str, task_id: str):
                 identifier = f"stage_{stage_idx}"
             path = AUDIO_ROOT / "scripts" / script_id / "system_messages" / f"{identifier}.wav"
         elif task_id.startswith("tts_"):
-            char_id = task_id[len("tts_"):]
+            char_id = task_id[len("tts_") :]
             path = AUDIO_ROOT / "scripts" / script_id / "character_scripts" / f"{char_id}.wav"
         else:
             return
@@ -647,6 +617,7 @@ async def retry_single_asset(script_id: str, task_id: str, state: ScriptGenState
             )
             if cover_url:
                 import aiosqlite
+
                 from app.core.config import settings
 
                 db_path = settings.DATABASE_URL.replace("sqlite+aiosqlite:///", "")
@@ -659,9 +630,7 @@ async def retry_single_asset(script_id: str, task_id: str, state: ScriptGenState
 
         elif task_id.startswith("avatar_"):
             char_id = task_id[len("avatar_") :]
-            char = next(
-                (c for c in characters if c.get("character_id") == char_id), None
-            )
+            char = next((c for c in characters if c.get("character_id") == char_id), None)
             if char:
                 from app.script_editor.services.image_gen import (
                     generate_character_avatar,
@@ -676,6 +645,7 @@ async def retry_single_asset(script_id: str, task_id: str, state: ScriptGenState
                 )
                 if avatar_url:
                     import aiosqlite
+
                     from app.core.config import settings
 
                     db_path = settings.DATABASE_URL.replace("sqlite+aiosqlite:///", "")
@@ -689,8 +659,8 @@ async def retry_single_asset(script_id: str, task_id: str, state: ScriptGenState
         elif task_id.startswith("tts_"):
             # TTS retry — handle both system messages and character scripts
             from app.script_editor.services.tts_gen import (
-                generate_single_system_audio,
                 generate_single_char_audio,
+                generate_single_system_audio,
             )
 
             # Delete existing audio file to force regeneration
@@ -720,30 +690,39 @@ async def retry_single_asset(script_id: str, task_id: str, state: ScriptGenState
                             identifier = f"stage_{stage_idx}_child_{child_idx}"
                             if notice:
                                 await generate_single_system_audio(
-                                    script_id, identifier, notice, stage_type, child_idx,
+                                    script_id,
+                                    identifier,
+                                    notice,
+                                    stage_type,
+                                    child_idx,
                                 )
                     else:
                         notice = stage.get("system_notice", "")
                         identifier = f"stage_{stage_idx}"
                         if notice:
                             await generate_single_system_audio(
-                                script_id, identifier, notice, stage_type,
+                                script_id,
+                                identifier,
+                                notice,
+                                stage_type,
                             )
 
             elif task_id.startswith("tts_") and not task_id.startswith("tts_sys_"):
                 # Character script: task_id is tts_{char_id}
-                char_id = task_id[len("tts_"):]
+                char_id = task_id[len("tts_") :]
                 # Find character info
-                char = next(
-                    (c for c in characters if c.get("character_id") == char_id), None
-                )
+                char = next((c for c in characters if c.get("character_id") == char_id), None)
                 if char:
                     name = char.get("name", "")
                     gender = char.get("gender", "")
                     script_text = character_scripts.get(name, "")
                     if script_text:
                         await generate_single_char_audio(
-                            script_id, name, char_id, script_text, gender,
+                            script_id,
+                            name,
+                            char_id,
+                            script_text,
+                            gender,
                         )
 
         _update_task_status(script_id, task_id, "complete")

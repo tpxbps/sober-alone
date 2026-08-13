@@ -12,13 +12,13 @@ AI角色扮演智能体
 - Middleware: Agent中间件
 """
 
-from app.agents.agent_player import AgentPlayer, SpeechReaction
 from app.agents.agent_manager import (
-    AgentManager,
     AgentInfo,
+    AgentManager,
     get_agent_manager,
     remove_agent_manager,
 )
+from app.agents.agent_player import AgentPlayer, SpeechReaction
 from app.agents.state import GameAgentState
 
 __all__ = [

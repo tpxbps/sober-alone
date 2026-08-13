@@ -5,6 +5,8 @@ import { SpeakerIcon, type SpeakerState } from "@/components/ui/SpeakerIcon";
 import { AudioSpeedButton } from "@/components/ui/AudioSpeedButton";
 import { Markdown } from "@/components/ui/Markdown";
 import { audioPlayerManager } from "@/lib/audioPlayerManager";
+import { systemApi } from "@/lib/api";
+import { ttsCapability } from "@/lib/capabilityAdapter";
 
 interface PlayerScriptTooltipProps {
   scriptContent: string;
@@ -36,30 +38,21 @@ export function PlayerScriptTooltip({
   onOpenChange,
 }: PlayerScriptTooltipProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [hasOpenedBefore, setHasOpenedBefore] = useState(false);
+  const [hasOpenedBefore, setHasOpenedBefore] = useState(
+    () => !!sessionId && localStorage.getItem(`script_opened_${sessionId}`) === "true",
+  );
   const [showQuickOverview, setShowQuickOverview] = useState(false);
   const [speakerState, setSpeakerState] = useState<SpeakerState>("off");
+  const [audioCapability, setAudioCapability] = useState({
+    enabled: false,
+    reason: "正在检查语音能力…",
+  });
+  const audioCapabilityEnabled = audioCapability.enabled;
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
   const isSeeking = useRef(false);
   const isScriptAudio = useRef(false); // 标记当前播放的是否为剧本音频
   const unsubRef = useRef<(() => void) | null>(null);
-
-  // Sync with external open prop
-  useEffect(() => {
-    if (open && !isOpen) {
-      handleOpenScript();
-    }
-  }, [open]);
-
-  // Restore from localStorage
-  useEffect(() => {
-    if (sessionId) {
-      const key = `script_opened_${sessionId}`;
-      const opened = localStorage.getItem(key) === "true";
-      setHasOpenedBefore(opened);
-    }
-  }, [sessionId]);
 
   const handleOpenScript = () => {
     setIsOpen(true);
@@ -69,6 +62,16 @@ export function PlayerScriptTooltip({
       setHasOpenedBefore(true);
     }
   };
+  const visible = isOpen || !!open;
+
+  useEffect(() => {
+    systemApi
+      .getCapabilities()
+      .then((capabilities) => setAudioCapability(ttsCapability(capabilities)))
+      .catch(() =>
+        setAudioCapability({ enabled: false, reason: "无法读取后端语音能力" })
+      );
+  }, []);
 
   // Subscribe to audio player state changes — only track script audio
   useEffect(() => {
@@ -93,6 +96,7 @@ export function PlayerScriptTooltip({
 
   // Handle script audio playback
   const handlePlayScriptAudio = useCallback(async () => {
+    if (!audioCapabilityEnabled) return;
     // If script audio is active (playing or paused) → toggle pause
     if (isScriptAudio.current && audioPlayerManager.isAudioActive()) {
       const resumed = audioPlayerManager.togglePause();
@@ -122,20 +126,19 @@ export function PlayerScriptTooltip({
       isScriptAudio.current = false;
       setSpeakerState("error");
     }
-  }, [scriptId, characterId]);
+  }, [scriptId, characterId, audioCapabilityEnabled]);
 
-  // Stop audio when modal closes
-  useEffect(() => {
-    if (!isOpen) {
-      if (isScriptAudio.current) {
-        audioPlayerManager.stop();
-        isScriptAudio.current = false;
-      }
-      setSpeakerState("off");
-      setProgress(0);
-      setDuration(0);
+  const handleClose = useCallback(() => {
+    if (isScriptAudio.current) {
+      audioPlayerManager.stop();
+      isScriptAudio.current = false;
     }
-  }, [isOpen]);
+    setSpeakerState("off");
+    setProgress(0);
+    setDuration(0);
+    setIsOpen(false);
+    onOpenChange?.(false);
+  }, [onOpenChange]);
 
   // Seek handler
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -187,15 +190,14 @@ export function PlayerScriptTooltip({
 
       {/* Modal */}
       <AnimatePresence>
-        {isOpen && (
+        {visible && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
             onClick={() => {
-              setIsOpen(false);
-              onOpenChange?.(false);
+              handleClose();
             }}
           >
             <motion.div
@@ -227,15 +229,19 @@ export function PlayerScriptTooltip({
                     </button>
                   )}
                   <SpeakerIcon
-                    state={speakerState}
+                    state={audioCapability.enabled ? speakerState : "disabled"}
                     onClick={handlePlayScriptAudio}
                     size={16}
                   />
+                  <span className="text-[9px] text-muted-foreground/60">
+                    {audioCapability.enabled
+                      ? "AI 生成语音"
+                      : audioCapability.reason}
+                  </span>
                 </div>
                 <button
                   onClick={() => {
-                    setIsOpen(false);
-                    onOpenChange?.(false);
+                    handleClose();
                   }}
                   className="p-2 rounded-lg hover:bg-secondary/50 transition-colors"
                 >

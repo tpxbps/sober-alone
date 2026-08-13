@@ -13,7 +13,6 @@ import { PlayerScriptTooltip } from "@/components/game/PlayerScriptTooltip";
 import { DraftNotebook } from "@/components/game/DraftNotebook";
 import { SettingsModal } from "@/components/SettingsModal";
 import { Markdown } from "@/components/ui/Markdown";
-import { useBGM } from "@/hooks/useBGM";
 import type { GameStage, GameRecord } from "@/types/game";
 
 interface GamePageProps {
@@ -22,18 +21,18 @@ interface GamePageProps {
 }
 
 export function GamePage({ sessionId, onExit }: GamePageProps) {
-  const [showVotingModal, setShowVotingModal] = useState(false);
+  const [votingDismissedRound, setVotingDismissedRound] = useState<string | null>(null);
   const [showScriptModal, setShowScriptModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showSpeechReminder, setShowSpeechReminder] = useState(false);
-  const [speechReminderShown, setSpeechReminderShown] = useState(false);
+  const speechReminderRoundRef = useRef<string | null>(null);
   const [previousStage, setPreviousStage] = useState<GameStage | null>(null);
-  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [draftOpen, setDraftOpen] = useState(false);
   const [scriptOpen, setScriptOpen] = useState(false);
-  const [scriptOpened, setScriptOpened] = useState(false);
+  const [scriptOpened, setScriptOpened] = useState(
+    () => localStorage.getItem(`script_opened_${sessionId}`) === "true",
+  );
 
-  const { playStage } = useBGM();
 
   const {
     // State
@@ -104,14 +103,6 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
     }))
   );
 
-  // Track script opened state for mobile toolbar badge
-  useEffect(() => {
-    if (sessionId) {
-      const key = `script_opened_${sessionId}`;
-      setScriptOpened(localStorage.getItem(key) === "true");
-    }
-  }, [sessionId]);
-
   const handleScriptOpenChange = useCallback(
     (open: boolean) => {
       setScriptOpen(open);
@@ -130,30 +121,15 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
     }
 
     return () => {
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current);
-      }
       // Cancel all in-flight SSE streams when GamePage unmounts
       cancelActiveOperations();
     };
   }, [sessionId, initializeGame, cancelActiveOperations]);
 
-  // Switch BGM based on game stage
-  useEffect(() => {
-    if (stage && stage !== "loading") {
-      playStage(stage);
-    }
-  }, [stage, playStage]);
-
-  // Show voting modal when entering vote stage
-  useEffect(() => {
-    const hasResults = voteResults && Object.keys(voteResults).length > 0;
-    if (stage === "vote" && !hasResults) {
-      setShowVotingModal(true);
-    } else {
-      setShowVotingModal(false);
-    }
-  }, [stage, voteResults]);
+  const voteRoundKey = `${stage}:${currentRound}`;
+  const hasVoteResults = !!voteResults && Object.keys(voteResults).length > 0;
+  const showVotingModal =
+    stage === "vote" && !hasVoteResults && votingDismissedRound !== voteRoundKey;
 
   // Show completion modal when game ends (removed - review stage has end button)
   useEffect(() => {
@@ -165,14 +141,11 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
   // 自由发言阶段：真人玩家尚未发言时弹出提醒（每次阶段仅一次）
   // 仅在所有AI角色用光发言次数、而真人一次都还没发言时触发
   useEffect(() => {
-    if (stage !== "free_discussion") {
-      setSpeechReminderShown(false);
-      return;
-    }
+    if (stage !== "free_discussion") return;
     if (
       !isStreaming &&
       !isProcessingReactions &&
-      !speechReminderShown &&
+      speechReminderRoundRef.current !== `${stage}:${currentRound}` &&
       currentSpeakerId === null
     ) {
       const humanState = playerStates.find(
@@ -192,8 +165,9 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
         aiStates.every((p) => (p.remaining_speech_count ?? 0) <= 0);
 
       if (humanHasRemaining && humanNotSpoken && allAIExhausted) {
-        setShowSpeechReminder(true);
-        setSpeechReminderShown(true);
+        speechReminderRoundRef.current = `${stage}:${currentRound}`;
+        const timer = window.setTimeout(() => setShowSpeechReminder(true), 0);
+        return () => window.clearTimeout(timer);
       }
     }
   }, [
@@ -203,7 +177,7 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
     currentSpeakerId,
     playerStates,
     humanCharacterId,
-    speechReminderShown,
+    currentRound,
   ]);
 
   // Auto-trigger AI speech when it's AI's turn (and hasn't spoken yet)
@@ -470,7 +444,7 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
         voteResults={voteResults}
         onVote={handleVote}
         onFinalize={finalizeVoting}
-        onClose={() => setShowVotingModal(false)}
+        onClose={() => setVotingDismissedRound(voteRoundKey)}
       />
 
       {/* Script Modal */}

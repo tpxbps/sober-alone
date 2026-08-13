@@ -3,9 +3,9 @@ SpeechScheduler - 发言调度器
 实现自由发言阶段的AI玩家发言倾向评估和调度
 """
 
-from typing import Any, Dict, List, Optional, Tuple
-from dataclasses import dataclass
 import random
+from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
@@ -15,7 +15,7 @@ class SpeechTendency:
     character_id: str
     character_name: str
     score: float
-    components: Dict[str, float]  # 评分各组成部分
+    components: dict[str, float]  # 评分各组成部分
 
 
 class SpeechScheduler:
@@ -49,11 +49,9 @@ class SpeechScheduler:
         # 最小发言间隔（避免同一角色连续发言）
         self.min_speech_interval = 1
         # 最近发言记录
-        self.recent_speakers: List[str] = []
+        self.recent_speakers: list[str] = []
 
-    async def calculate_speech_tendency(
-        self, player_state: Dict[str, Any]
-    ) -> SpeechTendency:
+    async def calculate_speech_tendency(self, player_state: dict[str, Any]) -> SpeechTendency:
         """
         计算单个玩家的发言倾向评分
 
@@ -77,9 +75,7 @@ class SpeechScheduler:
         # 主动怀疑强度: 对别人怀疑越多越想发言
         suspicion_map = player_state.get("suspicion", {})
         if suspicion_map:
-            active_suspicion = sum(float(v) for v in suspicion_map.values()) / len(
-                suspicion_map
-            )
+            active_suspicion = sum(float(v) for v in suspicion_map.values()) / len(suspicion_map)
         else:
             active_suspicion = 0.0
 
@@ -89,9 +85,7 @@ class SpeechScheduler:
 
         # 计算总分
         score = (
-            self.ALPHA * suspected
-            + self.BETA * active_suspicion
-            + self.GAMMA * opportunity_cost
+            self.ALPHA * suspected + self.BETA * active_suspicion + self.GAMMA * opportunity_cost
         )
 
         # 限制在0-1范围
@@ -110,9 +104,9 @@ class SpeechScheduler:
 
     async def select_next_speaker(
         self,
-        player_states: List[Dict[str, Any]],
+        player_states: list[dict[str, Any]],
         human_character_id: str = "",
-    ) -> Optional[Tuple[str, SpeechTendency]]:
+    ) -> tuple[str, SpeechTendency] | None:
         """
         选择下一位发言者
 
@@ -169,8 +163,8 @@ class SpeechScheduler:
         return self._weighted_random_pick(pool)
 
     def _weighted_random_pick(
-        self, candidates: List[Tuple[str, SpeechTendency]]
-    ) -> Optional[Tuple[str, SpeechTendency]]:
+        self, candidates: list[tuple[str, SpeechTendency]]
+    ) -> tuple[str, SpeechTendency] | None:
         """从候选者中加权随机选择（前3名）"""
         if not candidates:
             return None
@@ -201,7 +195,7 @@ class SpeechScheduler:
             self.recent_speakers = self.recent_speakers[-10:]
 
     async def check_round_completion(
-        self, player_states: List[Dict[str, Any]], min_speeches_per_player: int = 1
+        self, player_states: list[dict[str, Any]], min_speeches_per_player: int = 1
     ) -> bool:
         """
         检查当前轮次是否可以由玩家主动跳过，而不必等待所有玩家用光发言次数
@@ -222,10 +216,10 @@ class SpeechScheduler:
 
     async def get_speech_order(
         self,
-        player_states: List[Dict[str, Any]],
+        player_states: list[dict[str, Any]],
         human_character_id: str = "",
         is_sequential: bool = False,
-    ) -> List[str]:
+    ) -> list[str]:
         """
         获取发言顺序
 

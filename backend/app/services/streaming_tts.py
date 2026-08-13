@@ -3,11 +3,10 @@ StreamingTTSSession - StepFun WebSocket 流式 TTS 会话管理
 用于 AI 角色发言的实时语音生成
 """
 
-import json
 import asyncio
+import json
 import logging
-import base64
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 import websockets
 
@@ -94,7 +93,7 @@ class StreamingTTSSession:
             logger.info(f"TTS streaming session connected: {self._session_id}")
             return True
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.error("TTS WebSocket connection timeout")
             await self.close()
             return False
@@ -120,7 +119,8 @@ class StreamingTTSSession:
             return
 
         # 长文本拆分：按句子边界切割
-        from app.services.tts_service import split_text_for_tts, STEP_MAX_CHARS
+        from app.services.tts_service import STEP_MAX_CHARS, split_text_for_tts
+
         chunks = split_text_for_tts(text, STEP_MAX_CHARS)
         for chunk in chunks:
             await self._send_text_delta(chunk)

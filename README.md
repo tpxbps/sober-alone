@@ -1,152 +1,168 @@
-# 独醒 (Sober Alone)
+# 独醒 AI 剧本杀（Sober Alone）
 
-**众人皆醉我独醒** — AI 驱动的剧本杀游戏。
+> **English summary:** A local-first, single-user, single-process reference implementation for playing and authoring AI-assisted murder-mystery games. The bundled `雾港回声` sample is text-only; a DeepSeek API key is sufficient for the main game and text-authoring paths. Optional RAG, image and TTS features are capability-gated.
 
-玩家扮演侦探角色，与多个 AI 角色一起阅读线索、自由讨论、投票推理，最终揭开真相。
+独醒是一个比赛 Demo 治理而来的开源参考工程：真人玩家选择一个角色，与多个 AI 角色依次发言、分析线索、自由讨论并投票；也可以从一句创意生成新的纯文本剧本。
 
-## 功能特性
+## 发布边界
 
-- **AI 剧本创作** — 从一句话创意到完整可玩游戏剧本的全自动生成流程，支持人工审核与迭代修改
-- **多 AI 角色** — 每个 AI 角色拥有独立人格、记忆和推理能力，基于 LangGraph Agent 架构
-- **RAG 知识检索** — ChromaDB 向量化剧本内容，角色可随时回忆剧本细节
-- **实时 TTS** — AI 角色发言实时语音合成（流式 WebSocket），剧本预生成静态语音
-- **智能发言调度** — 自由讨论阶段基于嫌疑度和发言机会的加权策略调度
-- **AI 美术** — 自动生成剧本封面和角色头像（豆包 Seedream）
-- **移动端适配** — 响应式布局，手机可玩
+- 版本：`0.1.0`。
+- 运行定位：`local-first / single-user / single-process`。
+- 后端示例命令只监听 `127.0.0.1`；没有认证、限流、多租户和多实例一致性，不应直接暴露到公网。
+- 产品没有 Mock 模式；替身只存在于测试装配。
+- 运行数据、数据库、向量、检查点和生成媒体均写入被忽略的 `backend/.local-data/`。
+- `雾港回声` 是固定 ID 的 4 人、2 轮线索、约 20 分钟原创纯文本样例，无图片、音频和预计算向量。它标记为 AI 生成；公开发布前仍需由维护者完成人工逻辑审阅。
 
 ## 架构
 
-```
-sober-alone/
-├── backend/          # Python 3.13 (FastAPI + LangChain + LangGraph)
-│   └── app/
-│       ├── api/          # REST/SSE 接口
-│       │   └── routes/
-│       │       ├── game.py            # 游戏接口（12 endpoints）
-│       │       └── script_editor.py   # 剧本编辑器接口（16 endpoints）
-│       ├── game/         # 游戏核心逻辑
-│       │   ├── flow_controller.py     # 阶段状态机、发言处理、反应广播
-│       │   └── speech_scheduler.py    # 自由讨论加权调度
-│       ├── agents/       # AI 角色 Agent
-│       │   ├── agent_player.py        # 双 Agent 架构（主 Agent + 反应 Agent）
-│       │   ├── agent_manager.py       # 多 Agent 生命周期管理
-│       │   └── tools/                 # RAG 检索、嫌疑更新、投票
-│       ├── script_editor/ # AI 剧本创作工作流
-│       │   ├── graph.py              # LangGraph 13 节点工作流
-│       │   ├── nodes/                # 大纲→初稿→评审→终稿→结构化→安全检查→保存
-│       │   ├── services/             # 图片生成、TTS、向量化、进度推送
-│       │   └── prompts/              # 可自定义的提示词模板
-│       ├── rag/           # ChromaDB 向量检索（zhipuai embedding-3）
-│       ├── services/      # 业务服务层
-│       │   ├── game_service.py       # 游戏逻辑、SSE 流式推送
-│       │   ├── tts_service.py        # 静态/按需 TTS
-│       │   └── streaming_tts.py      # 流式 TTS（WebSocket）
-│       └── core/          # 配置、LLM 工厂（5+ 提供商）
-│
-└── frontend/         # React 19 + TypeScript + Vite + Zustand
-    └── src/
-        ├── screens/
-        │   ├── Homepage.tsx           # 剧本选择、角色配置
-        │   ├── GamePage.tsx           # 游戏主界面、SSE 编排
-        │   └── ScriptEditorPage.tsx   # 剧本创作界面
-        ├── components/
-        │   ├── game/                  # 聊天、投票、角色面板等 12 组件
-        │   ├── script-editor/         # 时间线、内容面板、AI 助手聊天
-        │   └── ui/                    # 通用 UI 组件
-        ├── stores/                    # Zustand 状态管理
-        ├── lib/                       # 音频管理器、API 客户端
-        └── types/                     # TypeScript 类型定义
+```mermaid
+flowchart LR
+    UI["React 19 / Zustand"] -->|"REST + SSE"| API["FastAPI"]
+    API --> GAME["GameService façade"]
+    GAME --> FLOW["GameFlowController\n阶段机与发言队列"]
+    GAME --> AGENT["角色级 LangGraph Agent"]
+    API --> EDITOR["剧本创作 LangGraph"]
+    FLOW --> DB["SQLite / Alembic"]
+    EDITOR --> DB
+    AGENT --> LLM["已配置的云模型"]
+    AGENT -. "可选" .-> RAG["智谱 Embedding + Chroma"]
+    EDITOR -. "可选" .-> MEDIA["豆包图片 / MiMo 与 StepFun TTS"]
 ```
 
-## 快速开始
+推荐部署为同源：反向代理 `/api`、`/audio`、`/images` 到后端，其余路径到前端静态文件。开发服务器已经配置这些代理。
 
-### 环境要求
+## 能力矩阵
 
-- Node.js 18+
-- Python 3.11+
-- 至少一个 LLM API Key
+| 能力 | 配置 | 缺少配置时的行为 |
+|---|---|---|
+| 主游戏与纯文本创作 | `DEEPSEEK_API_KEY` | 必需；无法创建 AI 对局或生成剧本 |
+| 摘要 / 流式 TTS | `STEPFUN_API_KEY` | 摘要回退到主模型；流式 TTS 禁用 |
+| 角色剧本 RAG | `ZHIPUAI_API_KEY` | 不注册 RAG 工具；仅向该角色注入其完整个人剧本 |
+| 图片生成 | `DOUBAO_API_KEY` | 图片任务标记 `skipped` 并说明原因 |
+| 静态 TTS | `MIMO_API_KEY` | 静态语音任务标记 `skipped` 并说明原因 |
+| 千问角色模型 | `QWEN_API_KEY` | 不在前端模型列表展示 |
 
-### 后端
+运行后可访问：
+
+- `GET /healthz`：只检查应用与本地数据库，不调用外部服务。
+- `GET /api/v1/system/capabilities`：列出模型和可选能力状态，不返回 Key。
+
+## 15 分钟快速开始
+
+要求：Python 3.13、Node.js 22、pnpm 10、[uv](https://docs.astral.sh/uv/)。
+
+### 1. 初始化后端
 
 ```bash
 cd backend
-uv sync
-uv run uvicorn app.main:app --reload --port 8000
+copy .env.example .env        # Windows
+# cp .env.example .env        # macOS / Linux
 ```
 
-在 `backend/.env` 中配置 API Key：
+只填写：
 
-```
-DEEPSEEK_API_KEY=...
-STEPFUN_API_KEY=...
-QWEN_API_KEY=...
-DOUBAO_API_KEY=...
-MIMO_API_KEY=...
-ZHIPUAI_API_KEY=...
+```dotenv
+DEEPSEEK_API_KEY=你的_Key
 ```
 
-### 前端
+然后执行：
+
+```bash
+uv sync --frozen
+uv run python -m app.cli init
+uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+`init` 会升级 Alembic、创建本地目录，并且仅在空库时导入 `雾港回声`；重复执行不会覆盖已有剧本。
+
+### 2. 启动前端
 
 ```bash
 cd frontend
-pnpm install
-pnpm dev
+pnpm install --frozen-lockfile
+pnpm dev --host 127.0.0.1
 ```
 
-访问 `http://localhost:5173`。
+访问 `http://127.0.0.1:5173`，选择 `雾港回声` 和一个角色开始游戏。
 
-## 游戏流程
+### 3. 迁入旧私有数据库（可选）
 
-```
-大厅 → 开场（AI 叙述背景）→ 线索分析 ⇄ 自由讨论 [多轮] → 总结陈词 → 投票 → 揭晓真相
-```
+先停止后端，再执行：
 
-1. **大厅** — 浏览剧本列表，选择角色和 AI 模型
-2. **开场** — AI 叙述故事背景，玩家阅读个人剧本
-3. **线索分析** — 玩家与 AI 角色轮流分析线索
-4. **自由讨论** — AI 角色按嫌疑度策略调度发言，玩家可随时参与
-5. **总结陈词** — 最后的陈述机会
-6. **投票** — 所有人投票选出嫌疑人
-7. **揭晓** — 公布真相与投票结果
-
-## 剧本创作
-
-内置 AI 剧本创作工作流，从一句话创意到完整可玩游戏：
-
-```
-创意输入 → 大纲生成 → 初稿 → AI 评审 → 终稿 → 结构化数据 → 安全检查 → 保存
-                                                                    ↓
-                                                            自动生成：封面图、角色头像、语音、向量索引
+```bash
+cd backend
+uv run python -m app.cli adopt-legacy-db --path D:/absolute/path/game_data.db
 ```
 
-- **5 个人工审核点** — 大纲、初稿、终稿、结构化数据均可编辑修改
-- **可自定义提示词** — 每个生成步骤的提示词都可调整
-- **时间旅行** — 支持从历史检查点分叉，重新生成
-- **AI 创作助手** — 上下文感知的 AI 聊天，可查看当前工作流内容
+命令会先验证五张业务表并在源文件旁创建时间戳备份，再登记并升级迁移；不会删除源数据库。
 
-## 技术栈
+## 游戏与创作流程
 
-| 层级     | 技术                                        |
-| -------- | ------------------------------------------- |
-| 后端框架 | FastAPI + SQLAlchemy (async)                |
-| AI Agent | LangChain + LangGraph                       |
-| 前端框架 | React 19 + TypeScript + Vite                |
-| 状态管理 | Zustand                                     |
-| 样式     | TailwindCSS + Framer Motion                 |
-| 数据库   | SQLite + ChromaDB                           |
-| TTS      | mimo-v2.5-tts (静态) + step-tts-mini (流式) |
-| 图片生成 | doubao-seedream-4-0                         |
-| 向量嵌入 | zhipuai embedding-3                         |
+```text
+大厅 → 选角 → 自我介绍 → [线索分析 → 自由讨论] × N → 总结 → 投票 → 复盘
+```
 
-## 支持的 LLM
+```text
+创意 → 大纲 → 初稿 → AI 评审 → 终稿 → 游戏数据 → 安全检查 → 保存 → 可选资产
+```
 
-通过 `.env` 配置，支持多个 LLM 提供商，可为不同 AI 角色指定不同模型：
+创作工作流保留人工审核、历史检查点和分叉。可选供应商缺失时资产任务显示 `skipped + reason`，不会伪装为成功。
 
-- DeepSeek (deepseek-v4-flash) — 默认
-- 阶跃星辰 (step-3.5-flash)
-- 通义千问 (qwen3.5-flash)
-- 豆包 (doubao-seed-2-0-mini)
+运行时生成的剧本、图片和语音在 UI 中带有 AI 生成提示；图片请求保留供应商水印。请勿移除供应商要求的显式或隐式标识。
+
+## 测试
+
+后端普通测试禁止访问外部主机；真实 API 冒烟必须显式手动运行。
+
+```bash
+cd backend
+uv sync --frozen
+uv run ruff check app migrations tests scripts
+uv run ruff format --check app migrations tests scripts
+uv run python -m pytest -q
+
+cd ../frontend
+pnpm install --frozen-lockfile
+pnpm lint
+pnpm test
+pnpm build
+pnpm exec playwright install chromium
+pnpm test:e2e
+
+cd ..
+uv run --project backend python scripts/check_public_tree.py
+uv run --project backend python scripts/check_dependency_licenses.py
+uv run --project backend python scripts/generate_sbom.py
+```
+
+付费 live 冒烟不会被 pytest 收集：
+
+```bash
+cd backend
+uv run python -m scripts.live_api_smoke deepseek
+uv run python -m scripts.live_api_smoke stepfun
+```
+
+## 数据流、费用和隐私
+
+提示词、角色个人剧本、玩家发言或待生成资产可能被发送给你启用的第三方云服务。项目不会替你承担调用费用，也不保证供应商的数据保留、区域或合规策略。启用前请阅读 [第三方服务说明](docs/THIRD_PARTY_SERVICES.md)，不要输入无权处理的个人信息、商业秘密或受版权保护内容。
+
+## 已知限制
+
+- 所有运行时 registry/checkpointer 均为单进程内存状态；进程重启会通过数据库恢复游戏阶段游标，但不会提供分布式一致性。
+- API 无认证和限流，服务端 Key 可被写接口消费；只能在受信任的本机环境运行。
+- 没有 Docker、后台任务队列、Redis、多用户账号或生产部署模板。
+- 媒体采用同源相对 URL；分域部署需要自行配置反向代理或修改 media base。
+- 可选供应商的 live 验证范围见 [CHANGELOG](CHANGELOG.md)，不能把源码开源等同于第三方服务或生成内容可自由再分发。
+
+## 发布资料
+
+- [CHANGELOG](CHANGELOG.md)
+- [ROADMAP](ROADMAP.md)
+- [第三方通知](THIRD_PARTY_NOTICES.md)
+- [品牌与 Logo 例外](TRADEMARKS.md)
+- [SBOM 说明](docs/SBOM.md)
 
 ## License
 
-Private
+源代码与明确标注的原创文本样例采用 [MIT License](LICENSE)。项目名称“独醒 / Sober Alone”和 Logo 不随 MIT 授权，详见 [TRADEMARKS.md](TRADEMARKS.md)。第三方云服务、依赖和用户生成内容受各自条款约束。

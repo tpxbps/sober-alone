@@ -26,7 +26,6 @@ export interface Script {
   cover_image_url?: string;
   game_full_process?: string;
   full_truth?: string;
-  owner_uuid?: string;
   is_ai_generated?: boolean;
 }
 
@@ -189,7 +188,9 @@ export interface GameStateResponse {
     tags?: string;
     difficulty?: number;
     player_count?: number;
+    estimated_duration?: number;
     cover_image_url?: string;
+    is_ai_generated?: boolean;
   };
   characters?: Array<{
     character_id: string;

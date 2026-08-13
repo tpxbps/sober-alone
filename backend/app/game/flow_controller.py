@@ -3,20 +3,21 @@ GameFlowController - 游戏流程控制器
 管理游戏的整体进程和阶段转换
 """
 
-from typing import Dict, List, Any, AsyncIterator
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
-from app.game.speech_scheduler import SpeechScheduler
 from app.agents import AgentManager
 from app.db.models import (
+    GameRecord,
     GameSession,
     GameStage,
     GameStatus,
-    GameRecord,
-    RecordType,
     PlayerState,
+    RecordType,
 )
+from app.game.speech_scheduler import SpeechScheduler
 
 
 @dataclass
@@ -52,7 +53,7 @@ class GameFlowController:
     def __init__(
         self,
         game_session: GameSession,
-        script_data: Dict[str, Any],
+        script_data: dict[str, Any],
         agent_manager: AgentManager,
     ):
         """
@@ -74,12 +75,55 @@ class GameFlowController:
         self.game_process = script_data.get("game_full_process", [])
         self.current_process_index = 0
         self.current_child_index = 0  # 用于追踪 advancement 类型中的子阶段
+        self.restore_cursor()
 
         # 角色信息缓存
         self.characters = script_data.get("characters", [])
         self.character_map = {c["character_id"]: c for c in self.characters}
 
-    async def start_game(self, db_session=None) -> Dict[str, Any]:
+    def restore_cursor(self) -> tuple[int, int]:
+        """Restore the in-memory process cursor from persisted session fields.
+
+        The public v0.1 schema deliberately keeps the cursor derivable instead of
+        adding another pair of mutable columns. ``current_round`` is the 1-based
+        advancement number while the persisted stage distinguishes each child
+        phase and the vote/review tail.
+        """
+        if not self.game_process:
+            self.current_process_index = 0
+            self.current_child_index = 0
+            return (0, 0)
+
+        stage = self.session.current_stage
+        indices_by_type: dict[str, list[int]] = {}
+        for index, process in enumerate(self.game_process):
+            indices_by_type.setdefault(process.get("type", ""), []).append(index)
+
+        if stage in {GameStage.CLUE_ANALYSIS.value, GameStage.FREE_DISCUSSION.value}:
+            candidates = indices_by_type.get("advancement", [])
+            ordinal = max(int(self.session.current_round or 1) - 1, 0)
+            if candidates:
+                self.current_process_index = candidates[min(ordinal, len(candidates) - 1)]
+        elif stage in {GameStage.SUMMARY.value, GameStage.VOTE.value}:
+            candidates = indices_by_type.get("vote", [])
+            if candidates:
+                self.current_process_index = candidates[0]
+        elif stage in {GameStage.REVIEW.value, GameStage.COMPLETED.value}:
+            candidates = indices_by_type.get("review", [])
+            if candidates:
+                self.current_process_index = candidates[-1]
+            else:
+                self.current_process_index = len(self.game_process) - 1
+        else:
+            candidates = indices_by_type.get("initial", [])
+            self.current_process_index = candidates[0] if candidates else 0
+
+        self.current_child_index = int(
+            stage in {GameStage.FREE_DISCUSSION.value, GameStage.VOTE.value}
+        )
+        return (self.current_process_index, self.current_child_index)
+
+    async def start_game(self, db_session=None) -> dict[str, Any]:
         """
         开始游戏
 
@@ -102,16 +146,16 @@ class GameFlowController:
 
         # 获取第一个阶段的系统通知
         first_stage = self.game_process[0] if self.game_process else {}
-        system_notice = first_stage.get(
-            "system_notice", "游戏开始，请各位依次进行自我介绍。"
-        )
+        system_notice = first_stage.get("system_notice", "游戏开始，请各位依次进行自我介绍。")
         audio_key = "stage_0" if system_notice else ""
 
         # 记录系统消息到游戏记录
         if db_session and system_notice:
             audio_url = ""
             if audio_key:
-                audio_url = f"/audio/scripts/{self.session.script_id}/system_messages/{audio_key}.wav"
+                audio_url = (
+                    f"/audio/scripts/{self.session.script_id}/system_messages/{audio_key}.wav"
+                )
             system_record = GameRecord(
                 session_id=self.session.session_id,
                 record_type=RecordType.SYSTEM.value,
@@ -133,9 +177,7 @@ class GameFlowController:
             "system_notice": system_notice,
         }
 
-    async def _clear_consumed_perspectives(
-        self, character_id: str, db_session
-    ):
+    async def _clear_consumed_perspectives(self, character_id: str, db_session):
         """
         清除该角色已消费的 player_perspectives（发言后调用）
 
@@ -184,8 +226,13 @@ class GameFlowController:
         await db_session.commit()
 
     async def process_speech(
-        self, character_id: str, content: str, is_human: bool = False, db_session=None, skip_reactions: bool = False
-    ) -> Dict[str, Any]:
+        self,
+        character_id: str,
+        content: str,
+        is_human: bool = False,
+        db_session=None,
+        skip_reactions: bool = False,
+    ) -> dict[str, Any]:
         """
         处理玩家发言
 
@@ -219,8 +266,9 @@ class GameFlowController:
         self.scheduler.record_speech(character_id)
 
         # 从发言队列中移除并持久化到数据库
-        from sqlalchemy import text
         import json
+
+        from sqlalchemy import text
 
         if character_id in (self.session.speech_queue or []):
             new_queue = list(self.session.speech_queue)
@@ -265,9 +313,7 @@ class GameFlowController:
             **next_result,
         }
 
-    async def broadcast_reactions_stream(
-        self, speaker_id: str, content: str
-    ) -> Dict[str, Any]:
+    async def broadcast_reactions_stream(self, speaker_id: str, content: str) -> dict[str, Any]:
         """
         流式广播reaction（真人发言时使用，支持UI反馈）
 
@@ -303,7 +349,7 @@ class GameFlowController:
             )
             db_session.add(record)
             await db_session.commit()
-        except Exception as e:
+        except Exception:
             await db_session.rollback()
 
     async def _update_speaker_state(self, character_id: str, content: str, db_session):
@@ -428,9 +474,7 @@ class GameFlowController:
         )
         await db_session.commit()
 
-    async def _save_reactions_to_db(
-        self, reactions: Dict[str, Any], speaker_id: str, db_session
-    ):
+    async def _save_reactions_to_db(self, reactions: dict[str, Any], speaker_id: str, db_session):
         """
         保存AI玩家的反应结果到数据库
 
@@ -503,16 +547,14 @@ class GameFlowController:
                     current_perspectives[speaker_id] = []
                 elif not isinstance(current_perspectives[speaker_id], list):
                     # 兼容旧格式：单条字符串转为列表
-                    current_perspectives[speaker_id] = [
-                        current_perspectives[speaker_id]
-                    ]
+                    current_perspectives[speaker_id] = [current_perspectives[speaker_id]]
                 current_perspectives[speaker_id].append(main_perspective)
                 player_state.player_perspectives = current_perspectives
                 flag_modified(player_state, "player_perspectives")
 
         await db_session.commit()
 
-    async def _determine_next_speaker(self, db_session) -> Dict[str, Any]:
+    async def _determine_next_speaker(self, db_session) -> dict[str, Any]:
         """确定下一位发言者"""
         current_stage = self.session.current_stage
 
@@ -535,10 +577,10 @@ class GameFlowController:
 
         return {"next_speaker": None, "stage_complete": True}
 
-    async def _get_next_sequential_speaker(self, db_session=None) -> Dict[str, Any]:
+    async def _get_next_sequential_speaker(self, db_session=None) -> dict[str, Any]:
         """获取顺序发言的下一位"""
+
         from sqlalchemy import text
-        import json
 
         speech_queue = self.session.speech_queue or []
 
@@ -562,9 +604,7 @@ class GameFlowController:
 
             return {
                 "next_speaker": next_speaker,
-                "next_speaker_name": self.agent_manager.get_character_name(
-                    next_speaker
-                ),
+                "next_speaker_name": self.agent_manager.get_character_name(next_speaker),
                 "stage_complete": False,
             }
         else:
@@ -586,7 +626,7 @@ class GameFlowController:
                 "message": "当前阶段已完成，可以推进到下一阶段",
             }
 
-    async def _get_next_free_speaker(self, db_session) -> Dict[str, Any]:
+    async def _get_next_free_speaker(self, db_session) -> dict[str, Any]:
         """
         获取自由发言的下一位
 
@@ -599,9 +639,7 @@ class GameFlowController:
         player_states = await self._get_all_player_states(db_session)
 
         # 检查是否所有玩家都没有剩余发言次数
-        all_exhausted = all(
-            state.get("remaining_speech_count", 0) == 0 for state in player_states
-        )
+        all_exhausted = all(state.get("remaining_speech_count", 0) == 0 for state in player_states)
         if all_exhausted and player_states:
             return {
                 "next_speaker": None,
@@ -611,9 +649,7 @@ class GameFlowController:
 
         # 过滤出仍有发言机会的玩家
         available_players = [
-            state
-            for state in player_states
-            if state.get("remaining_speech_count", 0) > 0
+            state for state in player_states if state.get("remaining_speech_count", 0) > 0
         ]
 
         if not available_players:
@@ -649,9 +685,7 @@ class GameFlowController:
                 await db_session.commit()
             return {
                 "next_speaker": next_speaker,
-                "next_speaker_name": self.agent_manager.get_character_name(
-                    next_speaker
-                ),
+                "next_speaker_name": self.agent_manager.get_character_name(next_speaker),
                 "tendency_score": tendency.score,
                 "stage_complete": False,
             }
@@ -662,7 +696,7 @@ class GameFlowController:
                 "message": "自由发言阶段已完成",
             }
 
-    async def _get_all_player_states(self, db_session) -> List[Dict[str, Any]]:
+    async def _get_all_player_states(self, db_session) -> list[dict[str, Any]]:
         """获取所有玩家状态"""
         if not db_session:
             return []
@@ -677,9 +711,7 @@ class GameFlowController:
         return [
             {
                 **state.to_dict(),
-                "character_name": self.agent_manager.get_character_name(
-                    state.character_id
-                ),
+                "character_name": self.agent_manager.get_character_name(state.character_id),
             }
             for state in states
         ]
@@ -711,10 +743,7 @@ class GameFlowController:
                 return await self.transition_to_free_discussion(db_session)
 
         # 检查是否在 vote 类型中，且需要从 SUMMARY 过渡到 VOTE
-        if (
-            current_type == "vote"
-            and self.session.current_stage == GameStage.SUMMARY.value
-        ):
+        if current_type == "vote" and self.session.current_stage == GameStage.SUMMARY.value:
             # SUMMARY 发言结束，进入实际投票阶段
             return await self.transition_to_vote(db_session)
 
@@ -741,9 +770,7 @@ class GameFlowController:
             "vote": GameStage.SUMMARY.value,
             "review": GameStage.REVIEW.value,
         }
-        self.session.current_stage = stage_mapping.get(
-            next_stage_type, GameStage.INTRO.value
-        )
+        self.session.current_stage = stage_mapping.get(next_stage_type, GameStage.INTRO.value)
 
         # 构建发言队列（保持剧本原始角色顺序）
         queue = [c["character_id"] for c in self.characters]
@@ -790,7 +817,9 @@ class GameFlowController:
                 if system_notice:
                     audio_key = f"stage_{self.current_process_index}"
             if not system_notice:
-                system_notice = "总结发言阶段，请各位依次进行最终总结，阐述你的推理、指控理由、以及最终辩护。"
+                system_notice = (
+                    "总结发言阶段，请各位依次进行最终总结，阐述你的推理、指控理由、以及最终辩护。"
+                )
         else:
             system_notice = next_stage_config.get("system_notice", "")
             # Fallback: if review stage has no system_notice, use full_truth
@@ -860,7 +889,8 @@ class GameFlowController:
 
         # 计算当前是第几个 advancement 阶段（用于索引 free_speech_limits）
         advancement_index = sum(
-            1 for i in range(self.current_process_index)
+            1
+            for i in range(self.current_process_index)
             if self.game_process[i].get("type") == "advancement"
         )
 
@@ -871,7 +901,12 @@ class GameFlowController:
         if free_speech_limits:
             try:
                 import json as _json
-                limits = _json.loads(free_speech_limits) if isinstance(free_speech_limits, str) else free_speech_limits
+
+                limits = (
+                    _json.loads(free_speech_limits)
+                    if isinstance(free_speech_limits, str)
+                    else free_speech_limits
+                )
                 if isinstance(limits, list) and 0 <= advancement_index < len(limits):
                     speech_count = limits[advancement_index]
             except (ValueError, TypeError):
@@ -946,7 +981,7 @@ class GameFlowController:
 
     async def generate_ai_speech(
         self, character_id: str, db_session=None
-    ) -> AsyncIterator[Dict[str, Any]]:
+    ) -> AsyncIterator[dict[str, Any]]:
         """
         生成AI玩家发言
 
@@ -964,10 +999,9 @@ class GameFlowController:
             Dict[str, Any]: 结构化的流式数据，包含type和相应字段
         """
         from app.agents.agent_player import (
-            StreamChunk,
-            StreamToken,
-            StreamProgress,
             StreamError,
+            StreamProgress,
+            StreamToken,
         )
 
         agent = self.agent_manager.get_agent(character_id)
@@ -998,7 +1032,7 @@ class GameFlowController:
                     "message": chunk.message,
                 }
 
-    async def _build_game_state(self, character_id: str, db_session) -> Dict[str, Any]:
+    async def _build_game_state(self, character_id: str, db_session) -> dict[str, Any]:
         """
         构建 Agent 所需的完整游戏状态
 
@@ -1010,9 +1044,7 @@ class GameFlowController:
             Dict: 游戏状态，包含 GameAgentState 所需的所有字段
         """
         # 基础游戏上下文
-        character_name_map = {
-            c["character_id"]: c.get("name", "") for c in self.characters
-        }
+        character_name_map = {c["character_id"]: c.get("name", "") for c in self.characters}
         character_names = list(character_name_map.values())
 
         game_state = {
@@ -1067,7 +1099,7 @@ class GameFlowController:
 
         return "\n".join(context_parts)
 
-    def get_game_state(self) -> Dict[str, Any]:
+    def get_game_state(self) -> dict[str, Any]:
         """获取当前游戏状态"""
 
         # 构建agent_llm_info

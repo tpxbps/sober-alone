@@ -5,19 +5,22 @@ generate_outline node — 根据用户创意生成剧本大纲（结构化输出
 import asyncio
 import logging
 
+from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
-from langchain_core.messages import SystemMessage, HumanMessage
 
-from app.script_editor.state import ScriptGenState, STEP_GENERATE_OUTLINE
-from app.script_editor.prompts.templates import get_prompt
 from app.script_editor.nodes.utils import call_llm
+from app.script_editor.prompts.templates import get_prompt
+from app.script_editor.state import STEP_GENERATE_OUTLINE, ScriptGenState
 
 logger = logging.getLogger(__name__)
 
 
 class OutlineResult(BaseModel):
     """大纲结构化输出"""
-    script_title: str = Field(description="剧本标题（2~6个字的精炼标题，如：客栈、暗夜追踪、迷雾庄园）")
+
+    script_title: str = Field(
+        description="剧本标题（2~6个字的精炼标题，如：客栈、暗夜追踪、迷雾庄园）"
+    )
     content: str = Field(description="完整的剧本杀游戏大纲（Markdown格式）")
 
 
@@ -31,13 +34,20 @@ async def generate_outline(state: ScriptGenState) -> dict:
     outline = ""
     try:
         from app.core.llm_factory import create_llm
-        llm = create_llm(model="deepseek-v4-flash", temperature=0.85, timeout=180, disable_thinking=True)
-        structured_llm = llm.with_structured_output(OutlineResult, method="function_calling", tool_choice="auto")
+
+        llm = create_llm(
+            model="deepseek-v4-flash", temperature=0.85, timeout=180, disable_thinking=True
+        )
+        structured_llm = llm.with_structured_output(
+            OutlineResult, method="function_calling", tool_choice="auto"
+        )
         result = await asyncio.wait_for(
-            structured_llm.ainvoke([
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=user_content),
-            ]),
+            structured_llm.ainvoke(
+                [
+                    SystemMessage(content=system_prompt),
+                    HumanMessage(content=user_content),
+                ]
+            ),
             timeout=240,
         )
         title = result.script_title.strip()  # type: ignore[union-attr]

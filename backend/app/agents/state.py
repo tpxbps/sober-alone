@@ -10,8 +10,6 @@ GameAgentState 继承 LangChain 的 AgentState，添加游戏相关字段。
 2. db_session 不再包含在状态中，而是通过 contextvars 传递，避免序列化问题
 """
 
-from typing import Dict
-
 from langchain.agents import AgentState
 
 
@@ -46,7 +44,7 @@ class GameAgentState(AgentState):
     current_round: int
 
     # ID到名称的映射 (用于工具中转换)
-    character_name_map: Dict[str, str]
+    character_name_map: dict[str, str]
 
     # 当前剧本中所有角色名称列表（用于校验）
     character_names: list[str]

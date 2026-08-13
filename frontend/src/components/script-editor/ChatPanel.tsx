@@ -3,6 +3,8 @@ import { Send, X, Loader2 } from "lucide-react";
 import { AI_MODELS } from "@/types/game";
 import type { ChatMessage } from "@/types/editor";
 import { editorApi } from "@/lib/editorApi";
+import { systemApi } from "@/lib/api";
+import { configuredModels } from "@/lib/capabilityAdapter";
 import { Markdown } from "@/components/ui/Markdown";
 
 interface ChatPanelProps {
@@ -23,10 +25,27 @@ export function ChatPanel({ threadId, onClose }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [model, setModel] = useState(AI_MODELS[0].id);
+  const [availableModels, setAvailableModels] = useState<typeof AI_MODELS>([]);
+  const [modelReason, setModelReason] = useState("正在检查模型能力…");
   const [isStreaming, setIsStreaming] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const userScrolledUp = useRef(false);
+
+  useEffect(() => {
+    systemApi
+      .getCapabilities()
+      .then((capabilities) => {
+        const models = configuredModels(AI_MODELS, capabilities);
+        setAvailableModels(models);
+        setModelReason(models.length ? "" : "没有已配置的模型");
+        if (models[0]) setModel(models[0].id);
+      })
+      .catch(() => {
+        setAvailableModels([]);
+        setModelReason("无法读取后端模型能力");
+      });
+  }, []);
 
   // Check if user is near bottom
   const isNearBottom = () => {
@@ -55,7 +74,7 @@ export function ChatPanel({ threadId, onClose }: ChatPanelProps) {
 
   const handleSend = useCallback(async () => {
     const trimmed = input.trim();
-    if (!trimmed || isStreaming) return;
+    if (!trimmed || isStreaming || availableModels.length === 0) return;
 
     const userMsg: ChatMessage = { role: "user", content: trimmed };
     const newMessages = [...messages, userMsg];
@@ -127,7 +146,7 @@ export function ChatPanel({ threadId, onClose }: ChatPanelProps) {
     } catch {
       setIsStreaming(false);
     }
-  }, [input, isStreaming, messages, model, chatSessionId, threadId]);
+  }, [input, isStreaming, messages, model, chatSessionId, threadId, availableModels.length]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -145,9 +164,14 @@ export function ChatPanel({ threadId, onClose }: ChatPanelProps) {
           <select
             value={model}
             onChange={(e) => setModel(e.target.value)}
+            disabled={availableModels.length === 0}
+            title={modelReason}
             className="text-xs px-2 py-1 rounded border border-border/50 bg-card focus:outline-none focus:border-primary/50"
           >
-            {AI_MODELS.map((m) => (
+            {availableModels.length === 0 && (
+              <option value={model}>{modelReason}</option>
+            )}
+            {availableModels.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.name}
               </option>
@@ -242,7 +266,7 @@ export function ChatPanel({ threadId, onClose }: ChatPanelProps) {
           />
           <button
             onClick={handleSend}
-            disabled={!input.trim() || isStreaming}
+            disabled={!input.trim() || isStreaming || availableModels.length === 0}
             className="shrink-0 p-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             <Send className="w-4 h-4" />

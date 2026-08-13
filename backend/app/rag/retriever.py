@@ -4,7 +4,8 @@ RAG Retriever - ChromaDB向量检索器
 """
 
 import asyncio
-from typing import List, Optional, Dict, Any, cast
+from typing import Any, cast
+
 import chromadb
 from chromadb.config import Settings as ChromaSettings
 from zhipuai import ZhipuAI
@@ -20,7 +21,7 @@ class ChromaRetriever:
     向量数据库存储在 data/chroma/ 目录下。
     """
 
-    def __init__(self, persist_dir: str = ''):
+    def __init__(self, persist_dir: str = ""):
         """
         初始化检索器
 
@@ -29,8 +30,7 @@ class ChromaRetriever:
         """
         self.persist_dir = persist_dir or settings.CHROMA_PERSIST_DIR
         self.client = chromadb.PersistentClient(
-            path=self.persist_dir,
-            settings=ChromaSettings(anonymized_telemetry=False)
+            path=self.persist_dir, settings=ChromaSettings(anonymized_telemetry=False)
         )
         self.zhipu_client = ZhipuAI(api_key=settings.ZHIPUAI_API_KEY)
         self.embedding_model = "embedding-3"
@@ -48,7 +48,7 @@ class ChromaRetriever:
         # 预处理时，将UUID中的横线替换为了下划线，以符合ChromaDB命名规范
         return f"script_{script_id.replace('-', '_')}"
 
-    def _create_embeddings(self, texts: List[str]) -> List[List[float]]:
+    def _create_embeddings(self, texts: list[str]) -> list[list[float]]:
         """
         创建文本嵌入向量
 
@@ -59,19 +59,13 @@ class ChromaRetriever:
             List[List[float]]: 嵌入向量列表
         """
         response = self.zhipu_client.embeddings.create(
-            model=self.embedding_model,
-            input=texts,
-            dimensions=1024
+            model=self.embedding_model, input=texts, dimensions=1024
         )
         return [item.embedding for item in response.data]
 
     async def retrieve(
-        self,
-        script_id: str,
-        query: str,
-        character_id: Optional[str] = None,
-        top_k: int = 3
-    ) -> List[Dict[str, Any]]:
+        self, script_id: str, query: str, character_id: str | None = None, top_k: int = 3
+    ) -> list[dict[str, Any]]:
         """
         检索相关内容
 
@@ -106,23 +100,31 @@ class ChromaRetriever:
             query_embeddings=cast(Any, query_embeddings),
             n_results=top_k,
             where=cast(Any, where_filter),
-            include=["documents", "metadatas", "distances"]
+            include=["documents", "metadatas", "distances"],
         )
 
         # 格式化结果
         formatted_results = []
         if results["documents"] and results["documents"][0]:
             for i in range(len(results["documents"][0])):
-                formatted_results.append({
-                    "content": results["documents"][0][i],
-                    "metadata": results["metadatas"][0][i] if results["metadatas"] else {},
-                    "distance": results["distances"][0][i] if results["distances"] else 0.0
-                })
+                metadata = results["metadatas"][0][i] if results["metadatas"] else {}
+                # Defense in depth: a malformed or stale index must never leak a
+                # different character's private script into this role.
+                if character_id and metadata.get("character_id") != character_id:
+                    continue
+                formatted_results.append(
+                    {
+                        "content": results["documents"][0][i],
+                        "metadata": metadata,
+                        "distance": results["distances"][0][i] if results["distances"] else 0.0,
+                    }
+                )
 
         return formatted_results
 
+
 # 全局实例
-_retriever_instance: Optional[ChromaRetriever] = None
+_retriever_instance: ChromaRetriever | None = None
 
 
 def get_retriever() -> ChromaRetriever:

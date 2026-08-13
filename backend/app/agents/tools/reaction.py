@@ -6,13 +6,11 @@ update_role_reaction tool
 功能: 更新怀疑图谱（suspicion_reasons）- 支持同时更新多名角色
 """
 
-from typing import List
+from langchain.tools import ToolRuntime, tool
+from langgraph.config import get_stream_writer
 from pydantic import BaseModel, Field
 
-from langchain.tools import tool, ToolRuntime
-from langgraph.config import get_stream_writer
 from app.agents.context import get_db_session
-
 
 # 允许调用此工具的阶段
 ALLOWED_STAGES = ["clue_analysis"]
@@ -37,7 +35,7 @@ class CharacterSuspicion(BaseModel):
 class ClueAnalysisInput(BaseModel):
     """线索分析输入参数"""
 
-    suspicion_updates: List[CharacterSuspicion] = Field(
+    suspicion_updates: list[CharacterSuspicion] = Field(
         default_factory=list,
         description="需要更新的角色怀疑列表（可同时更新多名角色，如无需更新则为空列表）",
     )
@@ -45,7 +43,7 @@ class ClueAnalysisInput(BaseModel):
 
 @tool(args_schema=ClueAnalysisInput)
 async def update_role_reaction(
-    suspicion_updates: List[CharacterSuspicion],
+    suspicion_updates: list[CharacterSuspicion],
     runtime: ToolRuntime,
 ) -> str:
     """
@@ -73,9 +71,7 @@ async def update_role_reaction(
     # 检查阶段限制
     current_stage = state.get("current_stage", "")
     if current_stage not in ALLOWED_STAGES:
-        return (
-            f"当前阶段为「{current_stage}」，无法更新怀疑。此工具仅在线索分析阶段可用。"
-        )
+        return f"当前阶段为「{current_stage}」，无法更新怀疑。此工具仅在线索分析阶段可用。"
 
     # 从 state 获取上下文
     session_id = state.get("session_id", "")
@@ -97,7 +93,9 @@ async def update_role_reaction(
         target_name = update.character_name
 
         if target_name not in character_names:
-            return f"错误：角色「{target_name}」不在当前剧本中。可用角色：{', '.join(character_names)}"
+            return (
+                f"错误：角色「{target_name}」不在当前剧本中。可用角色：{', '.join(character_names)}"
+            )
 
         # 根据角色名找到角色ID
         target_id = None
@@ -114,6 +112,7 @@ async def update_role_reaction(
     try:
         from sqlalchemy import select
         from sqlalchemy.orm.attributes import flag_modified
+
         from app.db.models import PlayerState
 
         # 获取当前玩家状态
@@ -140,9 +139,7 @@ async def update_role_reaction(
             reason = update.suspicion_reason
 
             # 获取当前怀疑数据
-            current_data = suspicion_reasons.get(
-                target_id, {"score": 0.0, "reason": ""}
-            )
+            current_data = suspicion_reasons.get(target_id, {"score": 0.0, "reason": ""})
 
             # 更新怀疑值（取较大值，而非累加）
             new_score = max(current_data.get("score", 0.0), score)

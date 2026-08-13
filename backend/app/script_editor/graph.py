@@ -5,31 +5,34 @@ Script Generation Graph — LangGraph StateGraph 定义
 import logging
 from typing import Literal
 
-from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph import END, START, StateGraph
 
-from app.script_editor.state import ScriptGenState
+from app.script_editor.nodes.convert import convert_to_game_data
+from app.script_editor.nodes.final_draft import generate_final_draft
+from app.script_editor.nodes.first_draft import generate_first_draft
 from app.script_editor.nodes.init_node import init_workflow
 from app.script_editor.nodes.outline import generate_outline
-from app.script_editor.nodes.first_draft import generate_first_draft
 from app.script_editor.nodes.review import review_by_llm
-from app.script_editor.nodes.final_draft import generate_final_draft
 from app.script_editor.nodes.review_nodes import (
-    review_outline,
-    review_first_draft,
     review_final,
+    review_first_draft,
     review_game_data,
+    review_outline,
 )
-from app.script_editor.nodes.convert import convert_to_game_data
-from app.script_editor.nodes.save import generate_assets, save_to_database
 from app.script_editor.nodes.safety_check import safety_check
+from app.script_editor.nodes.save import generate_assets, save_to_database
+from app.script_editor.state import ScriptGenState
 
 logger = logging.getLogger(__name__)
 
 
 # === 路由函数 ===
 
-def _route_after_outline_review(state: ScriptGenState) -> Literal["generate_outline", "generate_first_draft"]:
+
+def _route_after_outline_review(
+    state: ScriptGenState,
+) -> Literal["generate_outline", "generate_first_draft"]:
     """大纲审阅后路由：确认→初稿，重新生成→大纲"""
     action = state.get("_review_action", "confirm")
     if action == "regenerate":
@@ -37,7 +40,9 @@ def _route_after_outline_review(state: ScriptGenState) -> Literal["generate_outl
     return "generate_first_draft"
 
 
-def _route_after_first_draft_review(state: ScriptGenState) -> Literal["generate_first_draft", "review_by_llm"]:
+def _route_after_first_draft_review(
+    state: ScriptGenState,
+) -> Literal["generate_first_draft", "review_by_llm"]:
     """初稿审阅后路由：确认→AI审稿，重新生成→初稿"""
     action = state.get("_review_action", "confirm")
     if action == "regenerate":
@@ -45,7 +50,9 @@ def _route_after_first_draft_review(state: ScriptGenState) -> Literal["generate_
     return "review_by_llm"
 
 
-def _route_after_final_review(state: ScriptGenState) -> Literal["generate_final_draft", "convert_to_game_data"]:
+def _route_after_final_review(
+    state: ScriptGenState,
+) -> Literal["generate_final_draft", "convert_to_game_data"]:
     """终稿审阅后路由：确认→数据转化，重新生成→终稿"""
     action = state.get("_review_action", "confirm")
     if action == "regenerate":
@@ -53,7 +60,9 @@ def _route_after_final_review(state: ScriptGenState) -> Literal["generate_final_
     return "convert_to_game_data"
 
 
-def _route_after_game_data_review(state: ScriptGenState) -> Literal["convert_to_game_data", "safety_check"]:
+def _route_after_game_data_review(
+    state: ScriptGenState,
+) -> Literal["convert_to_game_data", "safety_check"]:
     """游戏数据审阅后路由：确认→安全审查，重新生成→重新转化"""
     action = state.get("_review_action", "confirm")
     if action == "regenerate":
@@ -61,7 +70,9 @@ def _route_after_game_data_review(state: ScriptGenState) -> Literal["convert_to_
     return "safety_check"
 
 
-def _route_after_safety_check(state: ScriptGenState) -> Literal["save_to_database", "review_game_data"]:
+def _route_after_safety_check(
+    state: ScriptGenState,
+) -> Literal["save_to_database", "review_game_data"]:
     """安全审查后路由：通过→保存，未通过→返回修改"""
     if state.get("safety_passed", False):
         return "save_to_database"
@@ -69,6 +80,7 @@ def _route_after_safety_check(state: ScriptGenState) -> Literal["save_to_databas
 
 
 # === 构建图 ===
+
 
 def build_script_gen_graph():
     """

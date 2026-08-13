@@ -9,7 +9,7 @@ import re
 
 from langgraph.types import interrupt
 
-from app.script_editor.state import ScriptGenState, STEP_SAFETY_CHECK
+from app.script_editor.state import STEP_SAFETY_CHECK, ScriptGenState
 
 logger = logging.getLogger(__name__)
 
@@ -47,9 +47,7 @@ async def safety_check(state: ScriptGenState) -> dict:
     try:
         from app.core.llm_factory import create_llm
 
-        llm = create_llm(
-            model="deepseek-v4-flash", temperature=0.1, timeout=60, max_retries=2
-        )
+        llm = create_llm(model="deepseek-v4-flash", temperature=0.1, timeout=60, max_retries=2)
 
         response = await asyncio.wait_for(
             llm.ainvoke(
@@ -76,11 +74,9 @@ async def safety_check(state: ScriptGenState) -> dict:
             logger.info("Safety check passed")
             return {"current_step": STEP_SAFETY_CHECK, "safety_passed": True}
 
-        reason = (
-            content.split("\n", 1)[-1].strip() if "\n" in content else content.strip()
-        )
+        reason = content.split("\n", 1)[-1].strip() if "\n" in content else content.strip()
         logger.warning(f"Safety check failed: {reason}")
-        user_response = interrupt(
+        interrupt(
             {
                 "step": STEP_SAFETY_CHECK,
                 "step_label": "安全审查",
@@ -96,7 +92,7 @@ async def safety_check(state: ScriptGenState) -> dict:
             "_review_action": "regenerate",
         }
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error("Safety check timed out (90s), allowing pass-through")
         return {"current_step": STEP_SAFETY_CHECK, "safety_passed": True}
     except Exception as e:

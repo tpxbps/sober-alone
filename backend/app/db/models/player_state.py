@@ -9,9 +9,9 @@ PlayerState model - 玩家状态数据模型
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional, Any, Dict, cast, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
-from sqlalchemy import String, Integer, Float, Boolean, ForeignKey, JSON, DateTime
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -41,7 +41,7 @@ class PlayerState(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     session_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("game_sessions.session_id"), nullable=False
+        String(36), ForeignKey("game_sessions.session_id", ondelete="CASCADE"), nullable=False
     )
     character_id: Mapped[str] = mapped_column(String(36), nullable=False)
 
@@ -98,20 +98,22 @@ class PlayerState(Base):
     # 是否已投票
     has_voted: Mapped[bool] = mapped_column(Boolean, default=False)
     # 投票给谁
-    voted_for: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    voted_for: Mapped[str | None] = mapped_column(String(36), nullable=True)
     # 投票理由
-    vote_reasoning: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    vote_reasoning: Mapped[str | None] = mapped_column(String(1000), nullable=True)
 
     # ========================================
     # 时间戳
     # ========================================
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
-    last_speech_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.now, onupdate=datetime.now
+    )
+    last_speech_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # 关系
-    session: Mapped["GameSession"] = relationship("GameSession", back_populates="player_states")
+    session: Mapped[GameSession] = relationship("GameSession", back_populates="player_states")
 
     def __repr__(self):
         return f"<PlayerState(character_id={self.character_id}, wait_rounds={self.wait_rounds})>"
@@ -137,9 +139,7 @@ class PlayerState(Base):
         """
         # 被怀疑强度: 越高越想发言辩解
         suspected = (
-            self.suspected_intensity
-            if isinstance(self.suspected_intensity, (int, float))
-            else 0.0
+            self.suspected_intensity if isinstance(self.suspected_intensity, (int, float)) else 0.0
         )
 
         # 主动怀疑强度: 对别人怀疑越多越想发言
@@ -154,9 +154,7 @@ class PlayerState(Base):
 
         return round(cast(float, score), 3)
 
-    def get_agent_state(
-        self, character_name_map: Dict[str, str] = {}
-    ) -> Dict[str, Any]:
+    def get_agent_state(self, character_name_map: dict[str, str] = {}) -> dict[str, Any]:
         """
         获取Agent内部状态 (用于注入到AgentState)
 

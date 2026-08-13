@@ -78,18 +78,8 @@ export const editorApi = {
   },
 
   // Delete a script
-  deleteScript: async (scriptId: string, ownerUuid: string) => {
-    const response = await api.delete(`/script-editor/scripts/${scriptId}`, {
-      data: { owner_uuid: ownerUuid },
-    });
-    return response.data;
-  },
-
-  // Verify ownership
-  verifyOwnership: async (scriptId: string, ownerUuid: string) => {
-    const response = await api.get(`/script-editor/scripts/${scriptId}/verify-ownership`, {
-      params: { owner_uuid: ownerUuid },
-    });
+  deleteScript: async (scriptId: string) => {
+    const response = await api.delete(`/script-editor/scripts/${scriptId}`);
     return response.data;
   },
 

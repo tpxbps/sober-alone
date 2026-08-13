@@ -16,7 +16,7 @@ LLM Factory - LangChain模型初始化统一管理
 """
 
 import logging
-from typing import Literal
+from typing import Literal, cast
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_openai import ChatOpenAI
@@ -44,7 +44,7 @@ MODEL_PROVIDER_MAP: dict[str, str] = {
 
 
 def create_llm(
-    model: SupportedModel = "step-3.5-flash",
+    model: SupportedModel = "deepseek-v4-flash",
     temperature: float = 0.8,
     api_key: str | None = None,
     timeout: int | None = None,
@@ -66,8 +66,7 @@ def create_llm(
 
     if not provider:
         raise ValueError(
-            f"不支持的模型: {model}。"
-            f"支持的模型: {', '.join(sorted(MODEL_PROVIDER_MAP.keys()))}"
+            f"不支持的模型: {model}。支持的模型: {', '.join(sorted(MODEL_PROVIDER_MAP.keys()))}"
         )
 
     resolved_key = api_key or settings.get_api_key(provider)
@@ -173,11 +172,17 @@ def create_chat_model_for_agent(
 
 
 def create_summary_llm() -> BaseChatModel:
-    """创建用于快速摘要LLM（step-3.5-flash）"""
+    """Create the summary model, falling back to the configured primary model."""
     api_key = settings.get_api_key("stepfun")
     base_url = settings.get_base_url("stepfun")
     if not api_key or not base_url:
-        raise ValueError("未配置 stepfun 的 API Key 或 Base URL")
+        return create_llm(
+            model=cast(SupportedModel, settings.get_llm_model_name().lower()),
+            temperature=0.3,
+            timeout=90,
+            max_retries=2,
+            disable_thinking=True,
+        )
 
     return ChatOpenAI(
         model="step-3.5-flash",

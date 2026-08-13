@@ -29,7 +29,6 @@ export interface EditorInterruptInfo {
 export interface EditorWorkflowState {
   script_title: string;
   script_id: string;
-  owner_uuid: string;
   user_idea: string;
   player_count: number;
   difficulty: number;
@@ -59,7 +58,6 @@ export interface EditorWorkflowState {
 export interface StartWorkflowResponse {
   success: boolean;
   thread_id: string;
-  owner_uuid: string;
   script_id: string;
   script_title: string;
   current_step: string;
@@ -174,12 +172,13 @@ export interface GameDataSections {
 
 // === Asset progress (granular task tree) ===
 
-export type AssetTaskStatus = "pending" | "running" | "complete" | "failed";
+export type AssetTaskStatus = "pending" | "running" | "complete" | "failed" | "skipped";
 
 export interface AssetTask {
   id: string;
   label: string;
   status: AssetTaskStatus;
+  reason?: string;
 }
 
 export interface AssetPhase {

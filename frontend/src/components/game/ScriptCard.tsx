@@ -10,7 +10,6 @@ import {
 } from "lucide-react";
 import type { Script } from "@/types/game";
 import { DIFFICULTY_COLORS } from "@/types/game";
-import { getOwnerUuids, removeOwnerUuid } from "@/stores/editorStore";
 import { editorApi } from "@/lib/editorApi";
 
 interface ScriptCardProps {
@@ -22,9 +21,6 @@ interface ScriptCardProps {
 export function ScriptCard({ script, onClick, onDeleted }: ScriptCardProps) {
   const difficultyInfo =
     DIFFICULTY_COLORS[script.difficulty] || DIFFICULTY_COLORS[1];
-
-  const ownerUuids = getOwnerUuids();
-  const isOwner = script.owner_uuid && ownerUuids.includes(script.owner_uuid);
 
   const [showMenu, setShowMenu] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -46,11 +42,9 @@ export function ScriptCard({ script, onClick, onDeleted }: ScriptCardProps) {
   }, [showMenu]);
 
   const handleDelete = async () => {
-    if (!script.owner_uuid) return;
     setIsDeleting(true);
     try {
-      await editorApi.deleteScript(script.script_id, script.owner_uuid);
-      removeOwnerUuid(script.owner_uuid);
+      await editorApi.deleteScript(script.script_id);
       setShowDeleteConfirm(false);
       setShowMenu(false);
       onDeleted?.();
@@ -89,6 +83,11 @@ export function ScriptCard({ script, onClick, onDeleted }: ScriptCardProps) {
 
         {/* Overlay gradient */}
         <div className="absolute inset-0 bg-gradient-to-t from-background/90 via-background/20 to-transparent" />
+        {script.cover_image_url && (
+          <span className="absolute bottom-3 right-3 px-2 py-0.5 rounded bg-black/70 text-white text-[10px]">
+            AI 生成图片
+          </span>
+        )}
 
         {/* Difficulty badge */}
         <div
@@ -98,8 +97,8 @@ export function ScriptCard({ script, onClick, onDeleted }: ScriptCardProps) {
           {difficultyInfo.label}
         </div>
 
-        {/* Owner menu (3 dots) */}
-        {isOwner && (
+        {/* Local single-user script menu */}
+        {script.is_ai_generated && (
           <div ref={menuRef} className="absolute top-3 left-3 z-10">
             <button
               onClick={(e) => {
@@ -145,7 +144,7 @@ export function ScriptCard({ script, onClick, onDeleted }: ScriptCardProps) {
             {script.is_ai_generated && (
               <span className="px-2 py-0.5 text-xs rounded-full bg-primary/15 text-primary flex items-center gap-1 font-medium">
                 <Sparkles className="w-3 h-3" />
-                创作工坊
+                AI 生成
               </span>
             )}
             {script.tags &&

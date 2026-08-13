@@ -15,6 +15,7 @@ import { HorizontalTimeline } from "@/components/script-editor/HorizontalTimelin
 import { ContentPanel } from "@/components/script-editor/ContentPanel";
 import { ChatPanel } from "@/components/script-editor/ChatPanel";
 import { SettingsModal } from "@/components/SettingsModal";
+import { editorApi } from "@/lib/editorApi";
 import type { GameDataSections } from "@/types/editor";
 import { WORKFLOW_PHASES, getPhaseFromStep } from "@/types/editor";
 
@@ -32,7 +33,6 @@ export function ScriptEditorPage({ onBack }: ScriptEditorPageProps) {
     isStarting,
     error,
     scriptTitle,
-    ownerUuid,
     workflowState,
     assetProgress,
     convertProgress,
@@ -61,12 +61,12 @@ export function ScriptEditorPage({ onBack }: ScriptEditorPageProps) {
   // Restore session on mount
   useEffect(() => {
     restoreSession();
-  }, []);
+  }, [restoreSession]);
 
   // Fetch checkpoint history when workflow is active
   useEffect(() => {
     if (threadId) fetchHistory();
-  }, [threadId]);
+  }, [threadId, fetchHistory]);
 
   const handleStart = async (params: {
     user_idea: string;
@@ -124,14 +124,11 @@ export function ScriptEditorPage({ onBack }: ScriptEditorPageProps) {
 
   const handleDiscardScript = async () => {
     const sid = scriptId;
-    const oid = ownerUuid;
     reset();
     onBack();
-    if (sid && oid) {
+    if (sid) {
       try {
-        await (
-          await import("@/lib/editorApi")
-        ).editorApi.deleteScript(sid, oid);
+        await editorApi.deleteScript(sid);
       } catch {
         // Cleanup best-effort
       }
@@ -311,7 +308,6 @@ export function ScriptEditorPage({ onBack }: ScriptEditorPageProps) {
               isStarting={isStarting}
               error={error}
               scriptTitle={scriptTitle}
-              ownerUuid={ownerUuid}
               workflowState={workflowState}
               assetProgress={assetProgress}
               convertProgress={convertProgress}

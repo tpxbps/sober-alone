@@ -3,9 +3,10 @@ recall_personal_script_memory tool
 用于检索角色个人剧本中的相关具体细节
 """
 
-from pydantic import BaseModel, Field
-from langchain.tools import tool, ToolRuntime
+from langchain.tools import ToolRuntime, tool
 from langgraph.config import get_stream_writer
+from pydantic import BaseModel, Field
+
 from app.rag.retriever import get_retriever
 
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { FileEdit, X, Save } from "lucide-react";
 
@@ -14,34 +14,21 @@ export function DraftNotebook({
   onOpenChange,
 }: DraftNotebookProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [content, setContent] = useState("");
+  const [content, setContent] = useState(() =>
+    localStorage.getItem(
+      sessionId ? `draft_notebook_${sessionId}` : "draft_notebook_temp",
+    ) || "",
+  );
 
   // 存储 key
   const storageKey = sessionId
     ? `draft_notebook_${sessionId}`
     : "draft_notebook_temp";
 
-  // Sync with external open prop (triggered from mobile toolbar)
-  useEffect(() => {
-    if (open && !isOpen) {
-      setIsOpen(true);
-    }
-  }, [open]);
-
-  // 从 localStorage 加载草稿
-  useEffect(() => {
-    if (sessionId) {
-      const saved = localStorage.getItem(storageKey);
-      if (saved) {
-        setContent(saved);
-      }
-    }
-  }, [sessionId, storageKey]);
-
   // 保存草稿到 localStorage
-  const saveDraft = () => {
+  const saveDraft = useCallback(() => {
     localStorage.setItem(storageKey, content);
-  };
+  }, [content, storageKey]);
 
   // 自动保存
   useEffect(() => {
@@ -49,7 +36,9 @@ export function DraftNotebook({
       const timer = setTimeout(saveDraft, 1000);
       return () => clearTimeout(timer);
     }
-  }, [content, isOpen]);
+  }, [content, isOpen, saveDraft]);
+
+  const visible = isOpen || !!open;
 
   const handleOpen = () => {
     setIsOpen(true);
@@ -80,7 +69,7 @@ export function DraftNotebook({
 
       {/* Modal */}
       <AnimatePresence>
-        {isOpen && (
+        {visible && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}

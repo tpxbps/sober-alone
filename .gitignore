@@ -3,6 +3,13 @@ node_modules/
 .venv/
 __pycache__/
 *.pyc
+.pnpm-store/
+.uv-cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
 
 # Environment & Secrets
 .env
@@ -24,3 +31,11 @@ Thumbs.db
 # Build
 dist/
 build/
+
+# Local runtime data (databases, checkpoints, generated media and vectors)
+backend/.local-data/
+
+# Test and browser artifacts
+test-results/
+playwright-report/
+blob-report/

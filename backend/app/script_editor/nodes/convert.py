@@ -10,26 +10,22 @@ convert_to_game_data node — 将终稿转化为结构化游戏数据
 
 import asyncio
 import logging
-import threading
 import uuid
 from typing import Any
 
+from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
-from langchain_core.messages import SystemMessage, HumanMessage
 
-from app.script_editor.state import ScriptGenState, STEP_CONVERT
+from app.script_editor.services.progress_registry import convert_progress_registry
+from app.script_editor.state import STEP_CONVERT, ScriptGenState
 
 logger = logging.getLogger(__name__)
 
 # === Convert 进度追踪 ===
 
-_convert_progress: dict[str, dict] = {}
-_convert_lock = threading.Lock()
-_script_thread_map: dict[str, str] = {}
-
 
 def register_script_thread(script_id: str, thread_id: str):
-    _script_thread_map[script_id] = thread_id
+    convert_progress_registry.register_thread(script_id, thread_id)
 
 
 def _init_convert_progress(
@@ -107,17 +103,14 @@ def _init_convert_progress(
             "tasks": char_tasks,
         },
     ]
-    with _convert_lock:
-        _convert_progress[script_id] = {"phases": phases, "isComplete": False}
+    convert_progress_registry.init(script_id, phases)
     _publish_convert_progress(script_id)
 
 
 def _add_character_tasks(script_id: str, characters: list[dict]):
     """角色发现成功后，动态添加角色任务到进度树"""
-    with _convert_lock:
-        progress = _convert_progress.get(script_id)
-        if not progress:
-            return
+
+    def add_tasks(progress: dict) -> None:
         for phase in progress["phases"]:
             if phase["id"] == "characters":
                 phase["label"] = f"角色数据生成（{len(characters)}人）"
@@ -130,48 +123,31 @@ def _add_character_tasks(script_id: str, characters: list[dict]):
                         }
                     )
                 break
+
+    convert_progress_registry.mutate(script_id, add_tasks)
     _publish_convert_progress(script_id)
 
 
 def _update_convert_task(script_id: str, task_id: str, status: str):
-    with _convert_lock:
-        progress = _convert_progress.get(script_id)
-        if not progress:
-            return
-        for phase in progress["phases"]:
-            for task in phase.get("tasks", []):
-                if task["id"] == task_id:
-                    task["status"] = status
-                    break
+    convert_progress_registry.update_task(script_id, task_id, status)
     _publish_convert_progress(script_id)
 
 
 def _mark_convert_complete(script_id: str):
-    with _convert_lock:
-        if script_id in _convert_progress:
-            _convert_progress[script_id]["isComplete"] = True
+    convert_progress_registry.mark_complete(script_id)
     _publish_convert_progress(script_id)
 
 
 def _publish_convert_progress(script_id: str):
-    thread_id = _script_thread_map.get(script_id)
-    if not thread_id:
-        return
-    from app.script_editor.services.progress_bus import publish
-
-    with _convert_lock:
-        progress = _convert_progress.get(script_id)
-    publish(thread_id, "convert_progress", progress)
+    convert_progress_registry.publish(script_id)
 
 
 def get_convert_progress(script_id: str) -> dict | None:
-    with _convert_lock:
-        return _convert_progress.get(script_id)
+    return convert_progress_registry.snapshot(script_id)
 
 
 def reset_convert_progress(script_id: str):
-    with _convert_lock:
-        _convert_progress.pop(script_id, None)
+    convert_progress_registry.reset(script_id)
 
 
 # === Pydantic 结构化输出 Schema ===
@@ -292,7 +268,7 @@ class CharacterDiscoveryResult(BaseModel):
 
     characters: list[CharacterBrief] = Field(
         default_factory=list,
-        description=f"恰好为指定数量的角色列表，不可多不可少",
+        description="恰好为指定数量的角色列表，不可多不可少",
     )
 
     @property
@@ -599,15 +575,13 @@ async def _discover_characters(
         )
 
         if not result or not getattr(result, "characters", None):
-            logger.warning(f"Character discovery attempt {attempt+1}: returned empty")
+            logger.warning(f"Character discovery attempt {attempt + 1}: returned empty")
             continue
 
         # Pydantic 级别验证
-        if isinstance(result, CharacterDiscoveryResult) and not result.validate_count(
-            player_count
-        ):
+        if isinstance(result, CharacterDiscoveryResult) and not result.validate_count(player_count):
             logger.warning(
-                f"Character discovery attempt {attempt+1}: "
+                f"Character discovery attempt {attempt + 1}: "
                 f"Pydantic validation failed, found {result.count}, expected {player_count}"
             )
             continue
@@ -628,13 +602,13 @@ async def _discover_characters(
 
         if len(discovered) == player_count:
             logger.info(
-                f"Character discovery OK ({attempt+1} attempts): "
+                f"Character discovery OK ({attempt + 1} attempts): "
                 f"{[c['name'] for c in discovered]}"
             )
             return discovered
 
         logger.warning(
-            f"Character discovery attempt {attempt+1}: found {len(discovered)}, "
+            f"Character discovery attempt {attempt + 1}: found {len(discovered)}, "
             f"expected {player_count}. Retrying..."
         )
 
@@ -648,9 +622,7 @@ async def _discover_characters(
 # === 并行 LLM 调用封装 ===
 
 
-async def _run_game_clues(
-    base_llm, script_id: str, state: ScriptGenState, chars_summary: str
-):
+async def _run_game_clues(base_llm, script_id: str, state: ScriptGenState, chars_summary: str):
     """并行任务：生成线索阶段数据"""
     _update_convert_task(script_id, "game_flow", "running")
     num_rounds = state.get("num_clue_rounds", 2)
@@ -686,9 +658,7 @@ async def _run_game_clues(
         return None
 
 
-async def _run_game_scenes(
-    base_llm, script_id: str, state: ScriptGenState, chars_summary: str
-):
+async def _run_game_scenes(base_llm, script_id: str, state: ScriptGenState, chars_summary: str):
     """并行任务：生成开场/投票/真相等非线索场景"""
     _update_convert_task(script_id, "game_scenes", "running")
     try:
@@ -760,7 +730,7 @@ def _merge_game_process(
             clue_notice = (
                 stage_data.clue_analysis_notice
                 if stage_data and stage_data.clue_analysis_notice
-                else f"第{i+1}轮线索发现！请分析线索。"
+                else f"第{i + 1}轮线索发现！请分析线索。"
             )
             discuss_notice = (
                 stage_data.free_discussion_notice
@@ -772,11 +742,11 @@ def _merge_game_process(
                     "type": "advancement",
                     "children": [
                         {
-                            "stage_title": f"第{i+1}轮-线索分析阶段",
+                            "stage_title": f"第{i + 1}轮-线索分析阶段",
                             "system_notice": clue_notice,
                         },
                         {
-                            "stage_title": f"第{i+1}轮-自由讨论阶段",
+                            "stage_title": f"第{i + 1}轮-自由讨论阶段",
                             "system_notice": discuss_notice,
                         },
                     ],
@@ -789,11 +759,11 @@ def _merge_game_process(
                     "type": "advancement",
                     "children": [
                         {
-                            "stage_title": f"第{i+1}轮-线索分析阶段",
-                            "system_notice": f"第{i+1}轮线索发现！请分析线索。",
+                            "stage_title": f"第{i + 1}轮-线索分析阶段",
+                            "system_notice": f"第{i + 1}轮线索发现！请分析线索。",
                         },
                         {
-                            "stage_title": f"第{i+1}轮-自由讨论阶段",
+                            "stage_title": f"第{i + 1}轮-自由讨论阶段",
                             "system_notice": "进入自由讨论环节。",
                         },
                     ],
@@ -801,12 +771,8 @@ def _merge_game_process(
             )
 
     # 投票
-    summary_notice = (
-        scenes_result.summary_notice if scenes_result else ""
-    ) or "请依次总结发言。"
-    vote_notice = (
-        scenes_result.vote_notice if scenes_result else ""
-    ) or "现在进行最终投票。"
+    summary_notice = (scenes_result.summary_notice if scenes_result else "") or "请依次总结发言。"
+    vote_notice = (scenes_result.vote_notice if scenes_result else "") or "现在进行最终投票。"
     process.append(
         {
             "type": "vote",
@@ -876,7 +842,6 @@ async def _run_character(
     chars_summary: str,
 ) -> tuple[str, SingleCharacterResult | None]:
     """并行任务：生成单个角色数据。返回 (name, result)"""
-    i = 0  # for task_id
     char_name = char.get("name", "未知")
     task_id = f"char_{char_name}"
     _update_convert_task(script_id, task_id, "running")
@@ -949,9 +914,7 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
     chars_summary = _build_characters_summary(characters)
 
     if len(characters) != player_count:
-        logger.warning(
-            f"Character count ({len(characters)}) != player_count ({player_count})"
-        )
+        logger.warning(f"Character count ({len(characters)}) != player_count ({player_count})")
 
     # === 并行调用：clues + scenes + metadata + 所有角色 ===
     coroutines = []
@@ -1004,9 +967,7 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
             )
             char_mimo_voices[name] = mimo_voice
             char_results.append(char_result)
-            step_voice = _validate_step_voice(
-                char_result.step_voice_id, char_result.gender
-            )
+            step_voice = _validate_step_voice(char_result.step_voice_id, char_result.gender)
             logger.info(
                 f"char '{name}' OK: script={len(char_result.character_script)}chars, "
                 f"mimo_voice={mimo_voice}, step_voice={step_voice}"
@@ -1025,14 +986,12 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
             c["character_id"] = str(uuid.uuid4())
 
     # === 拼接 game_full_process ===
-    game_full_process, free_speech_limits, full_truth, truth_reveal_notice = (
-        _merge_game_process(
-            clues_result,
-            scenes_result,
-            num_rounds,
-            script_title,
-            outline,
-        )
+    game_full_process, free_speech_limits, full_truth, truth_reveal_notice = _merge_game_process(
+        clues_result,
+        scenes_result,
+        num_rounds,
+        script_title,
+        outline,
     )
 
     # === 元数据 ===
@@ -1141,24 +1100,17 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
             )
 
     # Only mark complete if ALL tasks succeeded
-    with _convert_lock:
-        progress = _convert_progress.get(script_id)
-        has_failed = False
-        if progress:
-            for phase in progress.get("phases", []):
-                for task in phase.get("tasks", []):
-                    if task.get("status") == "failed":
-                        has_failed = True
-                        break
-                if has_failed:
-                    break
+    progress = get_convert_progress(script_id)
+    has_failed = any(
+        task.get("status") == "failed"
+        for phase in (progress or {}).get("phases", [])
+        for task in phase.get("tasks", [])
+    )
 
     if not has_failed:
         _mark_convert_complete(script_id)
     else:
-        logger.warning(
-            f"Convert has failures for script {script_id}, not marking complete"
-        )
+        logger.warning(f"Convert has failures for script {script_id}, not marking complete")
         _publish_convert_progress(script_id)
 
     return {
@@ -1204,13 +1156,9 @@ def _extract_clue_stages(
                         if children
                         else f"第{round_num}轮"
                     ),
-                    "system_notice": (
-                        children[0].get("system_notice", "") if children else ""
-                    ),
+                    "system_notice": (children[0].get("system_notice", "") if children else ""),
                     "discussion_notice": (
-                        children[1].get("system_notice", "")
-                        if len(children) > 1
-                        else ""
+                        children[1].get("system_notice", "") if len(children) > 1 else ""
                     ),
                     "free_speech_limit": 2,
                 }
@@ -1258,11 +1206,7 @@ async def retry_single_convert(script_id: str, task_id: str, state: ScriptGenSta
             elif task_id.startswith("char_"):
                 char_name = task_id[5:]
                 char = next(
-                    (
-                        c
-                        for c in state.get("characters", [])
-                        if c.get("name") == char_name
-                    ),
+                    (c for c in state.get("characters", []) if c.get("name") == char_name),
                     None,
                 )
                 if not char:
@@ -1280,16 +1224,8 @@ async def retry_single_convert(script_id: str, task_id: str, state: ScriptGenSta
 
 def _check_and_mark_convert_complete(script_id: str):
     """Check if all convert tasks are complete; if so, mark progress as done."""
-    with _convert_lock:
-        progress = _convert_progress.get(script_id)
-        if not progress:
-            return
-        for phase in progress.get("phases", []):
-            for task in phase.get("tasks", []):
-                if task.get("status") != "complete":
-                    return
-    # All tasks complete
-    _mark_convert_complete(script_id)
+    if convert_progress_registry.complete_if_all(script_id, {"complete"}):
+        _publish_convert_progress(script_id)
 
 
 def _create_fallback_process(state: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1348,9 +1284,7 @@ def _create_fallback_process(state: dict[str, Any]) -> list[dict[str, Any]]:
     return process
 
 
-def _generate_fallback_prompts(
-    characters: list[dict], character_scripts: dict
-) -> dict[str, str]:
+def _generate_fallback_prompts(characters: list[dict], character_scripts: dict) -> dict[str, str]:
     prompts = {}
     for c in characters:
         name = c.get("name", "")
@@ -1358,10 +1292,10 @@ def _generate_fallback_prompts(
         prompt_text = f"""你正在扮演剧本杀游戏中的角色「{name}」。
 
 【角色身份】
-{name}，{c.get('gender', '')}，{c.get('age', '')}岁，{c.get('occupation', '')}
+{name}，{c.get("gender", "")}，{c.get("age", "")}岁，{c.get("occupation", "")}
 
 【核心背景】
-{c.get('profile', '') or script[:500] if script else ''}
+{c.get("profile", "") or script[:500] if script else ""}
 
 【你的目标】
 1. 隐藏自己的秘密和可疑行为
@@ -1369,7 +1303,7 @@ def _generate_fallback_prompts(
 3. 在不暴露自己的前提下，引导讨论方向
 
 【你掌握的关键信息】
-{script[:800] if script else '（暂无详细信息）'}
+{script[:800] if script else "（暂无详细信息）"}
 """
         prompts[name] = prompt_text
     return prompts
