@@ -183,12 +183,19 @@ test('大厅 → 选角 → 发言 → 推进 → 投票 → 复盘', async ({ p
   await page.getByRole('button', { name: '开始游戏' }).click()
 
   await page.getByPlaceholder('输入你的发言...').fill('我先说明停电时间。')
+  const historyReloaded = page.waitForResponse((response) => {
+    const path = new URL(response.url()).pathname
+    return response.request().method() === 'GET' && path.endsWith('/records')
+  })
   await page.getByRole('button', { name: '完成发言' }).click()
+  await historyReloaded
   // The optimistic record and its authoritative replacement overlap briefly
-  // while AnimatePresence completes the exit animation. Assert convergence.
+  // while AnimatePresence completes the exit animation. Wait for that bounded
+  // visual transition, then assert the authoritative list has converged.
   const humanSpeech = page.getByText('我先说明停电时间。', { exact: true })
+  await expect(humanSpeech.last()).toBeVisible()
+  await page.waitForTimeout(500)
   await expect(humanSpeech).toHaveCount(1)
-  await expect(humanSpeech).toBeVisible()
   await page.getByRole('button', { name: '进入下一阶段' }).click()
 
   await expect(page.getByText('请投票指认真凶')).toBeVisible()
