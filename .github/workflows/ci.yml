@@ -33,7 +33,9 @@ jobs:
           uv run --project backend ruff check backend/app backend/migrations backend/tests backend/scripts scripts
           uv run --project backend ruff format --check backend/app backend/migrations backend/tests backend/scripts scripts
       - name: Unit and integration tests without external network
-        run: uv run --project backend pytest -q backend/tests
+        run: >-
+          uv run --project backend pytest -q backend/tests
+          --disable-socket --allow-hosts=127.0.0.1,localhost
       - name: Migration and seed smoke test
         working-directory: backend
         env:
@@ -152,7 +154,9 @@ jobs:
       - name: Install frozen dependencies
         run: uv sync --directory backend --frozen
       - name: Backend unit and integration tests
-        run: uv run --project backend pytest -q backend/tests
+        run: >-
+          uv run --project backend pytest -q backend/tests
+          --disable-socket --allow-hosts=127.0.0.1,localhost
       - name: Install frozen frontend dependencies
         working-directory: frontend
         run: pnpm install --frozen-lockfile
