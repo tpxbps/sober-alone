@@ -1,8 +1,11 @@
 import pytest
+from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.api.routes.system import healthz
-from app.main import app
+from app.db.base import Base
+from app.db.readiness import DatabaseNotInitializedError
+from app.main import app, lifespan
 
 
 @pytest.mark.asyncio
@@ -11,7 +14,36 @@ async def test_healthz_checks_local_database_only():
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
     async with session_factory() as session:
+        with pytest.raises(HTTPException) as exc_info:
+            await healthz(session)
+
+    assert exc_info.value.status_code == 503
+    assert "uv run python -m app.cli init" in exc_info.value.detail
+    assert "scripts" in exc_info.value.detail
+
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    async with session_factory() as session:
         assert await healthz(session) == {"status": "ok", "database": "ok"}
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_lifespan_fails_fast_until_schema_exists(monkeypatch):
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    monkeypatch.setattr("app.main.engine", engine)
+
+    with pytest.raises(DatabaseNotInitializedError, match="app.cli init"):
+        async with lifespan(app):
+            pass
+
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    async with lifespan(app):
+        pass
 
     await engine.dispose()
 

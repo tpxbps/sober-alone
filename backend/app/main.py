@@ -1,15 +1,31 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import game, script_editor, system
 from app.core.config import settings
+from app.db.readiness import ensure_database_ready
+from app.db.session import engine
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """Fail fast with an actionable message when migrations were skipped."""
+
+    async with engine.connect() as connection:
+        await ensure_database_ready(connection)
+    yield
+
 
 # Create FastAPI app
 app = FastAPI(
     title=settings.PROJECT_NAME,
     description="AI-powered Murder Mystery Game API",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 # Configure CORS

@@ -74,6 +74,15 @@ uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 `init` 会升级 Alembic、创建本地目录，并且仅在空库时导入 `雾港回声`；重复执行不会覆盖已有剧本。
+启动 Uvicorn 前应看到 `Database ready.`。如果启动时提示数据库未初始化，或曾遇到
+`no such table: scripts`，请先停止后端，在 `backend` 目录重新执行：
+
+```bash
+uv run python -m app.cli init
+```
+
+然后重新启动后端。`GET http://127.0.0.1:8000/healthz` 返回
+`{"status":"ok","database":"ok"}` 后，才表示本地数据库已可用。
 
 ### 2. 启动前端
 
