@@ -40,3 +40,6 @@ test-results/
 playwright-report/
 blob-report/
 /results.sarif
+
+# Local maintainer notes
+/PLAN.md

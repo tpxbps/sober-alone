@@ -16,8 +16,8 @@ describe('adaptGameState', () => {
       human_character_id: 'human',
       script: {
         script_id: 'script',
-        title: '雾港回声',
-        estimated_duration: 20,
+        title: '零点来电',
+        estimated_duration: 25,
         is_ai_generated: true,
       },
       characters: [{ character_id: 'human', name: '林岚', is_human: true }],
@@ -25,7 +25,7 @@ describe('adaptGameState', () => {
 
     const patch = adaptGameState(response)
 
-    expect(patch.script?.estimated_duration).toBe(20)
+    expect(patch.script?.estimated_duration).toBe(25)
     expect(patch.humanCharacterId).toBe('human')
     expect(patch.characters[0].gender).toBe('未知')
     expect(response.characters[0]).not.toHaveProperty('gender')

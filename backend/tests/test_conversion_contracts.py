@@ -21,8 +21,8 @@ def test_conversion_merge_preserves_round_task_shape_and_limits():
         clues,
         None,
         num_rounds=2,
-        script_title="雾港回声",
-        outline="暴雨封港。",
+        script_title="零点来电",
+        outline="广播站旧址的最后一夜。",
     )
 
     assert [stage["type"] for stage in process] == [

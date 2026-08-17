@@ -1,27 +1,27 @@
 import { expect, test, type Route } from '@playwright/test'
 
 const script = {
-  script_id: 'sample-fog-harbor-echo-v1',
-  title: '雾港回声',
-  description: 'AI 生成并经人工逻辑审阅的原创纯文本样例。',
-  overview: '暴雨封港之夜，四名留守者还原灯塔命案。',
+  script_id: 'sample-midnight-call-v1',
+  title: '零点来电',
+  description: '原创纯文本简单本，4 人、2 轮递进线索，预计 25 分钟。',
+  overview: '广播站旧址的最后一夜，四名工作人员拆穿一段伪造的存活广播。',
   tags: '原创样例,AI生成',
   difficulty: 1,
   player_count: 4,
-  estimated_duration: 20,
+  estimated_duration: 25,
   is_ai_generated: true,
 }
 
 const characters = [
   {
     character_id: 'human',
-    name: '林岚',
-    profile: '气象观察员',
+    name: '陆鸣',
+    profile: '广播主持人',
     character_script: '你的个人剧本',
   },
-  { character_id: 'ai-1', name: '赵屿', profile: '拖船船长' },
-  { character_id: 'ai-2', name: '沈砚', profile: '无线电维修员' },
-  { character_id: 'ai-3', name: '苏禾', profile: '海事实习生' },
+  { character_id: 'ai-1', name: '姜芮', profile: '节目制作人' },
+  { character_id: 'ai-2', name: '陈朔', profile: '音频工程师' },
+  { character_id: 'ai-3', name: '许棠', profile: '实习编辑' },
 ]
 
 function json(route: Route, body: unknown) {
@@ -111,7 +111,7 @@ test('大厅 → 选角 → 发言 → 推进 → 投票 → 复盘', async ({ p
           session_id: 'e2e-session',
           stage: 'intro',
           speaker_id: 'human',
-          speaker_name: '林岚',
+          speaker_name: '陆鸣',
           content: '我先说明停电时间。',
           record_type: 'speech',
           created_at: new Date().toISOString(),
@@ -178,8 +178,8 @@ test('大厅 → 选角 → 发言 → 推进 → 投票 → 复盘', async ({ p
 
   await page.goto('/')
   await expect(page.getByText('剧本大厅')).toBeVisible()
-  await page.getByText('雾港回声').first().click()
-  await page.getByText('林岚', { exact: true }).click()
+  await page.getByText('零点来电').first().click()
+  await page.getByText('陆鸣', { exact: true }).click()
   await page.getByRole('button', { name: '开始游戏' }).click()
 
   await page.getByPlaceholder('输入你的发言...').fill('我先说明停电时间。')
@@ -199,7 +199,7 @@ test('大厅 → 选角 → 发言 → 推进 → 投票 → 复盘', async ({ p
   await page.getByRole('button', { name: '进入下一阶段' }).click()
 
   await expect(page.getByText('请投票指认真凶')).toBeVisible()
-  await page.getByRole('button', { name: /赵屿/ }).click()
+  await page.getByRole('button', { name: /姜芮/ }).click()
   await page.getByRole('button', { name: '确认投票' }).click()
 
   await expect(page.getByRole('heading', { name: '复盘揭晓' })).toBeVisible()
