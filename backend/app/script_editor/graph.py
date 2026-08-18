@@ -79,6 +79,13 @@ def _route_after_safety_check(
     return "review_game_data"
 
 
+def _route_after_save(state: ScriptGenState) -> Literal["generate_assets", "end"]:
+    """保存失败时停止工作流，避免继续生成资产并误报完成。"""
+    if state.get("error_message"):
+        return "end"
+    return "generate_assets"
+
+
 # === 构建图 ===
 
 
@@ -91,7 +98,8 @@ def build_script_gen_graph():
       → generate_first_draft → review_first_draft ←─→ generate_first_draft
       → review_by_llm → generate_final_draft → review_final ←─→ generate_final_draft
       → convert_to_game_data → review_game_data ←─→ convert_to_game_data
-      → safety_check → (pass) → save_to_database → generate_assets → END
+      → safety_check → (pass) → save_to_database → (success) → generate_assets → END
+                                              └── (error) → END
                    └── (fail) → review_game_data
     """
     builder = StateGraph(ScriptGenState)
@@ -160,8 +168,12 @@ def build_script_gen_graph():
         ["save_to_database", "review_game_data"],
     )
 
-    # 保存 → 资源生成 → 结束
-    builder.add_edge("save_to_database", "generate_assets")
+    # 保存成功后才生成资源；保存失败则保留 error_message 并停止
+    builder.add_conditional_edges(
+        "save_to_database",
+        _route_after_save,
+        {"generate_assets": "generate_assets", "end": END},
+    )
     builder.add_edge("generate_assets", END)
 
     # 使用 MemorySaver 编译

@@ -251,6 +251,29 @@ function ContentPanelBody({
       );
     }
 
+    // === Terminal workflow error (for example, database save failure) ===
+    if (workflowState?.error_message && !isLoading) {
+      return (
+        <div className="h-full flex flex-col items-center justify-center gap-4 p-6">
+          <div className="w-14 h-14 rounded-full bg-red-500/20 flex items-center justify-center">
+            <AlertTriangle className="w-7 h-7 text-red-500" />
+          </div>
+          <h3 className="text-lg font-bold">剧本创建失败</h3>
+          <div className="w-full max-w-md p-4 bg-red-500/10 border border-red-500/20 rounded-lg">
+            <p className="text-sm text-red-400 whitespace-pre-wrap">
+              {workflowState.error_message}
+            </p>
+          </div>
+          <button
+            onClick={onBack}
+            className="mt-2 px-6 py-2.5 rounded-lg bg-secondary hover:bg-secondary/80 transition-colors text-sm"
+          >
+            返回剧本大厅
+          </button>
+        </div>
+      );
+    }
+
     // === Idea Phase: Show form ===
     if (isIdeaPhase) {
       return (

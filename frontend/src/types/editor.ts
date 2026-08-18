@@ -53,6 +53,7 @@ export interface EditorWorkflowState {
   character_avatars: Record<string, string>;
   error_message: string;
   safety_passed?: boolean;
+  safety_rejection_reason?: string;
 }
 
 export interface StartWorkflowResponse {

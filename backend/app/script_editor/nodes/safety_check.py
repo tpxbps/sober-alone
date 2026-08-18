@@ -93,11 +93,22 @@ async def safety_check(state: ScriptGenState) -> dict:
         }
 
     except TimeoutError:
-        logger.error("Safety check timed out (90s), allowing pass-through")
-        return {"current_step": STEP_SAFETY_CHECK, "safety_passed": True}
+        reason = "内容安全审查超时，请检查模型配置后重新提交"
+        logger.error("Safety check timed out (90s), rejecting until reviewed")
+        return {
+            "current_step": STEP_SAFETY_CHECK,
+            "safety_passed": False,
+            "safety_rejection_reason": reason,
+            "_review_action": "regenerate",
+        }
     except Exception as e:
         logger.error(f"Safety check error: {e}", exc_info=True)
-        return {"current_step": STEP_SAFETY_CHECK, "safety_passed": True}
+        return {
+            "current_step": STEP_SAFETY_CHECK,
+            "safety_passed": False,
+            "safety_rejection_reason": "内容安全审查失败，请检查模型配置后重新提交",
+            "_review_action": "regenerate",
+        }
 
 
 def _assemble_review_text(sections: dict) -> str:

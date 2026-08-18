@@ -210,13 +210,14 @@ class ScriptEditorWorkflowService:
         values = snapshot.values
         interrupt = self.extract_interrupt(snapshot)
         self._register_from_values(values, thread_id)
+        has_error = bool(values.get("error_message"))
         return {
             "success": True,
             "thread_id": thread_id,
             "script_id": values.get("script_id", ""),
             "script_title": values.get("script_title", ""),
             "current_step": interrupt["step"] if interrupt else values.get("current_step", ""),
-            "is_complete": snapshot.next == (),
+            "is_complete": snapshot.next == () and not has_error,
             "interrupt": interrupt,
             "state": self.serialize_state(values),
         }
@@ -313,6 +314,7 @@ class ScriptEditorWorkflowService:
             "character_avatars": {},
             "error_message": "",
             "safety_passed": False,
+            "safety_rejection_reason": "",
         }
         return {key: values.get(key, default) for key, default in defaults.items()}
 

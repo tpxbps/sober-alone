@@ -91,3 +91,20 @@ def test_missing_workflow_raises_domain_error():
 
     with pytest.raises(WorkflowNotFoundError):
         service.get_state("missing")
+
+
+def test_terminal_error_is_not_reported_as_completed():
+    failed = snapshot(
+        {
+            "current_step": "save_to_database",
+            "error_message": "保存失败: database is locked",
+            "safety_rejection_reason": "",
+        }
+    )
+    service = ScriptEditorWorkflowService(FakeGraph({"live": failed}))
+
+    result = service.get_state("thread")
+
+    assert result["is_complete"] is False
+    assert result["state"]["error_message"] == "保存失败: database is locked"
+    assert "safety_rejection_reason" in result["state"]

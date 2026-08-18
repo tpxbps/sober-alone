@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import type { ReactNode } from "react";
-import { ChevronDown, ChevronUp, Pencil } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronUp, Pencil } from "lucide-react";
 
 import type {
   EditorInterruptInfo,
@@ -120,6 +120,18 @@ export function ReviewGameDataStage({
       {error && (
         <div className="px-4 py-2 bg-red-500/10 border-b border-red-500/20 text-red-400 text-xs">
           {error}
+        </div>
+      )}
+
+      {interruptInfo.rejected && (
+        <div className="px-4 py-3 bg-amber-500/10 border-b border-amber-500/20 text-amber-300 text-xs flex gap-2">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-medium">内容安全审查未完成</p>
+            <p className="mt-1 text-amber-200/80">
+              {interruptInfo.reason || "请检查并修改内容后重新提交。"}
+            </p>
+          </div>
         </div>
       )}
 

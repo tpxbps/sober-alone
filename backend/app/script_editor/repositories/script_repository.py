@@ -167,6 +167,7 @@ async def _save_generated_script(state: ScriptGenState) -> dict:
 
     return {
         "current_step": STEP_SAVE,
+        "error_message": "",
     }
 
 
