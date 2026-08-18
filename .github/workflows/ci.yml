@@ -1,0 +1,143 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "codex/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  UV_FROZEN: "1"
+  PYTHONUTF8: "1"
+
+jobs:
+  backend-ubuntu:
+    name: Backend / Ubuntu
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.3"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - name: Install frozen backend dependencies
+        run: uv sync --directory backend --frozen
+      - name: Ruff
+        run: |
+          uv run --project backend ruff check backend/app backend/migrations backend/tests backend/scripts
+          uv run --project backend ruff format --check backend/app backend/migrations backend/tests backend/scripts
+      - name: Unit and integration tests without external network
+        run: >-
+          uv run --project backend pytest -q backend/tests
+          --disable-socket --allow-hosts=127.0.0.1,localhost
+      - name: Migration and seed smoke test
+        working-directory: backend
+        env:
+          DATABASE_URL: sqlite+aiosqlite:///./.local-data/ci-smoke.db
+        run: |
+          uv run python -m app.cli init
+          uv run python -m app.cli init
+      - name: Assert no unexpected files
+        shell: bash
+        run: test -z "$(git status --porcelain --untracked-files=all)"
+
+  frontend-ubuntu:
+    name: Frontend / Ubuntu
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install frozen frontend dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+      - name: Lint, unit tests and production build
+        working-directory: frontend
+        run: |
+          pnpm lint
+          pnpm test
+          pnpm build
+      - name: Install Playwright Chromium
+        working-directory: frontend
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Route-isolated browser flow
+        working-directory: frontend
+        run: pnpm test:e2e
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report
+          if-no-files-found: ignore
+      - name: Assert no unexpected files
+        shell: bash
+        run: test -z "$(git status --porcelain --untracked-files=all)"
+
+  repository-audit:
+    name: Secrets / clean tree
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan full history for secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Assert no unexpected files
+        shell: bash
+        run: test -z "$(git status --porcelain --untracked-files=all)"
+
+  windows-smoke:
+    name: Install, unit tests and build / Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.3"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install frozen dependencies
+        run: uv sync --directory backend --frozen
+      - name: Backend unit and integration tests
+        run: >-
+          uv run --project backend pytest -q backend/tests
+          --disable-socket --allow-hosts=127.0.0.1,localhost
+      - name: Install frozen frontend dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+      - name: Frontend unit tests and production build
+        working-directory: frontend
+        run: |
+          pnpm test
+          pnpm build
+      - name: Assert no unexpected files
+        shell: pwsh
+        run: |
+          $changes = git status --porcelain --untracked-files=all
+          if ($changes) { $changes; throw "Unexpected worktree changes" }

@@ -1,0 +1,56 @@
+[project]
+name = "sober-alone-backend"
+version = "0.1.0"
+description = "Local-first multi-agent murder mystery game API"
+readme = "README.md"
+requires-python = ">=3.13"
+license = "MIT"
+dependencies = [
+    # Web framework
+    "fastapi>=0.128.0",
+    "uvicorn[standard]>=0.40.0",
+    # Database
+    "sqlalchemy>=2.0.46",
+    "aiosqlite>=0.22.1",
+    "alembic>=1.14.0",
+    # LangChain & AI
+    "langchain>=1.2.7",
+    "langchain-community>=0.4.1",
+    "langchain-openai>=1.1.7",
+    "langchain-deepseek>=1.0.1",
+    "langgraph>=1.0.7",
+    # Vector database
+    "chromadb>=1.4.1",
+    # HTTP client
+    "httpx>=0.28.1",
+    # ZhipuAI SDK (for embedding)
+    "zhipuai>=2.1.5",
+    # Utilities
+    "pydantic>=2.12.5",
+    "pydantic-settings>=2.12.0",
+    "python-dotenv>=1.2.1",
+    "langgraph-checkpoint-sqlite>=3.0.3",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.25.0",
+    "pytest-cov>=6.0.0",
+    "pytest-socket>=0.7.0",
+    "ruff>=0.9.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "--disable-socket --allow-hosts=127.0.0.1,localhost,::1"
+markers = ["live: calls a real external provider and is never run by ordinary CI"]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]

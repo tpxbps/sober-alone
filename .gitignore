@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+.pnpm-store/
+.uv-cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Environment & Secrets
+.env
+*.env.local
+backend/.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.claude/settings.json
+.claude/settings.local.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+dist/
+build/
+
+# Local runtime data (databases, checkpoints, generated media and vectors)
+backend/.local-data/
+
+# Test and browser artifacts
+test-results/
+playwright-report/
+blob-report/
+/results.sarif
+
+# Local maintainer notes
+/PLAN.md

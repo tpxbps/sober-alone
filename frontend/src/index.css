@@ -1,0 +1,444 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  /* Custom colors for the game */
+  --color-glow: var(--glow);
+  --color-glow-secondary: var(--glow-secondary);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+}
+
+/* Dark cyberpunk theme - default dark mode */
+:root {
+  --radius: 0.75rem;
+
+  /* Base colors - deep dark background */
+  --background: hsl(227, 33%, 3%);
+  --foreground: hsl(224, 79%, 95%);
+
+  /* Card colors - slightly lighter than background */
+  --card: hsl(225, 30%, 6%);
+  --card-foreground: hsl(224, 79%, 95%);
+
+  /* Popover colors */
+  --popover: hsl(226, 38%, 4%);
+  --popover-foreground: hsl(224, 79%, 95%);
+
+  /* Primary - purple glow */
+  --primary: hsl(253, 99%, 72%);
+  --primary-foreground: hsl(223, 100%, 98%);
+
+  /* Secondary - muted purple */
+  --secondary: hsl(236, 28%, 16%);
+  --secondary-foreground: hsl(224, 33%, 89%);
+
+  /* Muted - for less emphasis */
+  --muted: hsl(225, 22%, 12%);
+  --muted-foreground: hsl(224, 8%, 58%);
+
+  /* Accent - cyan/teal for highlights */
+  --accent: hsl(177, 100%, 27%);
+  --accent-foreground: hsl(223, 100%, 98%);
+
+  /* Destructive - red for warnings */
+  --destructive: hsl(357, 79%, 54%);
+
+  /* Border and input */
+  --border: hsl(224, 16%, 17%);
+  --input: hsl(225, 22%, 12%);
+  --ring: hsl(253, 99%, 72%);
+
+  /* Custom glow colors */
+  --glow: hsl(253, 99%, 72%);
+  --glow-secondary: hsl(177, 100%, 27%);
+
+  /* Status colors */
+  --success: hsl(128, 55%, 43%);
+  --warning: hsl(43, 100%, 44%);
+  --danger: hsl(357, 79%, 54%);
+
+  /* Sidebar */
+  --sidebar: hsl(226, 38%, 4%);
+  --sidebar-foreground: hsl(224, 79%, 95%);
+  --sidebar-primary: hsl(253, 99%, 72%);
+  --sidebar-primary-foreground: hsl(223, 100%, 98%);
+  --sidebar-accent: hsl(236, 28%, 16%);
+  --sidebar-accent-foreground: hsl(224, 33%, 89%);
+  --sidebar-border: hsl(224, 16%, 17%);
+  --sidebar-ring: hsl(253, 99%, 72%);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+/* Custom utility classes */
+@layer utilities {
+  /* Glow effects */
+  .glow {
+    box-shadow: 0 0 20px var(--glow), 0 0 40px hsla(251, 65%, 69%, 0.3);
+  }
+
+  .glow-accent {
+    box-shadow: 0 0 20px var(--glow-secondary), 0 0 40px hsla(178, 100%, 26%, 0.3);
+  }
+
+  .text-glow {
+    text-shadow: 0 0 10px var(--glow), 0 0 20px hsla(251, 65%, 69%, 0.5);
+  }
+
+  .text-glow-accent {
+    text-shadow: 0 0 10px var(--glow-secondary), 0 0 20px hsla(178, 100%, 26%, 0.5);
+  }
+
+  /* Glass morphism effect */
+  .glass {
+    background: hsla(225, 30%, 6%, 0.6);
+    backdrop-filter: blur(12px);
+    border: 1px solid hsla(225, 18%, 25%, 0.4);
+  }
+
+  .glass-dark {
+    background: hsla(227, 33%, 3%, 0.8);
+    backdrop-filter: blur(16px);
+    border: 1px solid hsla(224, 16%, 17%, 0.5);
+  }
+
+  /* Animated border gradient */
+  .border-glow {
+    position: relative;
+  }
+
+  .border-glow::before {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(135deg, var(--glow), transparent 50%, var(--glow-secondary));
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+
+  /* Breathing animation for active speaker */
+  .breathing {
+    animation: breathing 2s ease-in-out infinite;
+  }
+
+  @keyframes breathing {
+    0%, 100% {
+      box-shadow: 0 0 5px var(--glow), 0 0 10px hsla(251, 65%, 69%, 0.3);
+    }
+    50% {
+      box-shadow: 0 0 15px var(--glow), 0 0 30px hsla(251, 65%, 69%, 0.5);
+    }
+  }
+
+  /* Prominent breathing animation for script button */
+  .breathing-prominent {
+    animation: breathingProminent 1.5s ease-in-out infinite;
+  }
+
+  @keyframes breathingProminent {
+    0%, 100% {
+      transform: scale(1);
+      box-shadow: 0 0 8px var(--glow), 0 0 16px hsla(251, 65%, 69%, 0.4);
+    }
+    50% {
+      transform: scale(1.2);
+      box-shadow: 0 0 25px var(--glow), 0 0 50px hsla(253, 99%, 72%, 0.6), 0 0 80px hsla(251, 65%, 69%, 0.3);
+    }
+  }
+
+  /* Fade in animation */
+  .fade-in {
+    animation: fadeIn 0.3s ease-out;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* Stage transition overlay */
+  .stage-transition {
+    animation: stageTransition 2s ease-in-out forwards;
+  }
+
+  @keyframes stageTransition {
+    0% {
+      opacity: 0;
+    }
+    20% {
+      opacity: 1;
+    }
+    80% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
+
+  /* Scrollbar styling */
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: hsl(224, 17%, 7%);
+    border-radius: 3px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: hsl(225, 18%, 25%);
+    border-radius: 3px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background: hsl(225, 17%, 36%);
+  }
+
+  /* Sparkles — calm breathing + fixed tilt + purple↔cyan color drift */
+  .sparkles-fancy {
+    transform: rotate(-12deg);
+    animation: sparklesBreathe 4s ease-in-out infinite, sparklesColor 6s ease-in-out infinite;
+    filter: drop-shadow(0 0 4px hsla(254, 100%, 75%, 0.6));
+  }
+
+  @keyframes sparklesBreathe {
+    0%, 100% {
+      transform: rotate(-12deg) scale(1);
+      filter: drop-shadow(0 0 4px hsla(252, 100%, 76%, 0.5));
+    }
+    50% {
+      transform: rotate(-12deg) scale(1.08);
+      filter: drop-shadow(0 0 10px hsla(200, 100%, 50%, 0.65))
+              drop-shadow(0 0 22px hsla(184, 100%, 32%, 0.25));
+    }
+  }
+
+  @keyframes sparklesColor {
+    0%, 100% { color: hsl(257, 100%, 76%); }
+    50%      { color: hsl(184, 100%, 42%); }
+  }
+
+  /* Dragon icon — gentle sway + breathe */
+  .icon-dragon {
+    animation: dragonSway 4s ease-in-out infinite;
+  }
+
+  @keyframes dragonSway {
+    0%, 100% {
+      transform: rotate(0deg) scale(1);
+    }
+    50% {
+      transform: rotate(-8deg) scale(1.06);
+    }
+  }
+
+  /* Pulse animation for typing indicator */
+  .pulse-dot {
+    animation: pulseDot 1.4s ease-in-out infinite;
+  }
+
+  @keyframes pulseDot {
+    0%, 80%, 100% {
+      transform: scale(0.6);
+      opacity: 0.5;
+    }
+    40% {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+}
+
+/* Custom selection color */
+::selection {
+  background: hsla(253, 99%, 72%, 0.4);
+  color: var(--foreground);
+}
+
+/* Focus visible styles */
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Hide scrollbar but keep functionality */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Markdown content styling - reduce paragraph spacing */
+.markdown-content {
+  line-height: 1.6;
+}
+
+.markdown-content p {
+  margin-bottom: 0.25rem;
+}
+
+.markdown-content p:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-content br {
+  display: block;
+  content: "";
+  margin-top: 0.125rem;
+}
+
+/* Speaker icon playing animation - blue-purple flowing glow */
+.speaker-playing {
+  animation: speakerGlow 1.5s ease-in-out infinite;
+  position: relative;
+}
+
+@keyframes speakerGlow {
+  0% {
+    box-shadow:
+      0 0 6px hsla(242, 85%, 68%, 0.8),
+      0 0 12px hsla(254, 57%, 58%, 0.4);
+    filter: hue-rotate(0deg);
+  }
+  33% {
+    box-shadow:
+      0 0 10px hsla(266, 99%, 70%, 0.9),
+      0 0 20px hsla(241, 72%, 67%, 0.5);
+    filter: hue-rotate(20deg);
+  }
+  66% {
+    box-shadow:
+      0 0 8px hsla(276, 92%, 72%, 0.85),
+      0 0 16px hsla(257, 75%, 60%, 0.45);
+    filter: hue-rotate(-10deg);
+  }
+  100% {
+    box-shadow:
+      0 0 6px hsla(242, 85%, 68%, 0.8),
+      0 0 12px hsla(254, 57%, 58%, 0.4);
+    filter: hue-rotate(0deg);
+  }
+}
+
+/* === Whack-a-Mole game animations === */
+
+@keyframes mole-pop {
+  0% {
+    transform: translateY(100%) scale(0.5);
+    opacity: 0;
+  }
+  60% {
+    transform: translateY(-10%) scale(1.1);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes hit-boom {
+  0% {
+    transform: scale(0.8);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+}
+
+@keyframes emoji-float {
+  0% {
+    transform: translate(-50%, -50%) scale(0.6);
+    opacity: 0;
+  }
+  15% {
+    transform: translate(calc(-50% + var(--emoji-dx, 0px) * 0.3), calc(-50% - 15px)) scale(1.1);
+    opacity: 1;
+  }
+  50% {
+    transform: translate(calc(-50% + var(--emoji-dx, 0px) * 0.8), calc(-50% - 40px)) scale(1);
+    opacity: 0.8;
+  }
+  100% {
+    transform: translate(calc(-50% + var(--emoji-dx, 0px)), calc(-50% - 65px)) scale(0.7);
+    opacity: 0;
+  }
+}
+
+@keyframes firework-bloom {
+  0% {
+    transform: translate(0, 0) scale(1);
+    opacity: 1;
+  }
+  70% {
+    opacity: 0.8;
+  }
+  100% {
+    transform: translate(var(--fw-dx, 20px), var(--fw-dy, -20px)) scale(0.3);
+    opacity: 0;
+  }
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px) rotate(-1deg); }
+  75% { transform: translateX(4px) rotate(1deg); }
+}
