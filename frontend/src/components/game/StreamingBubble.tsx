@@ -4,6 +4,7 @@ import { Loader2 } from "lucide-react";
 import { useGameStore } from "@/stores/gameStore";
 import { AI_MODELS } from "@/types/game";
 import { DynamicDot } from "@/components/ui/DynamicDot";
+import { GameMessageMarkdown } from "@/components/ui/GameMessageMarkdown";
 
 /**
  * StreamingBubble - 隔离渲染的流式消息气泡
@@ -170,14 +171,16 @@ export function StreamingBubble() {
               </motion.div>
             )}
           </AnimatePresence>
-          {/* Streaming content - plain text, no markdown parsing */}
+          {/* Keep streaming and persisted messages visually consistent. */}
           {streamingContent.trim() && (
-            <p className="text-sm whitespace-pre-wrap">
-              {streamingContent}
+            <div className="text-sm">
+              <GameMessageMarkdown characters={characters}>
+                {streamingContent}
+              </GameMessageMarkdown>
               {isStreaming && (
                 <span className="inline-block w-2 h-4 bg-primary ml-1 animate-pulse" />
               )}
-            </p>
+            </div>
           )}
         </div>
       </div>

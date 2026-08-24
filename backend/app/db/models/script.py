@@ -30,6 +30,7 @@ class Script(Base):
     cover_image_url: Mapped[str] = mapped_column(String(500), default="")
     free_speech_limits: Mapped[list] = mapped_column(JSON, default=list)
     is_ai_generated: Mapped[bool] = mapped_column(Boolean, default=False)
+    owner_key_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
     characters: Mapped[list[Character]] = relationship(

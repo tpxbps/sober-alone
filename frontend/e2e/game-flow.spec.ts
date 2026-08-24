@@ -10,6 +10,7 @@ const script = {
   player_count: 4,
   estimated_duration: 25,
   is_ai_generated: true,
+  can_manage: false,
 }
 
 const characters = [
@@ -37,6 +38,10 @@ test('大厅 → 选角 → 发言 → 推进 → 投票 → 复盘', async ({ p
   let currentSpeaker: string | null = 'human'
   let records: unknown[] = []
 
+  await page.addInitScript(() => {
+    HTMLMediaElement.prototype.play = async () => undefined
+  })
+
   await page.route(/https?:\/\/(?!127\.0\.0\.1:4173).*$/i, (route) =>
     route.abort('blockedbyclient'),
   )
@@ -63,7 +68,12 @@ test('大厅 → 选角 → 发言 → 推进 → 投票 → 复盘', async ({ p
             reason: '已配置',
           },
         ],
-        features: {},
+        features: {
+          rag: { enabled: false, reason: '未配置' },
+          image: { enabled: false, reason: '未配置' },
+          static_tts: { enabled: true, reason: '已配置' },
+          streaming_tts: { enabled: true, reason: '已配置' },
+        },
       })
     }
     if (path === '/api/v1/game/create' && method === 'POST') {
@@ -150,6 +160,7 @@ test('大厅 → 选角 → 发言 → 推进 → 投票 → 复盘', async ({ p
           stage: 'review',
           content: '真相揭晓：时间线已还原。',
           record_type: 'system',
+          audio_url: '/audio/review.wav',
           created_at: new Date().toISOString(),
         },
       ]
@@ -182,7 +193,38 @@ test('大厅 → 选角 → 发言 → 推进 → 投票 → 复盘', async ({ p
   await page.getByText('陆鸣', { exact: true }).click()
   await page.getByRole('button', { name: '开始游戏' }).click()
 
-  await page.getByPlaceholder('输入你的发言...').fill('我先说明停电时间。')
+  const quickMentionCard = page.getByRole('button', { name: '在输入框引用 姜芮' })
+  await expect(quickMentionCard).toHaveCSS('cursor', 'pointer')
+  const ownCharacterCard = page.getByRole('button', { name: '陆鸣（你）' })
+  await ownCharacterCard.hover()
+  const ownTooltip = page.getByRole('tooltip').filter({ hasText: '广播主持人' })
+  await expect(ownTooltip).toBeVisible()
+  const [headerBox, tooltipBox] = await Promise.all([
+    page.locator('header').boundingBox(),
+    ownTooltip.boundingBox(),
+  ])
+  expect(headerBox).not.toBeNull()
+  expect(tooltipBox).not.toBeNull()
+  expect(tooltipBox!.y).toBeGreaterThanOrEqual(headerBox!.y + headerBox!.height)
+
+  await page.getByRole('button', { name: '查看我的剧本' }).last().click({ force: true })
+  const scriptHeading = page.getByRole('heading', { name: '陆鸣的剧本' })
+  await expect(scriptHeading).toBeVisible()
+  await page.getByRole('button', { name: '播放语音' }).click()
+  await expect(page.getByRole('button', { name: '停止播放语音' })).toBeVisible()
+  await page.getByRole('button', { name: '停止播放语音' }).click()
+  await expect(page.getByRole('button', { name: '播放语音' })).toBeVisible()
+  await page.getByRole('button', { name: '关闭个人剧本' }).click()
+
+  const composer = page.getByRole('textbox', { name: '发言输入框' })
+  await composer.fill('@')
+  await expect(page.getByRole('listbox', { name: '可引用角色' })).toBeVisible()
+  await composer.press('ArrowDown')
+  await expect(page.getByRole('option', { name: '@陈朔' })).toHaveAttribute('aria-selected', 'true')
+  await composer.press('Enter')
+  await expect(composer).toContainText('@陈朔')
+
+  await composer.fill('我先说明停电时间。')
   const historyReloaded = page.waitForResponse((response) => {
     const path = new URL(response.url()).pathname
     return response.request().method() === 'GET' && path.endsWith('/records')
@@ -204,4 +246,8 @@ test('大厅 → 选角 → 发言 → 推进 → 投票 → 复盘', async ({ p
 
   await expect(page.getByRole('heading', { name: '复盘揭晓' })).toBeVisible()
   await expect(page.getByText(/真相揭晓/)).toBeVisible()
+  await page.getByRole('button', { name: '播放语音' }).click()
+  await expect(page.getByRole('button', { name: '停止播放语音' })).toBeVisible()
+  await page.getByRole('button', { name: '停止播放语音' }).click()
+  await expect(page.getByRole('button', { name: '播放语音' })).toBeVisible()
 })

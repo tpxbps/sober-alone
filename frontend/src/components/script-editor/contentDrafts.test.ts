@@ -13,6 +13,7 @@ const gameData: GameDataSections = {
   character_scripts: { 林岚: "原始个人剧本" },
   character_data: [
     {
+      character_id: "character-1",
       name: "林岚",
       profile: "气象观察员",
       appearance: "深色雨衣",
@@ -53,4 +54,3 @@ describe("ContentPanel draft isolation", () => {
     );
   });
 });
-

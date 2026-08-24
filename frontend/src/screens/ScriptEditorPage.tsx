@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   Sparkles,
@@ -21,9 +21,10 @@ import { WORKFLOW_PHASES, getPhaseFromStep } from "@/types/editor";
 
 interface ScriptEditorPageProps {
   onBack: () => void;
+  editScriptId?: string | null;
 }
 
-export function ScriptEditorPage({ onBack }: ScriptEditorPageProps) {
+export function ScriptEditorPage({ onBack, editScriptId }: ScriptEditorPageProps) {
   const {
     threadId,
     currentStep,
@@ -37,6 +38,7 @@ export function ScriptEditorPage({ onBack }: ScriptEditorPageProps) {
     assetProgress,
     convertProgress,
     startWorkflow,
+    startEditWorkflow,
     resumeWorkflow,
     restoreSession,
     openProgressStream,
@@ -57,11 +59,16 @@ export function ScriptEditorPage({ onBack }: ScriptEditorPageProps) {
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editTitleValue, setEditTitleValue] = useState("");
+  const initializationRef = useRef<string | null>(null);
 
   // Restore session on mount
   useEffect(() => {
-    restoreSession();
-  }, [restoreSession]);
+    const target = editScriptId ? `edit:${editScriptId}` : "restore";
+    if (initializationRef.current === target) return;
+    initializationRef.current = target;
+    if (editScriptId) void startEditWorkflow(editScriptId);
+    else void restoreSession();
+  }, [editScriptId, restoreSession, startEditWorkflow]);
 
   // Fetch checkpoint history when workflow is active
   useEffect(() => {
@@ -83,6 +90,17 @@ export function ScriptEditorPage({ onBack }: ScriptEditorPageProps) {
 
   const handleConfirmGameData = async (gameDataSections: GameDataSections) => {
     await resumeWorkflow("confirm", undefined, undefined, gameDataSections);
+  };
+
+  const handleConfirmAssetPlan = async (selectedIds: string[]) => {
+    await resumeWorkflow(
+      "confirm",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      selectedIds
+    );
   };
 
   const handleConfirmReviewFinal = async (
@@ -124,9 +142,10 @@ export function ScriptEditorPage({ onBack }: ScriptEditorPageProps) {
 
   const handleDiscardScript = async () => {
     const sid = scriptId;
+    const editingExisting = workflowState?.workflow_mode === "edit";
     reset();
     onBack();
-    if (sid) {
+    if (sid && !editingExisting) {
       try {
         await editorApi.deleteScript(sid);
       } catch {
@@ -164,7 +183,7 @@ export function ScriptEditorPage({ onBack }: ScriptEditorPageProps) {
       <header className="shrink-0 border-b border-border/50 bg-background/80 backdrop-blur-xl">
         <div className="lg:max-w-[70%] w-full mx-auto px-3 py-3 flex items-center gap-3">
           <button
-            onClick={onBack}
+            onClick={handleBackToLobby}
             className="p-2 rounded-lg hover:bg-secondary/50 transition-colors"
           >
             <ArrowLeft className="w-5 h-5" />
@@ -253,7 +272,9 @@ export function ScriptEditorPage({ onBack }: ScriptEditorPageProps) {
               {showDiscardConfirm && (
                 <div className="absolute right-0 top-full mt-1 w-56 bg-background border border-border/50 rounded-lg shadow-xl p-3 z-50">
                   <p className="text-xs text-muted-foreground mb-2">
-                    确认放弃此剧本？已生成的所有资源将被清除。
+                    {workflowState?.workflow_mode === "edit"
+                      ? "确认退出编辑？尚未确认保存的修改将被放弃，原剧本不会被删除。"
+                      : "确认放弃此剧本？已生成的所有资源将被清除。"}
                   </p>
                   <div className="flex gap-2">
                     <button
@@ -291,6 +312,7 @@ export function ScriptEditorPage({ onBack }: ScriptEditorPageProps) {
             isComplete={isComplete}
             onNodeClick={handleTimelineNodeClick}
             viewingPhase={viewingPhase}
+            workflowMode={workflowState?.workflow_mode || "create"}
           />
         </div>
       </div>
@@ -313,6 +335,7 @@ export function ScriptEditorPage({ onBack }: ScriptEditorPageProps) {
               convertProgress={convertProgress}
               onConfirm={handleConfirm}
               onConfirmGameData={handleConfirmGameData}
+              onConfirmAssetPlan={handleConfirmAssetPlan}
               onConfirmReviewFinal={handleConfirmReviewFinal}
               onRegenerate={handleRegenerate}
               onRegenerateReviewFinal={handleRegenerateReviewFinal}

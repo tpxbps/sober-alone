@@ -41,6 +41,7 @@ export function adaptGameState(state: GameStateResponse): GameStatePatch {
         estimated_duration: state.script.estimated_duration || 0,
         cover_image_url: state.script.cover_image_url,
         is_ai_generated: state.script.is_ai_generated,
+        can_manage: false,
       }
     : null
 

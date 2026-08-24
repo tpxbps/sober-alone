@@ -7,6 +7,7 @@ import type {
   AssetProgress,
   CheckpointInfo,
 } from '@/types/editor';
+import { AUTHOR_KEY_HEADER, getOrCreateAuthorKey } from '@/lib/authorKey';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
 
@@ -16,6 +17,11 @@ const api = axios.create({
 });
 
 const RAW_API_BASE = API_BASE_URL;
+
+api.interceptors.request.use((config) => {
+  config.headers.set(AUTHOR_KEY_HEADER, getOrCreateAuthorKey());
+  return config;
+});
 
 export const editorApi = {
   // Start a new workflow
@@ -27,6 +33,11 @@ export const editorApi = {
     prompts?: Record<string, string>;
   }): Promise<StartWorkflowResponse> => {
     const response = await api.post('/script-editor/start', params);
+    return response.data;
+  },
+
+  startEditWorkflow: async (scriptId: string): Promise<StartWorkflowResponse> => {
+    const response = await api.post(`/script-editor/scripts/${scriptId}/edit`);
     return response.data;
   },
 
@@ -47,6 +58,7 @@ export const editorApi = {
       human_review?: string;
       game_data_sections?: unknown;
       prompt?: string;
+      selected_asset_ids?: string[];
     }
   ): Promise<ResumeWorkflowResponse> => {
     const response = await api.post(`/script-editor/${threadId}/resume`, data);
@@ -145,33 +157,40 @@ export const editorApi = {
     onDone: () => void,
   ): (() => void) => {
     const url = `${RAW_API_BASE}/script-editor/${threadId}/progress-stream`;
-    const eventSource = new EventSource(url);
-
-    eventSource.onmessage = (e) => {
+    const controller = new AbortController();
+    void (async () => {
       try {
-        const parsed = JSON.parse(e.data);
-        if (parsed.type === 'convert_progress' && parsed.data) {
-          onConvertProgress(parsed.data);
-        } else if (parsed.type === 'asset_progress' && parsed.data) {
-          onAssetProgress(parsed.data);
-        } else if (parsed.type === 'done') {
-          onDone();
-          eventSource.close();
+        const response = await fetch(url, {
+          headers: { [AUTHOR_KEY_HEADER]: getOrCreateAuthorKey() },
+          signal: controller.signal,
+        });
+        if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (!controller.signal.aborted) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const events = buffer.split('\n\n');
+          buffer = events.pop() || '';
+          for (const event of events) {
+            const line = event.split('\n').find((item) => item.startsWith('data: '));
+            if (!line) continue;
+            const parsed = JSON.parse(line.slice(6));
+            if (parsed.type === 'convert_progress') onConvertProgress(parsed.data ?? null);
+            else if (parsed.type === 'asset_progress') onAssetProgress(parsed.data ?? null);
+            else if (parsed.type === 'done') {
+              onDone();
+              controller.abort();
+            }
+          }
         }
-      } catch {
-        // ignore malformed
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === 'AbortError')) onDone();
       }
-    };
-
-    eventSource.onerror = () => {
-      // Reconnection is handled automatically by EventSource,
-      // but if the stream is truly done we close it
-      if (eventSource.readyState === EventSource.CLOSED) {
-        onDone();
-      }
-    };
-
-    return () => eventSource.close();
+    })();
+    return () => controller.abort();
   },
 
   // Stream chat with AI assistant (SSE)
@@ -191,7 +210,10 @@ export const editorApi = {
     try {
       const response = await fetch(`${RAW_API_BASE}/script-editor/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          [AUTHOR_KEY_HEADER]: getOrCreateAuthorKey(),
+        },
         body: JSON.stringify(params),
         signal,
       });

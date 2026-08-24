@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import type { ReactNode } from "react";
-import { AlertTriangle, ChevronDown, ChevronUp, Pencil } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronUp, CircleHelp, Pencil } from "lucide-react";
+import * as Tooltip from "@radix-ui/react-tooltip";
 
 import type {
   EditorInterruptInfo,
@@ -9,6 +10,7 @@ import type {
 } from "@/types/editor";
 import { LoadingButton } from "./EditorControls";
 import { getButtonLoadingMessage } from "./editorMessages";
+import { STEP_VOICE_GROUPS, STEP_VOICE_OPTIONS } from "@/lib/stepVoices";
 
 export function ReviewGameDataStage({
   editedGameData,
@@ -50,7 +52,7 @@ export function ReviewGameDataStage({
   };
 
   const updateField = useCallback(
-    (path: string[], value: string) => {
+    (path: string[], value: unknown) => {
       if (!editedGameData) return;
       const updated = JSON.parse(
         JSON.stringify(editedGameData)
@@ -135,6 +137,17 @@ export function ReviewGameDataStage({
         </div>
       )}
 
+      {!!interruptInfo.validation_errors?.length && (
+        <div className="px-4 py-3 bg-red-500/10 border-b border-red-500/20 text-red-300 text-xs">
+          <p className="font-medium mb-1">请修正以下结构化数据：</p>
+          <ul className="list-disc pl-4 space-y-0.5">
+            {interruptInfo.validation_errors.map((message) => (
+              <li key={message}>{message}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div className="px-4 py-2.5 border-b border-border/30 bg-secondary/10">
         <span className="text-sm font-medium">{interruptInfo.step_label}</span>
         <p className="text-xs text-muted-foreground mt-0.5">
@@ -155,26 +168,33 @@ export function ReviewGameDataStage({
                 <label className="block text-xs font-medium text-muted-foreground mb-0.5">
                   剧本名称
                 </label>
-                <p className="text-xs text-foreground">
-                  {scriptTitle || "未命名"}
-                </p>
+                <input
+                  value={editedGameData.title ?? scriptTitle ?? ""}
+                  onChange={(event) => updateField(["title"], event.target.value)}
+                  className="w-full text-xs bg-transparent border border-border/30 rounded-md p-2 focus:outline-none focus:border-primary/50"
+                />
               </div>
               <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-0.5">
+                <label className="block text-xs font-medium text-muted-foreground mb-2.5">
                   玩家人数
                 </label>
                 <p className="text-xs text-foreground">
-                  {workflowState?.player_count || "?"}人
+                  {editedGameData.player_count || workflowState?.player_count || "?"}人
                 </p>
               </div>
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-0.5">
                   难度
                 </label>
-                <p className="text-xs text-foreground">
-                  {difficultyLabels[(workflowState?.difficulty || 1) - 1] ||
-                    "简单"}
-                </p>
+                <select
+                  value={editedGameData.difficulty ?? workflowState?.difficulty ?? 1}
+                  onChange={(event) => updateField(["difficulty"], Number(event.target.value))}
+                  className="w-full text-xs bg-background border border-border/30 rounded-md p-2"
+                >
+                  {difficultyLabels.map((label, index) => (
+                    <option key={label} value={index + 1}>{label}</option>
+                  ))}
+                </select>
               </div>
             </div>
             <div>
@@ -243,6 +263,27 @@ export function ReviewGameDataStage({
                 />
               </div>
             ))}
+            {editedGameData.free_speech_limits?.map((limit, index) => (
+              <div key={`limit-${index}`}>
+                <label className="block text-xs font-medium text-primary mb-1">
+                  第 {index + 1} 轮每位角色自由发言次数
+                </label>
+                <select
+                  value={limit}
+                  onChange={(event) =>
+                    updateField(
+                      ["free_speech_limits", String(index)],
+                      Number(event.target.value)
+                    )
+                  }
+                  className="text-xs bg-background border border-border/30 rounded-md p-2"
+                >
+                  {[1, 2, 3].map((value) => (
+                    <option key={value} value={value}>{value} 次</option>
+                  ))}
+                </select>
+              </div>
+            ))}
           </div>
         </CollapsibleSection>
 
@@ -253,24 +294,22 @@ export function ReviewGameDataStage({
           onToggle={() => toggleSection("character_scripts")}
         >
           <div className="space-y-3">
-            {editedGameData.character_scripts &&
-              Object.entries(editedGameData.character_scripts).map(
-                ([name, script]) => (
-                  <div key={name}>
+            {editedGameData.character_data?.map((character, index) => (
+                  <div key={character.character_id}>
                     <label className="block text-xs font-medium text-primary mb-1">
-                      {name}
+                      {character.name}
                     </label>
                     <textarea
-                      value={script || ""}
-                      onChange={(e) =>
-                        updateField(["character_scripts", name], e.target.value)
-                      }
+                      value={character.character_script || ""}
+                      onChange={(e) => updateField(
+                        ["character_data", String(index), "character_script"],
+                        e.target.value
+                      )}
                       className="w-full text-xs bg-transparent border border-border/30 rounded-md p-2 resize-none focus:outline-none focus:border-primary/50 scrollbar-thin"
                       style={{ minHeight: "30vh" }}
                     />
                   </div>
-                )
-              )}
+                ))}
           </div>
         </CollapsibleSection>
 
@@ -283,7 +322,7 @@ export function ReviewGameDataStage({
           <div className="space-y-4">
             {editedGameData.character_data?.map((cd, idx) => (
               <div
-                key={cd.name || idx}
+                key={cd.character_id}
                 className="border border-border/20 rounded-lg p-3 space-y-2"
               >
                 <div className="flex items-center gap-2">
@@ -332,8 +371,112 @@ export function ReviewGameDataStage({
                     </div>
                   )}
                   <span className="text-[10px] text-muted-foreground">
-                    {cd.gender} · {cd.age}岁 · {cd.occupation}
+                    ID: {cd.character_id}
                   </span>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <label className="text-xs text-muted-foreground">
+                    性别
+                    <input
+                      value={cd.gender || ""}
+                      onChange={(event) => updateField(["character_data", String(idx), "gender"], event.target.value)}
+                      className="mt-1 w-full bg-transparent border border-border/30 rounded p-1.5 text-foreground"
+                    />
+                  </label>
+                  <label className="text-xs text-muted-foreground">
+                    年龄
+                    <input
+                      type="number"
+                      value={cd.age ?? ""}
+                      onChange={(event) => updateField(["character_data", String(idx), "age"], event.target.value ? Number(event.target.value) : null)}
+                      className="mt-1 w-full bg-transparent border border-border/30 rounded p-1.5 text-foreground"
+                    />
+                  </label>
+                  <label className="text-xs text-muted-foreground">
+                    职业
+                    <input
+                      value={cd.occupation || ""}
+                      onChange={(event) => updateField(["character_data", String(idx), "occupation"], event.target.value)}
+                      className="mt-1 w-full bg-transparent border border-border/30 rounded p-1.5 text-foreground"
+                    />
+                  </label>
+                </div>
+                <div>
+                  <label className="block text-xs text-muted-foreground mb-0.5">
+                    个人剧本摘要
+                  </label>
+                  <textarea
+                    value={cd.script_summary || ""}
+                    onChange={(e) => updateField(["character_data", String(idx), "script_summary"], e.target.value)}
+                    className="w-full h-20 text-xs bg-transparent border border-border/30 rounded-md p-2 resize-none focus:outline-none focus:border-primary/50"
+                  />
+                </div>
+                <div>
+                  <div className="mb-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+                    <label htmlFor={`step-voice-${cd.character_id || idx}`}>
+                      Voice ID
+                    </label>
+                    <Tooltip.Provider delayDuration={200}>
+                      <Tooltip.Root>
+                        <Tooltip.Trigger asChild>
+                          <button
+                            type="button"
+                            aria-label="Voice ID 说明与可选音色"
+                            className="rounded-full hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                          >
+                            <CircleHelp className="h-3.5 w-3.5" />
+                          </button>
+                        </Tooltip.Trigger>
+                        <Tooltip.Portal>
+                          <Tooltip.Content
+                            side="right"
+                            align="start"
+                            collisionPadding={12}
+                            className="z-[80] max-h-[70vh] w-[min(28rem,calc(100vw-2rem))] overflow-y-auto rounded-xl border border-border bg-popover p-3 text-xs text-popover-foreground shadow-xl scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent"
+                          >
+                            <p className="font-medium">游戏实时 TTS 音色</p>
+                            <p className="mt-1 text-muted-foreground">
+                              Voice ID 决定该角色在游戏发言时使用的 step-tts-mini 音色。建议按角色性别、年龄和气质选择；当前支持以下音色：
+                            </p>
+                            <div className="mt-3 space-y-3">
+                              {STEP_VOICE_GROUPS.map((group) => (
+                                <div key={group.label}>
+                                  <p className="mb-1 font-medium text-primary">
+                                    {group.label}
+                                  </p>
+                                  <div className="grid gap-x-3 gap-y-1 sm:grid-cols-2">
+                                    {group.voices.map((voice) => (
+                                      <div key={voice.id} className="min-w-0">
+                                        <span>{voice.label}</span>
+                                        <code className="ml-1 break-all text-[10px] text-muted-foreground">
+                                          {voice.id}
+                                        </code>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                            <Tooltip.Arrow className="fill-popover" />
+                          </Tooltip.Content>
+                        </Tooltip.Portal>
+                      </Tooltip.Root>
+                    </Tooltip.Provider>
+                  </div>
+                  <input
+                    id={`step-voice-${cd.character_id || idx}`}
+                    list={`step-voice-options-${idx}`}
+                    value={cd.step_voice_id || ""}
+                    onChange={(e) => updateField(["character_data", String(idx), "step_voice_id"], e.target.value)}
+                    className="w-full text-xs bg-transparent border border-border/30 rounded-md p-2 focus:outline-none focus:border-primary/50"
+                  />
+                  <datalist id={`step-voice-options-${idx}`}>
+                    {STEP_VOICE_OPTIONS.map((voice) => (
+                      <option key={voice.id} value={voice.id}>
+                        {voice.label}
+                      </option>
+                    ))}
+                  </datalist>
                 </div>
                 <div>
                   <label className="block text-xs text-muted-foreground mb-0.5">

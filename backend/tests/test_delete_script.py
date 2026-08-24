@@ -9,6 +9,7 @@ from app.api.routes.script_editor import delete_script
 from app.core.config import settings
 from app.db.base import Base
 from app.db.models import Character, GameRecord, GameSession, PlayerState, Script
+from app.script_editor.ownership import hash_author_key
 from app.script_editor.services.progress_registry import asset_progress_registry
 
 
@@ -33,6 +34,7 @@ async def test_script_delete_cascades_runtime_and_files(tmp_path: Path, monkeypa
                 title="delete",
                 game_full_process=[],
                 free_speech_limits=[],
+                owner_key_hash=hash_author_key("test-author-key-0000000000000000"),
             )
         )
         session.add(Character(character_id="character", script_id="delete-me", name="角色"))
@@ -62,7 +64,11 @@ async def test_script_delete_cascades_runtime_and_files(tmp_path: Path, monkeypa
 
         asset_progress_registry.register_thread("delete-me", "thread")
         asset_progress_registry.init("delete-me", [])
-        result = await delete_script("delete-me", session)
+        result = await delete_script(
+            "delete-me",
+            session,
+            hash_author_key("test-author-key-0000000000000000"),
+        )
 
         assert result["success"] is True
         for model in (Script, Character, GameSession, PlayerState, GameRecord):

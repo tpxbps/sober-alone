@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
+from app.script_editor.ownership import optional_author_key_hash, owner_hash_matches
 from app.services.game_service import GameService
 
 router = APIRouter(prefix="/game", tags=["game"])
@@ -407,7 +408,10 @@ async def stream_tts_audio(
 
 
 @router.get("/scripts")
-async def list_scripts(db: AsyncSession = Depends(get_db)):
+async def list_scripts(
+    db: AsyncSession = Depends(get_db),
+    owner_key_hash: str | None = Depends(optional_author_key_hash),
+):
     """
     获取剧本列表
 
@@ -417,7 +421,8 @@ async def list_scripts(db: AsyncSession = Depends(get_db)):
 
     result = await db.execute(
         text(
-            "SELECT script_id, title, overview, tags, difficulty, player_count, cover_image_url, is_ai_generated, estimated_duration FROM scripts"
+            "SELECT script_id, title, overview, tags, difficulty, player_count, "
+            "cover_image_url, is_ai_generated, estimated_duration, owner_key_hash FROM scripts"
         )
     )
     scripts = result.fetchall()
@@ -435,6 +440,7 @@ async def list_scripts(db: AsyncSession = Depends(get_db)):
                 "cover_image_url": row[6],
                 "is_ai_generated": bool(row[7]) if row[7] is not None else False,
                 "estimated_duration": row[8] if row[8] else 0,
+                "can_manage": owner_hash_matches(row[9], owner_key_hash),
             }
             for row in scripts
         ],

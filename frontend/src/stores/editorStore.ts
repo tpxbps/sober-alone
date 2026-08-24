@@ -11,6 +11,7 @@ const REVIEW_STEPS = new Set([
   'review_final',
   'review_game_data',
   'safety_check',
+  'review_asset_plan',
 ]);
 
 // Generation steps that map to the interrupt step that follows them
@@ -45,6 +46,7 @@ function reconstructInterruptInfo(
     review_final: '审稿修订',
     review_game_data: '游戏数据确认',
     safety_check: '安全审查',
+    review_asset_plan: '资源更新确认',
   };
 
   const prompts = state.prompts || {};
@@ -58,6 +60,7 @@ function reconstructInterruptInfo(
     game_data_sections: state.game_data_sections || {},
     prompt_used: '',
     rejected: step === 'safety_check' && !state.safety_passed,
+    workflow_mode: state.workflow_mode,
   };
 
   if (step === 'review_outline') {
@@ -102,6 +105,7 @@ interface EditorState {
   scriptId: string | null;
   scriptTitle: string;
   currentStep: string;
+  workflowMode: 'create' | 'edit';
   isComplete: boolean;
 
   // Data
@@ -130,7 +134,8 @@ interface EditorState {
     difficulty?: number;
     num_clue_rounds?: number;
   }) => Promise<void>;
-  resumeWorkflow: (action: string, content?: string, prompt?: string, gameDataSections?: unknown, humanReview?: string) => Promise<void>;
+  startEditWorkflow: (scriptId: string) => Promise<void>;
+  resumeWorkflow: (action: string, content?: string, prompt?: string, gameDataSections?: unknown, humanReview?: string, selectedAssetIds?: string[]) => Promise<void>;
   fetchState: () => Promise<void>;
   restoreSession: () => Promise<boolean>;
   openProgressStream: () => void;
@@ -154,6 +159,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   scriptId: null,
   scriptTitle: '',
   currentStep: '',
+  workflowMode: 'create',
   isComplete: false,
   workflowState: null,
   interruptInfo: null,
@@ -180,6 +186,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         scriptId: result.script_id,
         scriptTitle: result.script_title,
         currentStep: result.current_step,
+        workflowMode: result.state.workflow_mode || 'create',
         isComplete: false,
         workflowState: result.state,
         interruptInfo: result.interrupt,
@@ -191,12 +198,36 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }
   },
 
-  resumeWorkflow: async (action, content, prompt, gameDataSections, humanReview) => {
-    const { threadId, currentStep } = get();
+  startEditWorkflow: async (scriptId) => {
+    set({ isStarting: true, error: null });
+    try {
+      const result = await editorApi.startEditWorkflow(scriptId);
+      saveSession({ threadId: result.thread_id });
+      set({
+        threadId: result.thread_id,
+        scriptId: result.script_id,
+        scriptTitle: result.script_title,
+        currentStep: result.current_step,
+        workflowMode: 'edit',
+        isComplete: false,
+        workflowState: result.state,
+        interruptInfo: result.interrupt,
+        isStarting: false,
+      });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : '打开编辑失败';
+      set({ error: message, isStarting: false });
+    }
+  },
+
+  resumeWorkflow: async (action, content, prompt, gameDataSections, humanReview, selectedAssetIds) => {
+    const { threadId, currentStep, workflowMode } = get();
     if (!threadId) return;
 
     // Optimistic: on confirm, immediately advance timeline to next generation step
-    const optimisticStep = action === "confirm" && currentStep
+    const optimisticStep = workflowMode === 'edit' && currentStep === 'review_game_data'
+      ? currentStep
+      : action === "confirm" && currentStep
       ? (OPTIMISTIC_STEP_MAP[currentStep] || currentStep)
       : currentStep;
 
@@ -223,6 +254,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         prompt,
         game_data_sections: gameDataSections,
         human_review: humanReview,
+        selected_asset_ids: selectedAssetIds,
       });
 
       // Clear session on completion
@@ -301,6 +333,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
       set({
         currentStep: interruptInfo?.step || result.current_step,
+        workflowMode: result.state.workflow_mode || 'create',
         isComplete: result.is_complete,
         workflowState: result.state,
         interruptInfo,
@@ -431,6 +464,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       scriptId: null,
       scriptTitle: '',
       currentStep: '',
+      workflowMode: 'create',
       isComplete: false,
       workflowState: null,
       interruptInfo: null,
@@ -460,8 +494,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
       // Don't advance if there are still incomplete tasks in progress data
       const { convertProgress: cp, assetProgress: ap } = get();
-      const convertIncomplete = cp?.phases?.some((p) => p.tasks?.some((t) => t.status !== "complete"));
-      const assetIncomplete = ap?.phases?.some((p) => p.tasks?.some((t) => t.status !== "complete"));
+      const convertIncomplete = cp?.phases?.some((p) => p.tasks?.some((t) => !["complete", "skipped"].includes(t.status)));
+      const assetIncomplete = ap?.phases?.some((p) => p.tasks?.some((t) => !["complete", "skipped"].includes(t.status)));
       if (convertIncomplete || assetIncomplete) return;
 
       editorApi.getState(tid).then((r) => {
@@ -566,4 +600,5 @@ const OPTIMISTIC_STEP_MAP: Record<string, string> = {
   review_final: "convert_to_game_data",
   review_game_data: "generate_assets",
   safety_check: "generate_assets",
+  review_asset_plan: "generate_assets",
 };

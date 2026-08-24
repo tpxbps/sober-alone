@@ -86,6 +86,9 @@ export function ScriptDetailModal({
   const [aiModels, setAiModels] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const [actionError, setActionError] = useState("");
+  const [reloadToken, setReloadToken] = useState(0);
   const [openSelectId, setOpenSelectId] = useState<string | null>(null);
   const [availableModels, setAvailableModels] = useState<typeof AI_MODELS>([]);
   const [modelCapabilityReason, setModelCapabilityReason] = useState(
@@ -97,34 +100,74 @@ export function ScriptDetailModal({
 
   // Load characters when modal opens
   useEffect(() => {
-    if (open && script.script_id) {
-      setIsLoading(true);
-      Promise.all([
-        scriptApi.getScriptCharacters(script.script_id),
-        systemApi.getCapabilities(),
-      ])
-        .then(([response, capabilities]) => {
-          const models = configuredModels(AI_MODELS, capabilities);
-          setAvailableModels(models);
-          setModelCapabilityReason(
-            models.length > 0 ? "" : "没有已配置的主模型，请先设置 DEEPSEEK_API_KEY"
-          );
-          const chars = response.characters;
-          setCharacters(chars);
-          const defaultModels: Record<string, string> = {};
-          chars.forEach((char) => {
-            if (models[0]) defaultModels[char.character_id] = models[0].id;
-          });
-          setAiModels(defaultModels);
-        })
-        .catch((error) => {
-          console.error(error);
-          setAvailableModels([]);
-          setModelCapabilityReason("无法读取后端模型能力");
-        })
-        .finally(() => setIsLoading(false));
-    }
-  }, [open, script.script_id]);
+    if (!open || !script.script_id) return;
+
+    let cancelled = false;
+    setIsLoading(true);
+    setLoadError("");
+    setActionError("");
+    setCharacters([]);
+    setSelectedCharacter(null);
+    setAiModels({});
+    setAvailableModels([]);
+    setModelCapabilityReason("正在检查模型能力…");
+
+    Promise.allSettled([
+      scriptApi.getScriptCharacters(script.script_id),
+      systemApi.getCapabilities(),
+    ]).then(([characterResult, capabilityResult]) => {
+      if (cancelled) return;
+
+      let chars: Character[] = [];
+      if (characterResult.status === "fulfilled") {
+        const payload = characterResult.value.characters;
+        chars = Array.isArray(payload)
+          ? payload.filter(
+              (character) =>
+                typeof character?.character_id === "string" &&
+                character.character_id.length > 0 &&
+                typeof character.name === "string" &&
+                character.name.length > 0
+            )
+          : [];
+        setCharacters(chars);
+        if (chars.length === 0) {
+          setLoadError("该剧本没有可用角色，请检查剧本数据后重试。");
+        }
+      } else {
+        console.error("Failed to load script characters:", characterResult.reason);
+        setLoadError("角色加载失败，请确认后端正常运行后重试。");
+      }
+
+      let models: typeof AI_MODELS = [];
+      if (capabilityResult.status === "fulfilled") {
+        models = configuredModels(AI_MODELS, capabilityResult.value);
+        setModelCapabilityReason(
+          models.length > 0
+            ? ""
+            : "没有已配置的主模型，请先在 backend/.env 配置 DEEPSEEK_API_KEY"
+        );
+      } else {
+        console.error("Failed to load model capabilities:", capabilityResult.reason);
+        setModelCapabilityReason("无法读取后端模型能力，请检查后端连接");
+      }
+      setAvailableModels(models);
+
+      const defaultModel = models[0];
+      const defaultModels: Record<string, string> = {};
+      if (defaultModel) {
+        chars.forEach((character) => {
+          defaultModels[character.character_id] = defaultModel.id;
+        });
+      }
+      setAiModels(defaultModels);
+      setIsLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, reloadToken, script.script_id]);
 
   // Handle character selection
   const handleCharacterSelect = (characterId: string) => {
@@ -138,16 +181,18 @@ export function ScriptDetailModal({
 
   // Start game
   const handleStartGame = async () => {
-    if (!selectedCharacter || availableModels.length === 0) return;
+    const defaultModel = availableModels[0];
+    if (!selectedCharacter || !defaultModel) return;
 
     setIsCreating(true);
+    setActionError("");
     try {
       // Prepare AI models for non-human characters
       const aiModelConfig: Record<string, string> = {};
       characters.forEach((char) => {
         if (char.character_id !== selectedCharacter) {
           aiModelConfig[char.character_id] =
-            aiModels[char.character_id] || availableModels[0]?.id;
+            aiModels[char.character_id] || defaultModel.id;
         }
       });
 
@@ -160,9 +205,12 @@ export function ScriptDetailModal({
       if (result.success && result.session_id) {
         onStartGame(result.session_id);
         onClose();
+      } else {
+        setActionError(result.error || "创建游戏失败，请检查角色和模型配置。");
       }
     } catch (error) {
       console.error("Failed to create game:", error);
+      setActionError("创建游戏失败，请确认后端服务和模型配置正常。");
     } finally {
       setIsCreating(false);
     }
@@ -291,6 +339,20 @@ export function ScriptDetailModal({
                     <div className="flex items-center justify-center py-12">
                       <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
                     </div>
+                  ) : loadError ? (
+                    <div
+                      role="alert"
+                      className="rounded-xl border border-destructive/30 bg-destructive/10 p-5 text-sm"
+                    >
+                      <p>{loadError}</p>
+                      <button
+                        type="button"
+                        onClick={() => setReloadToken((value) => value + 1)}
+                        className="mt-3 rounded-lg bg-secondary px-3 py-2 hover:bg-secondary/80"
+                      >
+                        重新加载
+                      </button>
+                    </div>
                   ) : (
                     <Tooltip.Provider delayDuration={0}>
                       <div className="space-y-3 flex-1 overflow-auto pr-2 py-1 scrollbar-thin max-h-[55vh]">
@@ -387,66 +449,66 @@ export function ScriptDetailModal({
                                       <Cpu className="w-3 h-3" />
                                       AI 扮演模型
                                     </label>
-                                    <Select.Root
-                                      value={
-                                        aiModels[char.character_id] ||
-                                        availableModels[0].id
-                                      }
-                                      onValueChange={(value: string) =>
-                                        handleAIModelChange(
-                                          char.character_id,
-                                          value
-                                        )
-                                      }
-                                      onOpenChange={(open) => {
-                                        setOpenSelectId(
-                                          open ? char.character_id : null
-                                        );
-                                      }}
-                                    >
-                                      <Select.Trigger
-                                        className="w-full px-3 py-2 text-sm rounded-lg bg-secondary/30 border border-border
+                                    {availableModels.length > 0 ? (
+                                      <Select.Root
+                                        value={
+                                          aiModels[char.character_id] ||
+                                          availableModels[0]?.id
+                                        }
+                                        onValueChange={(value: string) =>
+                                          handleAIModelChange(
+                                            char.character_id,
+                                            value
+                                          )
+                                        }
+                                        onOpenChange={(open) => {
+                                          setOpenSelectId(
+                                            open ? char.character_id : null
+                                          );
+                                        }}
+                                      >
+                                        <Select.Trigger
+                                          className="w-full px-3 py-2 text-sm rounded-lg bg-secondary/30 border border-border
                                                hover:bg-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/50
                                                flex items-center justify-between"
-                                        onClick={(e: React.MouseEvent) =>
-                                          e.stopPropagation()
-                                        }
-                                        onPointerDown={(e) =>
-                                          e.stopPropagation()
-                                        }
-                                        onTouchEnd={(e) =>
-                                          e.stopPropagation()
-                                        }
-                                      >
-                                        <Select.Value />
-                                        <Select.Icon>
-                                          <ChevronDown className="w-4 h-4 text-muted-foreground" />
-                                        </Select.Icon>
-                                      </Select.Trigger>
-                                      <Select.Portal>
-                                        <Select.Content
-                                          className="w-[var(--radix-select-trigger-width)] overflow-hidden rounded-lg bg-card border border-border shadow-xl z-50"
-                                          position="popper"
-                                          sideOffset={4}
                                         >
-                                          <Select.Viewport className="p-1">
-                                            {availableModels.map((model) => (
-                                              <Select.Item
-                                                key={model.id}
-                                                value={model.id}
-                                                className="w-full px-3 py-2 text-sm rounded-md cursor-pointer
+                                          <Select.Value />
+                                          <Select.Icon>
+                                            <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                                          </Select.Icon>
+                                        </Select.Trigger>
+                                        <Select.Portal>
+                                          <Select.Content
+                                            className="w-[var(--radix-select-trigger-width)] overflow-hidden rounded-lg bg-card border border-border shadow-xl z-50"
+                                            position="popper"
+                                            sideOffset={4}
+                                          >
+                                            <Select.Viewport className="p-1">
+                                              {availableModels.map((model) => (
+                                                <Select.Item
+                                                  key={model.id}
+                                                  value={model.id}
+                                                  className="w-full px-3 py-2 text-sm rounded-md cursor-pointer
                                                        outline-none hover:bg-secondary/50 focus:bg-secondary/50
                                                        data-[highlighted]:bg-secondary/50"
-                                              >
-                                                <Select.ItemText>
-                                                  {model.name}
-                                                </Select.ItemText>
-                                              </Select.Item>
-                                            ))}
-                                          </Select.Viewport>
-                                        </Select.Content>
-                                      </Select.Portal>
-                                    </Select.Root>
+                                                >
+                                                  <Select.ItemText>
+                                                    {model.name}
+                                                  </Select.ItemText>
+                                                </Select.Item>
+                                              ))}
+                                            </Select.Viewport>
+                                          </Select.Content>
+                                        </Select.Portal>
+                                      </Select.Root>
+                                    ) : (
+                                      <p
+                                        role="status"
+                                        className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300"
+                                      >
+                                        暂不可分配 AI 模型：{modelCapabilityReason}
+                                      </p>
+                                    )}
                                   </motion.div>
                                 )}
                             </div>
@@ -461,6 +523,11 @@ export function ScriptDetailModal({
 
             {/* Footer */}
             <div className="p-6 border-t border-border bg-secondary/10">
+              {actionError && (
+                <p role="alert" className="mb-3 text-sm text-destructive">
+                  {actionError}
+                </p>
+              )}
               <Tooltip.Provider delayDuration={300}>
               <Tooltip.Root>
                 <Tooltip.Trigger asChild>

@@ -9,12 +9,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents import remove_agent_manager
 from app.core.config import settings
-from app.db.models import GameSession, Script
+from app.db.models import Character, GameSession, Script
 from app.db.session import get_db
 from app.script_editor.graph import get_script_gen_graph
+from app.script_editor.ownership import owner_hash_matches, require_author_key_hash
 from app.script_editor.services.progress_registry import (
     asset_progress_registry,
     convert_progress_registry,
+)
+from app.script_editor.services.workflow_service import (
+    ScriptEditorWorkflowService,
+    WorkflowAuthorizationError,
 )
 from app.services.game_service import remove_flow_controller
 
@@ -24,12 +29,18 @@ router = APIRouter()
 
 
 @router.delete("/scripts/{script_id}")
-async def delete_script(script_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_script(
+    script_id: str,
+    db: AsyncSession = Depends(get_db),
+    owner_key_hash: str = Depends(require_author_key_hash),
+):
     """Delete a script and all locally owned dependent runtime data."""
     try:
-        existing = await db.scalar(select(Script.script_id).where(Script.script_id == script_id))
+        existing = await db.scalar(select(Script).where(Script.script_id == script_id))
         if not existing:
             raise HTTPException(status_code=404, detail="剧本不存在")
+        if not owner_hash_matches(existing.owner_key_hash, owner_key_hash):
+            raise HTTPException(status_code=403, detail="无权删除该剧本")
 
         session_ids = list(
             await db.scalars(
@@ -69,6 +80,29 @@ async def delete_script(script_id: str, db: AsyncSession = Depends(get_db)):
         await db.rollback()
         logger.error("Failed to delete script: %s", error, exc_info=True)
         raise HTTPException(status_code=500, detail=str(error)) from error
+
+
+@router.post("/scripts/{script_id}/edit")
+async def edit_script(
+    script_id: str,
+    db: AsyncSession = Depends(get_db),
+    owner_key_hash: str = Depends(require_author_key_hash),
+):
+    """Open a completed owned script directly at structured-data review."""
+    script = await db.scalar(select(Script).where(Script.script_id == script_id))
+    if not script:
+        raise HTTPException(status_code=404, detail="剧本不存在")
+    characters = list(
+        await db.scalars(
+            select(Character)
+            .where(Character.script_id == script_id)
+            .order_by(Character.character_id)
+        )
+    )
+    try:
+        return await ScriptEditorWorkflowService().start_edit(script, characters, owner_key_hash)
+    except WorkflowAuthorizationError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
 
 
 def _delete_vector_collection(script_id: str) -> None:

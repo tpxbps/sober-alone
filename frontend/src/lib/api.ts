@@ -12,6 +12,7 @@ import type {
   LLMConfig,
 } from '@/types/game';
 import type { SystemCapabilities } from '@/types/capabilities';
+import { AUTHOR_KEY_HEADER, getStoredAuthorKey } from '@/lib/authorKey';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api/v1';
 
@@ -20,6 +21,12 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+});
+
+api.interceptors.request.use((config) => {
+  const authorKey = getStoredAuthorKey();
+  if (authorKey) config.headers.set(AUTHOR_KEY_HEADER, authorKey);
+  return config;
 });
 
 export const systemApi = {

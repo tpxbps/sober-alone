@@ -5,6 +5,7 @@ Review (interrupt) nodes — 用户确认/编辑各步骤内容
 from langgraph.types import interrupt
 
 from app.script_editor.state import (
+    STEP_REVIEW_ASSET_PLAN,
     STEP_REVIEW_FINAL,
     STEP_REVIEW_FIRST_DRAFT,
     STEP_REVIEW_GAME_DATA,
@@ -89,7 +90,12 @@ def review_game_data(state: ScriptGenState) -> dict:
         "step_label": "游戏数据确认",
         "game_data_sections": state.get("game_data_sections", {}),
         "prompt_used": state.get("prompts", {}).get("convert_to_game_data", ""),
+        "workflow_mode": state.get("workflow_mode", "create"),
     }
+
+    validation_errors = state.get("data_validation_errors", [])
+    if validation_errors:
+        interrupt_payload["validation_errors"] = validation_errors
 
     # Forward safety check rejection reason if present
     rejection_reason = state.get("safety_rejection_reason", "")
@@ -111,5 +117,30 @@ def review_game_data(state: ScriptGenState) -> dict:
     # Clear rejection reason on confirm so next safety check starts fresh
     if action == "confirm":
         result["safety_rejection_reason"] = ""
+        result["data_validation_errors"] = []
 
     return result
+
+
+def review_asset_plan(state: ScriptGenState) -> dict:
+    """Confirm exactly which changed or missing assets should be regenerated."""
+    plan = state.get("asset_plan", [])
+    user_response = interrupt(
+        {
+            "step": STEP_REVIEW_ASSET_PLAN,
+            "step_label": "资源更新确认",
+            "workflow_mode": "edit",
+            "asset_plan": plan,
+        }
+    )
+
+    published = {item.get("id") for item in plan if item.get("available")}
+    selected = user_response.get("selected_asset_ids", [])
+    if not isinstance(selected, list) or any(item not in published for item in selected):
+        raise ValueError("selected_asset_ids 包含未发布或不可用的资源任务")
+
+    return {
+        "current_step": STEP_REVIEW_ASSET_PLAN,
+        "selected_asset_ids": list(dict.fromkeys(selected)),
+        "_review_action": "confirm",
+    }

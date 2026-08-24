@@ -60,12 +60,18 @@ export function CharacterPanel({
             initial={{ opacity: 0, x: side === "left" ? -20 : 20 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: index * 0.1 }}
-            onClick={() => onCharacterClick?.(character.character_id)}
-            className="relative group cursor-pointer"
+            className="relative group w-full"
           >
+            <button
+              type="button"
+              disabled={human || !onCharacterClick}
+              aria-label={human ? `${character.name}（你）` : `在输入框引用 ${character.name}`}
+              onClick={() => onCharacterClick?.(character.character_id)}
+              className="block w-full cursor-pointer text-left disabled:cursor-default"
+            >
             {/* Character Card - Fixed width for all items */}
             <div
-              className={`relative flex items-center gap-3 p-3 rounded-xl transition-all duration-300 w-56
+              className={`relative flex items-center gap-3 p-3 rounded-xl transition-all duration-300 w-full
                 ${
                   speaking
                     ? "bg-primary/20 border border-primary/50 breathing"
@@ -144,16 +150,24 @@ export function CharacterPanel({
                 )}
               </div>
             </div>
+            </button>
 
             {/* Hover tooltip */}
             <div
+              role="tooltip"
               className={`absolute ${
                 side === "left" ? "left-full" : "right-full"
               }
-                top-0 bottom-0 z-50
-                flex items-center opacity-0 group-hover:opacity-100
+                ${
+                  index === 0
+                    ? "top-0"
+                    : index === displayCharacters.length - 1
+                      ? "bottom-0"
+                      : "top-1/2 -translate-y-1/2"
+                }
+                z-[60] opacity-0 group-hover:opacity-100 group-focus-within:opacity-100
                 transition-opacity duration-200
-                pointer-events-none group-hover:pointer-events-auto
+                pointer-events-none group-hover:pointer-events-auto group-focus-within:pointer-events-auto
                 ${side === "left" ? "pl-2" : "pr-2"}`}
             >
               <div className="p-4 rounded-xl bg-popover border border-border shadow-lg text-sm w-80">

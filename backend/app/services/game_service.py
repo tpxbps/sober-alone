@@ -142,22 +142,38 @@ class GameService:
             votes={},
         )
         self.db.add(game_session)
-        await self.db.commit()
+        try:
+            await self.db.commit()
 
-        # 初始化Agent管理器（传入LLM配置）
-        agent_manager = get_agent_manager(session_id, script_id)
-        await agent_manager.initialize_agents(characters, human_character_id, llm_configs)
+            # 初始化Agent管理器（传入LLM配置）
+            agent_manager = get_agent_manager(session_id, script_id)
+            await agent_manager.initialize_agents(characters, human_character_id, llm_configs)
 
-        # 创建流程控制器
-        flow_controller = GameFlowController(
-            game_session=game_session,
-            script_data=script_data,
-            agent_manager=agent_manager,
-        )
-        _flow_controllers.put(session_id, flow_controller)
-
-        # 开始游戏
-        start_result = await flow_controller.start_game(self.db)
+            # 创建流程控制器；成功开始后才注册到运行时缓存。
+            flow_controller = GameFlowController(
+                game_session=game_session,
+                script_data=script_data,
+                agent_manager=agent_manager,
+            )
+            start_result = await flow_controller.start_game(self.db)
+            _flow_controllers.put(session_id, flow_controller)
+        except Exception:
+            logger.exception("Failed to initialize game session %s", session_id)
+            await self.db.rollback()
+            remove_agent_manager(session_id)
+            _flow_controllers.remove(session_id)
+            try:
+                persisted_session = await self.db.get(GameSession, session_id)
+                if persisted_session:
+                    await self.db.delete(persisted_session)
+                    await self.db.commit()
+            except Exception:
+                await self.db.rollback()
+                logger.exception("Failed to clean incomplete game session %s", session_id)
+            return {
+                "success": False,
+                "error": "创建游戏失败，请检查模型配置和后端日志",
+            }
 
         # 获取LLM配置信息
         agent_llm_info = agent_manager.to_dict()["agents"]

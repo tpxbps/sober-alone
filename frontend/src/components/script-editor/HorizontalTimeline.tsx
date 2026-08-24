@@ -6,28 +6,30 @@ interface HorizontalTimelineProps {
   isComplete?: boolean;
   onNodeClick?: (phaseIndex: number) => void;
   viewingPhase?: string | null;
+  workflowMode?: "create" | "edit";
 }
-
-const PHASE_ORDER = WORKFLOW_PHASES.map((p) => p.phase);
 
 export function HorizontalTimeline({
   currentStep,
   isComplete = false,
   onNodeClick,
   viewingPhase,
+  workflowMode = "create",
 }: HorizontalTimelineProps) {
+  const phases = workflowMode === "edit" ? WORKFLOW_PHASES.slice(4) : WORKFLOW_PHASES;
+  const phaseOrder = phases.map((phase) => phase.phase);
   const currentPhase = getPhaseFromStep(currentStep);
-  const currentIndex = PHASE_ORDER.indexOf(currentPhase);
+  const currentIndex = phaseOrder.indexOf(currentPhase);
 
   return (
     <div className="flex items-center gap-1 overflow-x-auto py-3 px-1 scrollbar-thin">
-      {WORKFLOW_PHASES.map((phase, index) => {
+      {phases.map((phase, index) => {
         const isCompleted = currentIndex > index;
         const isCurrent = currentIndex === index;
         // When workflow is complete and this is the last phase, show checkmark
         const isPhaseDone =
           isCompleted ||
-          (isCurrent && isComplete && index === PHASE_ORDER.length - 1);
+          (isCurrent && isComplete && index === phaseOrder.length - 1);
         const isPending = currentIndex < index;
         const isViewing = viewingPhase === phase.phase;
         const isClickable = !isPending && !!onNodeClick;
@@ -36,7 +38,9 @@ export function HorizontalTimeline({
           <div key={phase.phase} className="flex items-center shrink-0">
             {/* Step card */}
             <div
-              onClick={() => isClickable && onNodeClick?.(index)}
+              onClick={() =>
+                isClickable && onNodeClick?.(WORKFLOW_PHASES.indexOf(phase))
+              }
               className={`
                 relative px-3 py-2 rounded-lg border text-left transition-all min-w-[100px]
                 ${isClickable ? "cursor-pointer hover:brightness-110" : ""}
@@ -91,7 +95,7 @@ export function HorizontalTimeline({
             </div>
 
             {/* Arrow connector */}
-            {index < WORKFLOW_PHASES.length - 1 && (
+            {index < phases.length - 1 && (
               <div
                 className={`mx-1 w-4 h-px ${
                   isPhaseDone ? "bg-green-500/40" : "bg-border/30"

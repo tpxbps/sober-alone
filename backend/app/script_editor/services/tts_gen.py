@@ -109,6 +109,7 @@ async def generate_single_system_audio(
         audio_type="system_messages",
         identifier=identifier,
         voice=SYSTEM_VOICE,
+        force=True,
     )
     if url:
         return url
@@ -134,6 +135,7 @@ async def generate_single_char_audio(
         audio_type="character_scripts",
         identifier=char_id,
         voice=voice,
+        force=True,
     )
     if url:
         return url
@@ -146,6 +148,8 @@ async def generate_script_tts(
     characters: list[dict],
     game_full_process: list[dict],
     task_callback: Callable | None = None,
+    selected_task_ids: set[str] | None = None,
+    force: bool = False,
 ) -> dict:
     """
     为新剧本生成所有 TTS 音频（全量并行）
@@ -182,19 +186,21 @@ async def generate_script_tts(
             notice = stage.get("system_notice", "")
             if notice:
                 task_id = f"tts_sys_{i}"
-                tasks.append(
-                    (
-                        task_id,
-                        _generate_system_audio(
-                            script_id,
-                            f"stage_{i}",
-                            notice,
-                            SYSTEM_STYLE,
-                            SYSTEM_VOICE,
-                            results,
-                        ),
+                if selected_task_ids is None or task_id in selected_task_ids:
+                    tasks.append(
+                        (
+                            task_id,
+                            _generate_system_audio(
+                                script_id,
+                                f"stage_{i}",
+                                notice,
+                                SYSTEM_STYLE,
+                                SYSTEM_VOICE,
+                                results,
+                                force,
+                            ),
+                        )
                     )
-                )
 
         elif stage_type == "advancement":
             children = stage.get("children", [])
@@ -203,19 +209,21 @@ async def generate_script_tts(
                 if notice:
                     task_id = f"tts_sys_{i}_{j}"
                     style = get_system_style_for_stage("advancement", j)
-                    tasks.append(
-                        (
-                            task_id,
-                            _generate_system_audio(
-                                script_id,
-                                f"stage_{i}_child_{j}",
-                                notice,
-                                style,
-                                SYSTEM_VOICE,
-                                results,
-                            ),
+                    if selected_task_ids is None or task_id in selected_task_ids:
+                        tasks.append(
+                            (
+                                task_id,
+                                _generate_system_audio(
+                                    script_id,
+                                    f"stage_{i}_child_{j}",
+                                    notice,
+                                    style,
+                                    SYSTEM_VOICE,
+                                    results,
+                                    force,
+                                ),
+                            )
                         )
-                    )
 
         elif stage_type == "vote":
             children = stage.get("children", [])
@@ -223,37 +231,41 @@ async def generate_script_tts(
                 notice = child.get("system_notice", "")
                 if notice:
                     task_id = f"tts_sys_{i}_{j}"
-                    tasks.append(
-                        (
-                            task_id,
-                            _generate_system_audio(
-                                script_id,
-                                f"stage_{i}_child_{j}",
-                                notice,
-                                "以庄重的口吻朗读",
-                                SYSTEM_VOICE,
-                                results,
-                            ),
+                    if selected_task_ids is None or task_id in selected_task_ids:
+                        tasks.append(
+                            (
+                                task_id,
+                                _generate_system_audio(
+                                    script_id,
+                                    f"stage_{i}_child_{j}",
+                                    notice,
+                                    "以庄重的口吻朗读",
+                                    SYSTEM_VOICE,
+                                    results,
+                                    force,
+                                ),
+                            )
                         )
-                    )
 
         elif stage_type == "review":
             notice = stage.get("system_notice", "")
             if notice:
                 task_id = f"tts_sys_{i}"
-                tasks.append(
-                    (
-                        task_id,
-                        _generate_system_audio(
-                            script_id,
-                            f"stage_{i}",
-                            notice,
-                            "以揭秘的口吻朗读，语气逐渐加重",
-                            SYSTEM_VOICE,
-                            results,
-                        ),
+                if selected_task_ids is None or task_id in selected_task_ids:
+                    tasks.append(
+                        (
+                            task_id,
+                            _generate_system_audio(
+                                script_id,
+                                f"stage_{i}",
+                                notice,
+                                "以揭秘的口吻朗读，语气逐渐加重",
+                                SYSTEM_VOICE,
+                                results,
+                                force,
+                            ),
+                        )
                     )
-                )
 
     # 2. 角色个人剧本任务
     for name, script_text in character_scripts.items():
@@ -264,6 +276,8 @@ async def generate_script_tts(
             continue
 
         tts_char_task_id = f"tts_{char_id}"
+        if selected_task_ids is not None and tts_char_task_id not in selected_task_ids:
+            continue
         tasks.append(
             (
                 tts_char_task_id,
@@ -276,6 +290,7 @@ async def generate_script_tts(
                     style=None,
                     gender=gender,
                     results=results,
+                    force=force,
                 ),
             )
         )
@@ -311,6 +326,7 @@ async def _generate_char_audio(
     style: str | None = None,
     gender: str = "",
     results: dict | None = None,
+    force: bool = False,
 ):
     """生成单个角色个人剧本音频"""
     clean_text = preprocess_tts_text(script_text)
@@ -325,6 +341,7 @@ async def _generate_char_audio(
         audio_type="character_scripts",
         identifier=char_id,
         voice=voice,
+        force=force,
     )
     if url:
         if results is not None:
@@ -340,6 +357,7 @@ async def _generate_system_audio(
     style_prompt: str,
     voice: str,
     results: dict,
+    force: bool = False,
 ):
     """生成单条系统消息音频"""
     clean_text = preprocess_tts_text(text)
@@ -352,6 +370,7 @@ async def _generate_system_audio(
         audio_type="system_messages",
         identifier=key,
         voice=voice,
+        force=force,
     )
     if url:
         results["system_messages"][key] = url

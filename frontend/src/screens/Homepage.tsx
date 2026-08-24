@@ -10,7 +10,7 @@ import type { Script } from "@/types/game";
 
 interface HomepageProps {
   onStartGame: (sessionId: string) => void;
-  onOpenEditor: () => void;
+  onOpenEditor: (scriptId?: string) => void;
 }
 
 export function Homepage({ onStartGame, onOpenEditor }: HomepageProps) {
@@ -75,7 +75,7 @@ export function Homepage({ onStartGame, onOpenEditor }: HomepageProps) {
             {/* Nav */}
             <nav className="flex items-center gap-4">
               <button
-                onClick={onOpenEditor}
+                onClick={() => onOpenEditor()}
                 className="relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors text-sm font-medium"
               >
                 <PenTool className="w-4 h-4" />
@@ -186,6 +186,7 @@ export function Homepage({ onStartGame, onOpenEditor }: HomepageProps) {
                           script={script}
                           onClick={() => setSelectedScript(script)}
                           onDeleted={loadScripts}
+                          onEdit={() => onOpenEditor(script.script_id)}
                         />
                       </motion.div>
                     ))}

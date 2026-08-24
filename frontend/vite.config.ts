@@ -17,7 +17,7 @@ export default defineConfig({
       output: {
         manualChunks: {
           react: ['react', 'react-dom', 'react-router-dom'],
-          ui: ['framer-motion', 'lucide-react'],
+          ui: ['framer-motion', 'lucide-react', '@radix-ui/react-switch'],
           markdown: ['react-markdown', 'remark-gfm'],
         },
       },

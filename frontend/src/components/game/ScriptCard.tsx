@@ -7,6 +7,7 @@ import {
   MoreVertical,
   Trash2,
   Sparkles,
+  Pencil,
 } from "lucide-react";
 import type { Script } from "@/types/game";
 import { DIFFICULTY_COLORS } from "@/types/game";
@@ -16,9 +17,10 @@ interface ScriptCardProps {
   script: Script;
   onClick: () => void;
   onDeleted?: () => void;
+  onEdit?: () => void;
 }
 
-export function ScriptCard({ script, onClick, onDeleted }: ScriptCardProps) {
+export function ScriptCard({ script, onClick, onDeleted, onEdit }: ScriptCardProps) {
   const difficultyInfo =
     DIFFICULTY_COLORS[script.difficulty] || DIFFICULTY_COLORS[1];
 
@@ -98,9 +100,10 @@ export function ScriptCard({ script, onClick, onDeleted }: ScriptCardProps) {
         </div>
 
         {/* Local single-user script menu */}
-        {script.is_ai_generated && (
+        {script.can_manage && (
           <div ref={menuRef} className="absolute top-3 left-3 z-10">
             <button
+              aria-label={`管理剧本 ${script.title}`}
               onClick={(e) => {
                 e.stopPropagation();
                 setShowMenu(!showMenu);
@@ -112,6 +115,17 @@ export function ScriptCard({ script, onClick, onDeleted }: ScriptCardProps) {
 
             {showMenu && (
               <div className="absolute left-0 top-full mt-1 bg-card border border-border rounded-lg shadow-lg py-1 min-w-[120px] z-20">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowMenu(false);
+                    onEdit?.();
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary/50 transition-colors"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                  编辑剧本
+                </button>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();

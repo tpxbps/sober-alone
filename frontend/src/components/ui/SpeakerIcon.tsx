@@ -44,29 +44,37 @@ export function SpeakerIcon({
 
   if (state === 'loading') {
     return (
-      <span
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onClick();
+        }}
         className={`${baseClasses} ${className}`}
         style={{ width: size + 8, height: size + 8 }}
-        title="加载音频中..."
+        title="取消加载"
+        aria-label="取消加载语音"
       >
         <Loader2
           style={{ width: size, height: size }}
           className="animate-spin text-primary"
         />
-      </span>
+      </button>
     );
   }
 
   if (state === 'playing') {
     return (
       <button
+        type="button"
         onClick={(e) => {
           e.stopPropagation();
           onClick();
         }}
         className={`${baseClasses} speaker-playing ${className}`}
         style={{ width: size + 8, height: size + 8 }}
-        title="正在播放"
+        title="停止播放"
+        aria-label="停止播放语音"
       >
         <Volume2 style={{ width: size, height: size }} className="text-primary" />
       </button>
@@ -76,6 +84,7 @@ export function SpeakerIcon({
   // state === 'off'
   return (
     <button
+      type="button"
       onClick={(e) => {
         e.stopPropagation();
         onClick();
@@ -83,6 +92,7 @@ export function SpeakerIcon({
       className={`${baseClasses} hover:bg-primary/10 ${className}`}
       style={{ width: size + 8, height: size + 8 }}
       title="播放语音"
+      aria-label="播放语音"
     >
       <Volume2
         style={{ width: size, height: size }}
