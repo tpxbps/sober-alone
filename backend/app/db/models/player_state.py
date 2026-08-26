@@ -90,6 +90,8 @@ class PlayerState(Base):
     has_spoken_this_round: Mapped[bool] = mapped_column(Boolean, default=False)
     # 本轮发言次数 (自由发言阶段)
     speeches_this_round: Mapped[int] = mapped_column(Integer, default=0)
+    # Highest complete human speech record injected into this AI's speaking context.
+    last_seen_human_record_id: Mapped[int] = mapped_column(Integer, default=0)
 
     # ========================================
     # 投票相关
@@ -217,6 +219,7 @@ class PlayerState(Base):
             "remaining_speech_count": self.remaining_speech_count,
             "has_spoken_this_round": self.has_spoken_this_round,
             "speeches_this_round": self.speeches_this_round,
+            "last_seen_human_record_id": self.last_seen_human_record_id,
             "has_voted": self.has_voted,
             # 调度评分
             "speech_tendency": self.calculate_speech_tendency(),

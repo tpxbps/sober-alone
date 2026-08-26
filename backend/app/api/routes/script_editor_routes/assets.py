@@ -5,11 +5,16 @@ import json
 import logging
 from typing import cast
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.script_editor.graph import get_script_gen_graph
-from app.script_editor.services.workflow_service import ScriptEditorWorkflowService
+from app.script_editor.ownership import require_author_key_hash
+from app.script_editor.services.workflow_service import (
+    ScriptEditorWorkflowService,
+    WorkflowAuthorizationError,
+    WorkflowNotFoundError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +28,15 @@ def _script_id_for_thread(thread_id: str) -> str:
     return state_snapshot.values.get("script_id", "")
 
 
+def _authorize_thread(thread_id: str, owner_key_hash: str) -> None:
+    try:
+        ScriptEditorWorkflowService().authorize(thread_id, owner_key_hash)
+    except WorkflowNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except WorkflowAuthorizationError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+
+
 def _task_status(progress: dict | None, task_id: str) -> str:
     if progress:
         for phase in progress.get("phases", []):
@@ -33,9 +47,12 @@ def _task_status(progress: dict | None, task_id: str) -> str:
 
 
 @operation_router.get("/{thread_id}/asset-progress")
-async def get_asset_progress_endpoint(thread_id: str):
+async def get_asset_progress_endpoint(
+    thread_id: str, owner_key_hash: str = Depends(require_author_key_hash)
+):
     """Poll asset-generation progress."""
     try:
+        _authorize_thread(thread_id, owner_key_hash)
         script_id = _script_id_for_thread(thread_id)
         if not script_id:
             return {"success": True, "progress": None}
@@ -49,9 +66,12 @@ async def get_asset_progress_endpoint(thread_id: str):
 
 
 @operation_router.get("/{thread_id}/convert-progress")
-async def get_convert_progress_endpoint(thread_id: str):
+async def get_convert_progress_endpoint(
+    thread_id: str, owner_key_hash: str = Depends(require_author_key_hash)
+):
     """Poll structured-conversion progress."""
     try:
+        _authorize_thread(thread_id, owner_key_hash)
         script_id = _script_id_for_thread(thread_id)
         if not script_id:
             return {"success": True, "progress": None}
@@ -65,9 +85,14 @@ async def get_convert_progress_endpoint(thread_id: str):
 
 
 @operation_router.post("/{thread_id}/retry-asset/{task_id}")
-async def retry_asset_task(thread_id: str, task_id: str):
+async def retry_asset_task(
+    thread_id: str,
+    task_id: str,
+    owner_key_hash: str = Depends(require_author_key_hash),
+):
     """Retry one failed asset-generation task."""
     try:
+        _authorize_thread(thread_id, owner_key_hash)
         graph = get_script_gen_graph()
         state_snapshot = graph.get_state(ScriptEditorWorkflowService.config(thread_id))
         script_id = state_snapshot.values.get("script_id", "")
@@ -87,9 +112,14 @@ async def retry_asset_task(thread_id: str, task_id: str):
 
 
 @operation_router.post("/{thread_id}/retry-convert/{task_id}")
-async def retry_convert_task(thread_id: str, task_id: str):
+async def retry_convert_task(
+    thread_id: str,
+    task_id: str,
+    owner_key_hash: str = Depends(require_author_key_hash),
+):
     """Retry one failed structured-conversion task."""
     try:
+        _authorize_thread(thread_id, owner_key_hash)
         graph = get_script_gen_graph()
         state_snapshot = graph.get_state(ScriptEditorWorkflowService.config(thread_id))
         script_id = state_snapshot.values.get("script_id", "")
@@ -116,10 +146,11 @@ async def retry_convert_task(thread_id: str, task_id: str):
 
 
 @stream_router.get("/{thread_id}/progress-stream")
-async def progress_stream(thread_id: str):
+async def progress_stream(thread_id: str, owner_key_hash: str = Depends(require_author_key_hash)):
     """Stream conversion and asset progress snapshots over SSE."""
     from app.script_editor.services.progress_bus import subscribe, unsubscribe
 
+    _authorize_thread(thread_id, owner_key_hash)
     queue = subscribe(thread_id)
 
     async def event_generator():

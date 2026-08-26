@@ -27,6 +27,7 @@ export interface Script {
   game_full_process?: string;
   full_truth?: string;
   is_ai_generated?: boolean;
+  can_manage: boolean;
 }
 
 // Character from backend
@@ -151,12 +152,13 @@ export interface CreateGameRequest {
 // Game creation response
 export interface CreateGameResponse {
   success: boolean;
-  session_id: string;
-  script: Script;
-  characters: Character[];
-  human_character_id: string;
-  player_states: PlayerState[];
-  agent_llm_info: Record<string, { model: string; provider: string; is_human: boolean }>;
+  session_id?: string;
+  error?: string;
+  script?: Script;
+  characters?: Character[];
+  human_character_id?: string;
+  player_states?: PlayerState[];
+  agent_llm_info?: Record<string, { model: string; provider: string; is_human: boolean }>;
 }
 
 // Stage transition response

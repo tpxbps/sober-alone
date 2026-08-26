@@ -16,6 +16,7 @@ const STORAGE_KEY = 'sober_alone_session';
 function App() {
   const [currentScreen, setCurrentScreen] = useState<AppScreen>('home');
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [editScriptId, setEditScriptId] = useState<string | null>(null);
   const [isRestoring, setIsRestoring] = useState(false);
 
   const { reset, initializeGame } = useGameStore();
@@ -72,12 +73,14 @@ function App() {
   }, [setSearchParams]);
 
   // Handle opening script editor
-  const handleOpenEditor = useCallback(() => {
+  const handleOpenEditor = useCallback((scriptId?: string) => {
+    setEditScriptId(scriptId || null);
     setCurrentScreen('editor');
   }, []);
 
   // Handle exiting editor back to home
   const handleExitEditor = useCallback(() => {
+    setEditScriptId(null);
     setCurrentScreen('home');
   }, []);
 
@@ -150,7 +153,7 @@ function App() {
             exit={{ opacity: 0 }}
             transition={{ duration: 0.3 }}
           >
-            <ScriptEditorPage onBack={handleExitEditor} />
+            <ScriptEditorPage onBack={handleExitEditor} editScriptId={editScriptId} />
           </motion.div>
         )}
       </AnimatePresence>

@@ -3,7 +3,6 @@ ChromaDB Ingestion Service — 将角色剧本向量化存入 ChromaDB
 """
 
 import logging
-import uuid
 
 import chromadb
 from chromadb.config import Settings as ChromaSettings
@@ -31,94 +30,67 @@ def ingest_script(
         characters: 角色列表
         character_scripts: {角色名: 个人剧本文本}
     """
-    # 初始化 ChromaDB 客户端
+    by_name = {item.get("name"): item for item in characters}
+    for name, script_text in character_scripts.items():
+        character = by_name.get(name)
+        if not character or not character.get("character_id"):
+            raise ValueError(f"Missing stable character_id for {name}")
+        ingest_character(script_id, character, script_text)
+
+
+def ingest_character(script_id: str, character: dict, script_text: str) -> None:
+    """Atomically replace only one character's vector documents."""
+    character_id = str(character.get("character_id", ""))
+    name = str(character.get("name", ""))
+    if not character_id:
+        raise ValueError("character_id is required")
+
     client = chromadb.PersistentClient(
         path=settings.CHROMA_PERSIST_DIR,
         settings=ChromaSettings(anonymized_telemetry=False),
     )
-
-    # 初始化 ZhipuAI 客户端
-    zhipu_client = ZhipuAI(api_key=settings.ZHIPUAI_API_KEY)
-    embedding_model = "embedding-3"
-
-    # 生成集合名称
-    collection_name = f"script_{script_id.replace('-', '_')}"
-
-    # 删除已有集合（如果存在）以避免重复
-    try:
-        client.delete_collection(collection_name)
-    except Exception:
-        pass
-
-    # 创建新集合
     collection = client.get_or_create_collection(
-        name=collection_name,
+        name=f"script_{script_id.replace('-', '_')}",
         metadata={"script_id": script_id},
     )
-
-    # 构建角色名 -> character_id 映射
-    name_to_id = {c.get("name"): c.get("character_id", str(uuid.uuid4())) for c in characters}
-
-    # 处理每个角色的个人剧本
-    all_ids = []
-    all_documents = []
-    all_metadatas = []
-    all_embeddings = []
-
-    for name, script_text in character_scripts.items():
-        char_id = name_to_id.get(name, str(uuid.uuid4()))
-        if not script_text:
-            continue
-
-        # 分块
-        chunks = _chunk_text(script_text, CHUNK_SIZE, CHUNK_OVERLAP)
-
-        for i, chunk in enumerate(chunks):
-            doc_id = f"{char_id}_chunk_{i}"
-            all_ids.append(doc_id)
-            all_documents.append(chunk)
-            all_metadatas.append(
-                {
-                    "character_id": char_id,
-                    "character_name": name,
-                    "chunk_index": i,
-                    "total_chunks": len(chunks),
-                }
-            )
-
-    if not all_documents:
-        logger.warning(f"No documents to ingest for script {script_id}")
-        return
-
-    # 批量生成 embeddings
-    batch_size = 20
-    for batch_start in range(0, len(all_documents), batch_size):
-        batch_end = min(batch_start + batch_size, len(all_documents))
-        batch_texts = all_documents[batch_start:batch_end]
-
-        try:
+    chunks = _chunk_text(script_text, CHUNK_SIZE, CHUNK_OVERLAP) if script_text else []
+    embeddings = []
+    if chunks:
+        zhipu_client = ZhipuAI(api_key=settings.ZHIPUAI_API_KEY)
+        for batch_start in range(0, len(chunks), 20):
             response = zhipu_client.embeddings.create(
-                model=embedding_model,
-                input=batch_texts,
+                model="embedding-3",
+                input=chunks[batch_start : batch_start + 20],
                 dimensions=1024,
             )
-            batch_embeddings = [item.embedding for item in response.data]
-            all_embeddings.extend(batch_embeddings)
-        except Exception as e:
-            logger.error(f"Embedding generation failed for batch starting at {batch_start}: {e}")
-            return
+            embeddings.extend(item.embedding for item in response.data)
+        if len(embeddings) != len(chunks):
+            raise RuntimeError("Embedding provider returned an incomplete batch")
 
-    # 存入 ChromaDB
-    try:
+    # Do not remove the last good vectors until the replacement is ready.
+    collection.delete(where={"character_id": character_id})
+    if chunks:
         collection.add(
-            ids=all_ids,
-            documents=all_documents,
-            metadatas=all_metadatas,
-            embeddings=all_embeddings,
+            ids=[f"{character_id}_chunk_{index}" for index in range(len(chunks))],
+            documents=chunks,
+            metadatas=[
+                {
+                    "character_id": character_id,
+                    "character_name": name,
+                    "chunk_index": index,
+                    "total_chunks": len(chunks),
+                }
+                for index in range(len(chunks))
+            ],
+            embeddings=embeddings,
         )
-        logger.info(f"Ingested {len(all_ids)} chunks for script {script_id}")
-    except Exception as e:
-        logger.error(f"ChromaDB ingestion failed: {e}")
+    logger.info("Ingested %s chunks for %s/%s", len(chunks), script_id, character_id)
+
+
+async def ingest_character_async(script_id: str, character: dict, script_text: str) -> None:
+    import asyncio
+
+    await asyncio.to_thread(ingest_character, script_id, character, script_text)
 
 
 async def ingest_script_async(

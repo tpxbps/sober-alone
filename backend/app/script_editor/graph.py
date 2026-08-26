@@ -9,12 +9,14 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from app.script_editor.nodes.convert import convert_to_game_data
+from app.script_editor.nodes.editing import build_asset_plan, normalize_edited_game_data
 from app.script_editor.nodes.final_draft import generate_final_draft
 from app.script_editor.nodes.first_draft import generate_first_draft
 from app.script_editor.nodes.init_node import init_workflow
 from app.script_editor.nodes.outline import generate_outline
 from app.script_editor.nodes.review import review_by_llm
 from app.script_editor.nodes.review_nodes import (
+    review_asset_plan,
     review_final,
     review_first_draft,
     review_game_data,
@@ -62,19 +64,35 @@ def _route_after_final_review(
 
 def _route_after_game_data_review(
     state: ScriptGenState,
-) -> Literal["convert_to_game_data", "safety_check"]:
+) -> Literal["convert_to_game_data", "normalize_game_data"]:
     """游戏数据审阅后路由：确认→安全审查，重新生成→重新转化"""
     action = state.get("_review_action", "confirm")
     if action == "regenerate":
         return "convert_to_game_data"
+    return "normalize_game_data"
+
+
+def _route_from_start(state: ScriptGenState) -> Literal["init_workflow", "review_game_data"]:
+    if state.get("workflow_mode") == "edit":
+        return "review_game_data"
+    return "init_workflow"
+
+
+def _route_after_normalize(
+    state: ScriptGenState,
+) -> Literal["review_game_data", "safety_check"]:
+    if state.get("data_validation_errors"):
+        return "review_game_data"
     return "safety_check"
 
 
 def _route_after_safety_check(
     state: ScriptGenState,
-) -> Literal["save_to_database", "review_game_data"]:
+) -> Literal["prepare_asset_plan", "save_to_database", "review_game_data"]:
     """安全审查后路由：通过→保存，未通过→返回修改"""
     if state.get("safety_passed", False):
+        if state.get("workflow_mode") == "edit":
+            return "prepare_asset_plan"
         return "save_to_database"
     return "review_game_data"
 
@@ -115,12 +133,19 @@ def build_script_gen_graph():
     builder.add_node("review_final", review_final)
     builder.add_node("convert_to_game_data", convert_to_game_data)
     builder.add_node("review_game_data", review_game_data)
+    builder.add_node("normalize_game_data", normalize_edited_game_data)
+    builder.add_node("prepare_asset_plan", build_asset_plan)
+    builder.add_node("review_asset_plan", review_asset_plan)
     builder.add_node("save_to_database", save_to_database)
     builder.add_node("generate_assets", generate_assets)
     builder.add_node("safety_check", safety_check)
 
     # 添加边
-    builder.add_edge(START, "init_workflow")
+    builder.add_conditional_edges(
+        START,
+        _route_from_start,
+        ["init_workflow", "review_game_data"],
+    )
     builder.add_edge("init_workflow", "generate_outline")
     builder.add_edge("generate_outline", "review_outline")
 
@@ -154,19 +179,28 @@ def build_script_gen_graph():
     # 数据转化 → 数据审阅
     builder.add_edge("convert_to_game_data", "review_game_data")
 
-    # 数据审阅后条件路由（确认→安全审查，重新生成→重新转化）
+    # 数据审阅后条件路由（确认→规范化，重新生成→重新转化）
     builder.add_conditional_edges(
         "review_game_data",
         _route_after_game_data_review,
-        ["convert_to_game_data", "safety_check"],
+        ["convert_to_game_data", "normalize_game_data"],
+    )
+
+    builder.add_conditional_edges(
+        "normalize_game_data",
+        _route_after_normalize,
+        ["review_game_data", "safety_check"],
     )
 
     # 安全审查后条件路由（通过→保存，未通过→返回修改）
     builder.add_conditional_edges(
         "safety_check",
         _route_after_safety_check,
-        ["save_to_database", "review_game_data"],
+        ["prepare_asset_plan", "save_to_database", "review_game_data"],
     )
+
+    builder.add_edge("prepare_asset_plan", "review_asset_plan")
+    builder.add_edge("review_asset_plan", "save_to_database")
 
     # 保存成功后才生成资源；保存失败则保留 error_message 并停止
     builder.add_conditional_edges(

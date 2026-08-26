@@ -19,6 +19,7 @@ import { CheckpointView } from "./CheckpointView";
 import { IdeaStage } from "./IdeaStage";
 import { cloneGameDataSections, workflowDraftKey } from "./contentDrafts";
 import { DefaultReviewStage } from "./DefaultReviewStage";
+import { AssetPlanDialog } from "./AssetPlanDialog";
 
 // === Props ===
 
@@ -36,6 +37,7 @@ interface ContentPanelProps {
   viewingCheckpoint: import("@/types/editor").CheckpointInfo | null;
   onConfirm: (content: string) => Promise<void>;
   onConfirmGameData: (gameDataSections: GameDataSections) => Promise<void>;
+  onConfirmAssetPlan: (selectedIds: string[]) => Promise<void>;
   onConfirmReviewFinal: (content: string, humanReview: string) => Promise<void>;
   onRegenerate: (prompt?: string) => Promise<void>;
   onRegenerateReviewFinal: (
@@ -68,6 +70,7 @@ export function ContentPanel({
   convertProgress,
   onConfirm,
   onConfirmGameData,
+  onConfirmAssetPlan,
   onConfirmReviewFinal,
   onRegenerate,
   onRegenerateReviewFinal,
@@ -98,6 +101,7 @@ export function ContentPanel({
       convertProgress={convertProgress}
       onConfirm={onConfirm}
       onConfirmGameData={onConfirmGameData}
+      onConfirmAssetPlan={onConfirmAssetPlan}
       onConfirmReviewFinal={onConfirmReviewFinal}
       onRegenerate={onRegenerate}
       onRegenerateReviewFinal={onRegenerateReviewFinal}
@@ -123,6 +127,7 @@ function ContentPanelBody({
   convertProgress,
   onConfirm,
   onConfirmGameData,
+  onConfirmAssetPlan,
   onConfirmReviewFinal,
   onRegenerate,
   onRegenerateReviewFinal,
@@ -139,6 +144,8 @@ function ContentPanelBody({
     currentStep === "review_game_data" && !!interruptInfo;
   const isSafetyRejected =
     interruptInfo?.step === "safety_check" && interruptInfo?.rejected === true;
+  const isReviewAssetPlan =
+    currentStep === "review_asset_plan" && !!interruptInfo?.asset_plan;
   // Check if convert/asset progress has incomplete tasks (failed or running)
   const convertHasIncomplete = !!convertProgress?.phases?.some((p) =>
     p.tasks?.some((t) => !["complete", "skipped"].includes(t.status))
@@ -233,6 +240,7 @@ function ContentPanelBody({
     isIdeaPhase ||
     isReviewFinal ||
     isReviewGameData ||
+    isReviewAssetPlan ||
     (interruptInfo &&
       !isComplete &&
       !isSafetyRejected &&
@@ -301,15 +309,17 @@ function ContentPanelBody({
           <div className="w-14 h-14 rounded-full bg-green-500/20 flex items-center justify-center">
             <Check className="w-7 h-7 text-green-500" />
           </div>
-          <h3 className="text-lg font-bold">剧本创建完成！</h3>
+          <h3 className="text-lg font-bold">
+            {workflowState?.workflow_mode === "edit" ? "剧本修改完成！" : "剧本创建完成！"}
+          </h3>
           <p className="text-muted-foreground text-center text-sm max-w-sm">
-            剧本「{scriptTitle}」已成功创建，你可以在剧本大厅找到它并开始游戏。
+            剧本「{scriptTitle}」已保存为最新版本，你可以返回剧本大厅开始新对局。
           </p>
           <button
             onClick={onBack}
             className="w-full max-w-sm mt-2 py-2.5 rounded-lg bg-primary text-primary-foreground font-medium hover:bg-primary/90 transition-colors text-sm"
           >
-            创作结单，返回大厅
+            返回剧本大厅
           </button>
         </div>
       );
@@ -398,6 +408,16 @@ function ContentPanelBody({
           scriptTitle={scriptTitle}
           workflowState={workflowState}
           moleActive={moleActive}
+        />
+      );
+    }
+
+    if (isReviewAssetPlan) {
+      return (
+        <AssetPlanDialog
+          items={interruptInfo?.asset_plan || []}
+          isLoading={isLoading}
+          onConfirm={onConfirmAssetPlan}
         />
       );
     }

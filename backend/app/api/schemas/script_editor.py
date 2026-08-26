@@ -17,6 +17,7 @@ class ResumeWorkflowRequest(BaseModel):
     human_review: str | None = None
     game_data_sections: dict | None = None
     prompt: str | None = None
+    selected_asset_ids: list[str] | None = None
 
 
 class UpdatePromptRequest(BaseModel):

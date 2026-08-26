@@ -44,9 +44,19 @@ def test_init_is_idempotent(tmp_path: Path):
         character_count = connection.execute(
             "SELECT COUNT(*) FROM characters WHERE script_id = ?", (SAMPLE_SCRIPT_ID,)
         ).fetchone()[0]
+        script_columns = {row[1] for row in connection.execute("PRAGMA table_info(scripts)")}
+        player_state_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(player_states)")
+        }
+        legacy_owner = connection.execute(
+            "SELECT owner_key_hash FROM scripts WHERE script_id = ?", (SAMPLE_SCRIPT_ID,)
+        ).fetchone()[0]
 
     assert {"scripts", "characters", "game_sessions", "player_states", "game_records"} <= tables
     assert script_count == 1
     assert character_count == 4
+    assert "owner_key_hash" in script_columns
+    assert "last_seen_human_record_id" in player_state_columns
+    assert legacy_owner is None
     assert "Sample imported" in first.stdout
     assert "sample import skipped" in second.stdout

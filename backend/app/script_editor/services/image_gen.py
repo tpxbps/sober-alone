@@ -32,6 +32,7 @@ async def generate_cover_image(
     script_id: str,
     story_synopsis: str,
     title: str = "",
+    force: bool = False,
 ) -> str | None:
     """
     生成剧本封面图片 (1280x768)
@@ -51,7 +52,7 @@ async def generate_cover_image(
     save_dir.mkdir(parents=True, exist_ok=True)
     save_path = save_dir / "cover.png"
 
-    if save_path.exists() and save_path.stat().st_size > 0:
+    if not force and save_path.exists() and save_path.stat().st_size > 0:
         return f"/images/scripts/{script_id}/cover.png"
 
     result = await _generate_image(prompt, save_path, "1280x768")
@@ -66,6 +67,7 @@ async def generate_character_avatar(
     name: str,
     appearance: str = "",
     gender: str = "",
+    force: bool = False,
 ) -> str | None:
     """
     生成角色头像 (1024x1024)
@@ -85,7 +87,7 @@ async def generate_character_avatar(
     save_dir.mkdir(parents=True, exist_ok=True)
     save_path = save_dir / f"{character_id}.png"
 
-    if save_path.exists() and save_path.stat().st_size > 0:
+    if not force and save_path.exists() and save_path.stat().st_size > 0:
         return f"/images/scripts/{script_id}/avatars/{character_id}.png"
 
     result = await _generate_image(prompt, save_path, "1024x1024")
@@ -134,7 +136,9 @@ async def _generate_image(
         async with httpx.AsyncClient(timeout=30.0) as http_client:
             img_response = await http_client.get(image_url, timeout=30.0)
             img_response.raise_for_status()
-            save_path.write_bytes(img_response.content)
+            temp_path = save_path.with_suffix(f"{save_path.suffix}.tmp")
+            temp_path.write_bytes(img_response.content)
+            temp_path.replace(save_path)
 
         logger.info(f"Image saved: {save_path} ({save_path.stat().st_size} bytes)")
         return True

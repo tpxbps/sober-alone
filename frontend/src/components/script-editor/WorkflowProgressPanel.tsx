@@ -12,7 +12,7 @@ export function ConvertProgressPanel({
   const phases = convertProgress?.phases || [];
 
   return (
-    <div className="h-full flex flex-col p-5 overflow-y-auto scrollbar-thin">
+    <div className="h-full flex flex-col p-5 overflow-y-auto scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
       <h3 className="text-base font-bold mb-1">结构化数据转化</h3>
       <p className="text-xs text-muted-foreground mb-5">
         正在通过多步 LLM
@@ -45,7 +45,7 @@ export function AssetGenerationProgress({
   const phases = assetProgress?.phases || [];
 
   return (
-    <div className="h-full flex flex-col p-5 overflow-y-auto scrollbar-thin">
+    <div className="h-full flex flex-col p-5 overflow-y-auto scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
       <h3 className="text-base font-bold mb-1">资源生成</h3>
       <p className="text-xs text-muted-foreground mb-5">
         正在为剧本生成图片、语音和向量数据

@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useMemo, useCallback } from "react";
+import { useRef, useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Info } from "lucide-react";
 import type {
@@ -12,6 +12,7 @@ import { Markdown } from "@/components/ui/Markdown";
 import { GameMessageMarkdown } from "@/components/ui/GameMessageMarkdown";
 import { StreamingBubble } from "@/components/game/StreamingBubble";
 import { ChatInputArea } from "@/components/game/ChatInputArea";
+import { MentionText } from "@/components/game/MentionText";
 import { SpeakerIcon, type SpeakerState } from "@/components/ui/SpeakerIcon";
 import { AudioSpeedButton } from "@/components/ui/AudioSpeedButton";
 import { audioPlayerManager } from "@/lib/audioPlayerManager";
@@ -50,6 +51,10 @@ interface ChatAreaProps {
   onEndGame: () => void;
   /** 自由发言阶段，所有玩家是否都已发言至少一次（可提前推进） */
   canAdvanceEarly?: boolean;
+  mentionRequest?: { character: Character; nonce: number } | null;
+  pauseAutoSpeak: boolean;
+  onPauseAutoSpeakChange: (value: boolean) => void;
+  onHumanSpeechCompleted: () => void;
 }
 
 // 格式化模型名称显示
@@ -78,6 +83,10 @@ export function ChatArea({
   onAdvanceStage,
   onEndGame,
   canAdvanceEarly = false,
+  mentionRequest,
+  pauseAutoSpeak,
+  onPauseAutoSpeakChange,
+  onHumanSpeechCompleted,
 }: ChatAreaProps) {
   const [thinkingMessage, setThinkingMessage] = useState(THINKING_MESSAGES[0]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -108,10 +117,12 @@ export function ChatArea({
       activeAudioRef.current.abortController?.abort();
       activeAudioRef.current = null;
     }
-    if (audioPlayerManager.getIsPlaying()) {
+    if (audioPlayerManager.isAudioActive()) {
       audioPlayerManager.stop();
     }
     setTtsStates({});
+    setSysAudioStates({});
+    setTtsProgress({});
   }, []);
 
   // Stop active audio when TTS is disabled mid-game
@@ -125,10 +136,7 @@ export function ChatArea({
   const handlePlayRecordAudio = useCallback(
     async (record: GameRecord) => {
       // If already playing this record → stop (toggle off)
-      if (
-        activeAudioRef.current?.recordId === record.id &&
-        audioPlayerManager.isAudioActive()
-      ) {
+      if (activeAudioRef.current?.recordId === record.id) {
         stopActiveAudio();
         return;
       }
@@ -143,6 +151,12 @@ export function ChatArea({
         setTtsStates({ [record.id]: "playing" });
         try {
           await audioPlayerManager.play(cachedUrl);
+          if (activeAudioRef.current?.recordId !== record.id) return;
+          if (!audioPlayerManager.isAudioActive()) {
+            setTtsStates({ [record.id]: "error" });
+            activeAudioRef.current = null;
+            return;
+          }
           const unsub = audioPlayerManager.onStateChange((playing) => {
             if (!playing && !audioPlayerManager.isAudioActive()) {
               setTtsStates((prev) => ({ ...prev, [record.id]: "off" }));
@@ -164,6 +178,12 @@ export function ChatArea({
         setTtsStates({ [record.id]: "loading" });
         try {
           await audioPlayerManager.play(record.audio_url);
+          if (activeAudioRef.current?.recordId !== record.id) return;
+          if (!audioPlayerManager.isAudioActive()) {
+            setTtsStates({ [record.id]: "error" });
+            activeAudioRef.current = null;
+            return;
+          }
           setTtsStates({ [record.id]: "playing" });
           const unsub = audioPlayerManager.onStateChange((playing) => {
             if (!playing && !audioPlayerManager.isAudioActive()) {
@@ -270,16 +290,9 @@ export function ChatArea({
   // Handle system message audio playback
   const handlePlaySystemAudio = useCallback(
     async (record: GameRecord) => {
-      // If already playing this system record → toggle pause/resume
-      if (
-        activeAudioRef.current?.recordId === record.id &&
-        audioPlayerManager.isAudioActive()
-      ) {
-        const resumed = audioPlayerManager.togglePause();
-        setSysAudioStates((prev) => ({
-          ...prev,
-          [record.id]: resumed ? "playing" : "off",
-        }));
+      // A second click is an explicit cancel, including while audio is loading.
+      if (activeAudioRef.current?.recordId === record.id) {
+        stopActiveAudio();
         return;
       }
 
@@ -293,6 +306,12 @@ export function ChatArea({
       setTtsProgress({});
       try {
         await audioPlayerManager.play(record.audio_url);
+        if (activeAudioRef.current?.recordId !== record.id) return;
+        if (!audioPlayerManager.isAudioActive()) {
+          setSysAudioStates({ [record.id]: "error" });
+          activeAudioRef.current = null;
+          return;
+        }
         setSysAudioStates({ [record.id]: "playing" });
         const unsub = audioPlayerManager.onStateChange(
           (playing, currentTime, duration) => {
@@ -336,11 +355,6 @@ export function ChatArea({
     if (!characterId) return undefined;
     return characters.find((c) => c.character_id === characterId);
   };
-
-  // Build character name list for highlighting
-  const characterNamesArray = useMemo(() => {
-    return characters.map((c) => c.name).filter(Boolean);
-  }, [characters]);
 
   // Auto-scroll to bottom when records change (new complete message arrives).
   // Always scroll to bottom for new messages; streaming tokens are handled by StreamingBubble.
@@ -551,7 +565,7 @@ export function ChatArea({
                     >
                       <GameMessageMarkdown
                         className="text-sm"
-                        characterNames={characterNamesArray}
+                        characters={characters}
                         preserveWhitespace={isHuman}
                       >
                         {record.content}
@@ -602,7 +616,7 @@ export function ChatArea({
                 </span>
                 <div className="px-4 py-3 rounded-2xl bg-primary/10 border border-primary/20 rounded-tr-sm opacity-70">
                   <p className="text-sm whitespace-pre-wrap">
-                    {pendingHumanSpeech}
+                    <MentionText text={pendingHumanSpeech} characters={characters} />
                   </p>
                 </div>
               </div>
@@ -635,6 +649,11 @@ export function ChatArea({
         onAdvanceStage={onAdvanceStage}
         onEndGame={onEndGame}
         onSetPendingHumanSpeech={setPendingHumanSpeech}
+        characters={characters.filter((item) => item.character_id !== humanCharacterId)}
+        mentionRequest={mentionRequest}
+        pauseAutoSpeak={pauseAutoSpeak}
+        onPauseAutoSpeakChange={onPauseAutoSpeakChange}
+        onHumanSpeechCompleted={onHumanSpeechCompleted}
       />
     </div>
   );

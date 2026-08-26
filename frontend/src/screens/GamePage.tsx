@@ -13,7 +13,8 @@ import { PlayerScriptTooltip } from "@/components/game/PlayerScriptTooltip";
 import { DraftNotebook } from "@/components/game/DraftNotebook";
 import { SettingsModal } from "@/components/SettingsModal";
 import { Markdown } from "@/components/ui/Markdown";
-import type { GameStage, GameRecord } from "@/types/game";
+import type { Character, GameStage, GameRecord } from "@/types/game";
+import { resolveDisplayedSpeakerId } from "@/lib/speakerPresentation";
 
 interface GamePageProps {
   sessionId: string;
@@ -29,6 +30,15 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
   const [previousStage, setPreviousStage] = useState<GameStage | null>(null);
   const [draftOpen, setDraftOpen] = useState(false);
   const [scriptOpen, setScriptOpen] = useState(false);
+  const [pauseAutoSpeak, setPauseAutoSpeak] = useState({
+    context: "",
+    value: false,
+  });
+  const [mentionRequest, setMentionRequest] = useState<{
+    character: Character;
+    nonce: number;
+  } | null>(null);
+  const mentionNonceRef = useRef(0);
   const [scriptOpened, setScriptOpened] = useState(
     () => localStorage.getItem(`script_opened_${sessionId}`) === "true",
   );
@@ -101,6 +111,22 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
       setPendingHumanSpeech: s.setPendingHumanSpeech,
       cancelActiveOperations: s.cancelActiveOperations,
     }))
+  );
+  const pauseContextKey = `${sessionId}:${stage}:${currentRound}`;
+  const isAutoSpeakPaused =
+    pauseAutoSpeak.value && pauseAutoSpeak.context === pauseContextKey;
+  const displayedSpeakerId = resolveDisplayedSpeakerId({
+    stage,
+    isAutoSpeakPaused,
+    isStreaming,
+    streamingSpeakerId,
+    currentSpeakerId,
+  });
+  const handlePauseAutoSpeakChange = useCallback(
+    (value: boolean) => {
+      setPauseAutoSpeak({ context: value ? pauseContextKey : "", value });
+    },
+    [pauseContextKey]
   );
 
   const handleScriptOpenChange = useCallback(
@@ -191,6 +217,7 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
         stage === "clue_analysis" ||
         stage === "free_discussion" ||
         stage === "summary")
+      && !(stage === "free_discussion" && isAutoSpeakPaused)
     ) {
       // Check if this AI can speak
       const speakerState = playerStates.find(
@@ -225,7 +252,19 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
     stage,
     triggerAISpeak,
     playerStates,
+    isAutoSpeakPaused,
   ]);
+
+  const handleCharacterMention = useCallback(
+    (characterId: string) => {
+      if (characterId === humanCharacterId) return;
+      const character = characters.find((item) => item.character_id === characterId);
+      if (!character) return;
+      mentionNonceRef.current += 1;
+      setMentionRequest({ character, nonce: mentionNonceRef.current });
+    },
+    [characters, humanCharacterId]
+  );
 
   // Handle stage transition completion
   const handleTransitionComplete = useCallback(() => {
@@ -305,16 +344,18 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
       />
 
       {/* Main Game Area */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 overflow-hidden">
+        <div className="h-full mx-auto flex max-w-[1800px] px-0 lg:px-4 xl:px-8 2xl:px-12">
         {/* Left Character Panel */}
-        <div className="hidden lg:block w-64 p-4 pt-24 border-r border-border/30">
+        <div className="hidden lg:block lg:w-56 xl:w-64 shrink-0 p-2 xl:p-4 pt-24 border-r border-border/30">
           <CharacterPanel
             stage={stage}
             characters={characters}
             playerStates={playerStates}
-            currentSpeakerId={currentSpeakerId}
+            currentSpeakerId={displayedSpeakerId}
             humanCharacterId={humanCharacterId}
             side="left"
+            onCharacterClick={handleCharacterMention}
           />
         </div>
 
@@ -340,6 +381,10 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
             onAdvanceStage={handleAdvanceStage}
             onEndGame={() => endGame().then(onExit)}
             canAdvanceEarly={allPlayersSpokenOnce}
+            mentionRequest={mentionRequest}
+            pauseAutoSpeak={isAutoSpeakPaused}
+            onPauseAutoSpeakChange={handlePauseAutoSpeakChange}
+            onHumanSpeechCompleted={() => handlePauseAutoSpeakChange(false)}
           />
 
           {/* Mobile Bottom Toolbar - flow-based, NOT fixed */}
@@ -348,15 +393,19 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
               {/* Character avatars - horizontally scrollable */}
               <div className="flex gap-1.5 overflow-x-auto flex-1 py-0.5 scrollbar-hide">
                 {characters.map((char) => {
-                  const isSpeaking = currentSpeakerId === char.character_id;
+                  const isSpeaking = displayedSpeakerId === char.character_id;
                   const isHuman = humanCharacterId === char.character_id;
 
                   return (
-                    <div
+                    <button
                       key={char.character_id}
+                      type="button"
+                      disabled={isHuman}
+                      onClick={() => handleCharacterMention(char.character_id)}
+                      aria-label={isHuman ? `${char.name}（你）` : `在输入框引用 ${char.name}`}
                       className={`relative w-8 h-8 rounded-full shrink-0 flex items-center justify-center
                         ${isSpeaking ? "breathing ring-2 ring-primary" : ""}
-                        bg-gradient-to-br from-primary/30 to-accent/30`}
+                        bg-gradient-to-br from-primary/30 to-accent/30 disabled:cursor-default`}
                     >
                       {char.avatar_url ? (
                         <img
@@ -375,7 +424,7 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
                           你
                         </div>
                       )}
-                    </div>
+                    </button>
                   );
                 })}
               </div>
@@ -399,6 +448,7 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
                     className="relative w-8 h-8 rounded-full bg-primary/80 hover:bg-primary
                                flex items-center justify-center transition-colors"
                     title="查看我的剧本"
+                    aria-label="查看我的剧本"
                   >
                     <BookOpen className="w-4 h-4" />
                     {!scriptOpened && (
@@ -414,15 +464,17 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
         </div>
 
         {/* Right Character Panel */}
-        <div className="hidden lg:block w-64 p-4 pt-24 border-l border-border/30">
+        <div className="hidden lg:block lg:w-56 xl:w-64 shrink-0 p-2 xl:p-4 pt-24 border-l border-border/30">
           <CharacterPanel
             stage={stage}
             characters={characters}
             playerStates={playerStates}
-            currentSpeakerId={currentSpeakerId}
+            currentSpeakerId={displayedSpeakerId}
             humanCharacterId={humanCharacterId}
             side="right"
+            onCharacterClick={handleCharacterMention}
           />
+        </div>
         </div>
       </div>
 

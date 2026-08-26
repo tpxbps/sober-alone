@@ -97,15 +97,18 @@ export function PlayerScriptTooltip({
   // Handle script audio playback
   const handlePlayScriptAudio = useCallback(async () => {
     if (!audioCapabilityEnabled) return;
-    // If script audio is active (playing or paused) → toggle pause
-    if (isScriptAudio.current && audioPlayerManager.isAudioActive()) {
-      const resumed = audioPlayerManager.togglePause();
-      setSpeakerState(resumed ? "playing" : "off");
+    // A second click cancels playback and resets the progress UI.
+    if (isScriptAudio.current) {
+      if (audioPlayerManager.isAudioActive()) audioPlayerManager.stop();
+      isScriptAudio.current = false;
+      setSpeakerState("off");
+      setProgress(0);
+      setDuration(0);
       return;
     }
 
     // Something else is playing → stop it
-    if (audioPlayerManager.getIsPlaying()) {
+    if (audioPlayerManager.isAudioActive()) {
       audioPlayerManager.stop();
     }
 
@@ -120,6 +123,12 @@ export function PlayerScriptTooltip({
 
     try {
       await audioPlayerManager.play(audioUrl);
+      if (!isScriptAudio.current) return;
+      if (!audioPlayerManager.isAudioActive()) {
+        isScriptAudio.current = false;
+        setSpeakerState("error");
+        return;
+      }
       setSpeakerState("playing");
       setProgress(0);
     } catch {
@@ -171,6 +180,7 @@ export function PlayerScriptTooltip({
         whileHover={{ scale: 1.1 }}
         whileTap={{ scale: 0.95 }}
         title="查看我的剧本"
+        aria-label="查看我的剧本"
         style={
           showGlow
             ? {
@@ -240,6 +250,8 @@ export function PlayerScriptTooltip({
                   </span>
                 </div>
                 <button
+                  type="button"
+                  aria-label="关闭个人剧本"
                   onClick={() => {
                     handleClose();
                   }}

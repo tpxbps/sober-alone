@@ -601,6 +601,7 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
             step_voice = _validate_step_voice(r.step_voice_id, r.gender)
             character_data.append(
                 {
+                    "character_id": c["character_id"],
                     "name": r.name,
                     "gender": r.gender,
                     "age": r.age,
@@ -625,6 +626,7 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
             gender = c.get("gender", "")
             character_data.append(
                 {
+                    "character_id": c["character_id"],
                     "name": name,
                     "gender": gender,
                     "age": c.get("age"),

@@ -41,6 +41,14 @@ class ScriptGenState(TypedDict, total=False):
     character_avatars: dict[str, str]  # {角色ID: 头像URL}
     character_voice_ids: dict[str, str]  # {角色ID: voice_id}
 
+    # === 完成剧本编辑 ===
+    workflow_mode: str  # "create" | "edit"
+    owner_key_hash: str  # private digest, never serialized
+    original_snapshot: dict  # immutable structure and asset dependency baseline
+    asset_plan: list[dict]
+    selected_asset_ids: list[str]
+    data_validation_errors: list[str]
+
     # === 工作流控制 ===
     current_step: str  # 当前步骤标识
     error_message: str  # 错误信息
@@ -63,6 +71,9 @@ STEP_REVIEW_GAME_DATA = "review_game_data"
 STEP_SAVE = "save_to_database"
 STEP_GENERATE_ASSETS = "generate_assets"
 STEP_SAFETY_CHECK = "safety_check"
+STEP_NORMALIZE_GAME_DATA = "normalize_game_data"
+STEP_PREPARE_ASSET_PLAN = "prepare_asset_plan"
+STEP_REVIEW_ASSET_PLAN = "review_asset_plan"
 
 # 步骤标签（用于前端显示）
 STEP_LABELS: dict[str, str] = {
@@ -79,6 +90,9 @@ STEP_LABELS: dict[str, str] = {
     STEP_SAVE: "保存完成",
     STEP_GENERATE_ASSETS: "资源生成",
     STEP_SAFETY_CHECK: "安全审查",
+    STEP_NORMALIZE_GAME_DATA: "校验游戏数据",
+    STEP_PREPARE_ASSET_PLAN: "分析资源变更",
+    STEP_REVIEW_ASSET_PLAN: "资源更新确认",
 }
 
 # 需要用户确认的步骤（有 interrupt）
@@ -88,4 +102,5 @@ INTERRUPT_STEPS = {
     STEP_REVIEW_FINAL,
     STEP_REVIEW_GAME_DATA,
     STEP_SAFETY_CHECK,
+    STEP_REVIEW_ASSET_PLAN,
 }

@@ -180,6 +180,7 @@ class GameSpeechService:
                     content=full_content,
                     is_human=False,
                     db_session=self.db,
+                    consume_human_context=True,
                 )
                 next_speaker_info = {
                     "next_speaker_id": result.get("next_speaker"),

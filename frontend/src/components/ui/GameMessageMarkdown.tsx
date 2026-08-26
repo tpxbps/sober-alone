@@ -1,39 +1,34 @@
 import React, { type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import type { Character } from "@/types/game";
 
 interface GameMessageMarkdownProps {
   children: string;
   className?: string;
   /** 角色名称列表，用于高亮匹配 */
-  characterNames?: string[];
+  characters?: Character[];
   /** 是否保留原始空白符（换行等），用于真人玩家发言 */
   preserveWhitespace?: boolean;
 }
 
-/**
- * 渲染带有角色名称高亮的文本
- * 处理@前缀的"多退少补"：如果已有@则不添加，没有则添加
- */
+/** 渲染普通角色名高亮和显式 @角色名引用。 */
 function renderTextWithHighlights(
   text: string,
-  characterNames: string[]
+  characters: Character[]
 ): ReactNode {
-  if (!text || characterNames.length === 0) return text;
+  if (!text || characters.length === 0) return text;
 
   // 清理并按长度降序排序，避免短名称被长名称的部分匹配
-  const cleanedNames = characterNames.map((n) => n.trim()).filter(Boolean);
+  const cleanedNames = characters.map((item) => item.name.trim()).filter(Boolean);
   if (cleanedNames.length === 0) return text;
 
   const sortedNames = [...cleanedNames].sort((a, b) => b.length - a.length);
 
-  // 创建匹配 @?角色名称 的正则（按长度降序）
-  // 匹配可选的@后跟角色名称
   const escapedNames = sortedNames.map((n) =>
     n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
   );
-  // 匹配 @名字 或 名字（前面没有@）
-  const pattern = new RegExp(`@?(${escapedNames.join("|")})`, "g");
+  const pattern = new RegExp(`(@?)(${escapedNames.join("|")})`, "g");
 
   // 用于快速查找的Set
   const nameSet = new Set(cleanedNames);
@@ -48,18 +43,37 @@ function renderTextWithHighlights(
       result.push(text.slice(lastIndex, match.index));
     }
 
-    const matchedText = match[0]; // 可能是 "@名字" 或 "名字"
-    const name = match[1]; // 只是名字部分
+    const matchedText = match[0];
+    const explicitMention = match[1] === "@";
+    const name = match[2];
 
     if (nameSet.has(name)) {
-      // 统一显示为 @名字 格式（高亮）
+      const character = characters.find((item) => item.name === name);
       result.push(
-        <span
-          key={result.length}
-          className="text-primary font-medium bg-primary/10 px-1 rounded"
-        >
-          @{name}
-        </span>
+        explicitMention ? (
+          <span
+            key={result.length}
+            data-mention-name={name}
+            className="inline-flex items-center gap-1 text-primary font-medium bg-primary/10 px-1.5 py-0.5 rounded-full align-middle"
+          >
+            <span className="w-4 h-4 rounded-full overflow-hidden bg-primary/20 flex items-center justify-center text-[9px]">
+              {character?.avatar_url ? (
+                <img src={character.avatar_url} alt="" className="w-full h-full object-cover" />
+              ) : (
+                name[0]
+              )}
+            </span>
+            @{name}
+          </span>
+        ) : (
+          <span
+            key={result.length}
+            data-character-name={name}
+            className="text-primary font-semibold bg-primary/10 px-1 rounded"
+          >
+            {name}
+          </span>
+        )
       );
     } else {
       result.push(matchedText);
@@ -81,10 +95,10 @@ function renderTextWithHighlights(
  */
 function processChildrenWithHighlights(
   children: React.ReactNode,
-  characterNames: string[]
+  characters: Character[]
 ): React.ReactNode {
   if (typeof children === "string") {
-    return renderTextWithHighlights(children, characterNames);
+    return renderTextWithHighlights(children, characters);
   }
 
   if (Array.isArray(children)) {
@@ -92,7 +106,7 @@ function processChildrenWithHighlights(
       if (typeof child === "string") {
         return (
           <React.Fragment key={index}>
-            {renderTextWithHighlights(child, characterNames)}
+            {renderTextWithHighlights(child, characters)}
           </React.Fragment>
         );
       }
@@ -104,7 +118,7 @@ function processChildrenWithHighlights(
         if (reactChild.props && reactChild.props.children) {
           const processedChildren = processChildrenWithHighlights(
             reactChild.props.children,
-            characterNames
+            characters
           );
           return React.cloneElement(
             reactChild,
@@ -127,7 +141,7 @@ function processChildrenWithHighlights(
 export function GameMessageMarkdown({
   children,
   className,
-  characterNames = [],
+  characters = [],
   preserveWhitespace = false,
 }: GameMessageMarkdownProps) {
   // Normalize double/multiple @ into a single @ before rendering
@@ -145,7 +159,7 @@ export function GameMessageMarkdown({
           // 自定义段落渲染 - 在这里处理角色名称高亮
           p: ({ children }) => (
             <p className="mb-1 last:mb-0 leading-relaxed">
-              {processChildrenWithHighlights(children, characterNames)}
+              {processChildrenWithHighlights(children, characters)}
             </p>
           ),
           // 自定义列表渲染
@@ -157,7 +171,7 @@ export function GameMessageMarkdown({
           ),
           li: ({ children }) => (
             <li className="mb-0.5 leading-relaxed">
-              {processChildrenWithHighlights(children, characterNames)}
+              {processChildrenWithHighlights(children, characters)}
             </li>
           ),
           // 自定义强调渲染

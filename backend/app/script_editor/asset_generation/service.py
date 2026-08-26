@@ -37,12 +37,16 @@ async def _generate_assets(state: ScriptGenState) -> dict:
     script_id = state.get("script_id", str(uuid.uuid4()))
     characters = state.get("characters", [])
     game_full_process = state.get("game_full_process", [])
+    edit_mode = state.get("workflow_mode") == "edit"
+    selected = set(state.get("selected_asset_ids", [])) if edit_mode else None
 
     # 构建 TTS 系统消息任务（从 game_full_process 动态生成）
     tts_sys_tasks = []
     for i, stage in enumerate(game_full_process):
         stage_type = stage.get("type", "")
         if stage_type == "initial":
+            if not stage.get("system_notice", ""):
+                continue
             tts_sys_tasks.append(
                 {
                     "id": f"tts_sys_{i}",
@@ -52,7 +56,9 @@ async def _generate_assets(state: ScriptGenState) -> dict:
             )
         elif stage_type in ("advancement", "vote"):
             children = stage.get("children", [])
-            for j, _child in enumerate(children):
+            for j, child in enumerate(children):
+                if not child.get("system_notice", ""):
+                    continue
                 label = f"系统消息音频（第{i}阶段）"
                 if stage_type == "advancement":
                     label = "线索分析音频" if j == 0 else "自由讨论音频"
@@ -66,6 +72,8 @@ async def _generate_assets(state: ScriptGenState) -> dict:
                     }
                 )
         elif stage_type == "review":
+            if not stage.get("system_notice", ""):
+                continue
             tts_sys_tasks.append(
                 {
                     "id": f"tts_sys_{i}",
@@ -82,11 +90,14 @@ async def _generate_assets(state: ScriptGenState) -> dict:
             "tech": "Embedding",
             "model": "zai-embedding-3",
             "tasks": [
-                {
-                    "id": "vectorize_all",
-                    "label": "向量化所有角色的个人剧本并存入向量数据库",
-                    "status": "pending",
-                },
+                *[
+                    {
+                        "id": f"vector_{c.get('character_id', str(i))}",
+                        "label": f"{c.get('name', '?')} 个人剧本向量化",
+                        "status": "pending",
+                    }
+                    for i, c in enumerate(characters)
+                ],
             ],
         },
         {
@@ -127,6 +138,11 @@ async def _generate_assets(state: ScriptGenState) -> dict:
 
     _init_asset_progress(script_id, phases)
 
+    all_task_ids = {task["id"] for phase in phases for task in phase.get("tasks", [])}
+    if selected is not None:
+        for task_id in all_task_ids - selected:
+            _update_task_status(script_id, task_id, "skipped", "本次编辑未选择更新")
+
     updates = {
         "current_step": STEP_GENERATE_ASSETS,
         "cover_image_url": "",
@@ -137,26 +153,48 @@ async def _generate_assets(state: ScriptGenState) -> dict:
         _update_task_status(script_id, task_id, status, reason)
 
     phase_jobs = []
-    if settings.ZHIPUAI_API_KEY:
-        phase_jobs.append(_run_vectorize(script_id, state, characters))
+    vector_task_ids = {f"vector_{c.get('character_id', str(i))}" for i, c in enumerate(characters)}
+    selected_vectors = vector_task_ids if selected is None else vector_task_ids & selected
+    if settings.ZHIPUAI_API_KEY and selected_vectors:
+        phase_jobs.append(_run_vectorize(script_id, state, characters, selected_vectors))
     else:
-        _update_task_status(script_id, "vectorize_all", "skipped", "未配置 ZHIPUAI_API_KEY")
+        for task_id in selected_vectors:
+            _update_task_status(script_id, task_id, "skipped", "未配置 ZHIPUAI_API_KEY")
 
     image_task_ids = [
         "cover",
         *[f"avatar_{c.get('character_id', str(i))}" for i, c in enumerate(characters)],
     ]
-    if settings.DOUBAO_API_KEY:
-        phase_jobs.append(_run_images(script_id, state, characters))
+    selected_images = set(image_task_ids) if selected is None else set(image_task_ids) & selected
+    if settings.DOUBAO_API_KEY and selected_images:
+        phase_jobs.append(_run_images(script_id, state, characters, selected_images, edit_mode))
     else:
-        for task_id in image_task_ids:
+        for task_id in selected_images:
             _update_task_status(script_id, task_id, "skipped", "未配置 DOUBAO_API_KEY")
 
     tts_task_ids = [task["id"] for task in phases[2]["tasks"]]
-    if settings.MIMO_API_KEY:
-        phase_jobs.append(_run_tts(script_id, state, characters, tts_task_callback, tts_task_ids))
+    selected_tts = set(tts_task_ids) if selected is None else set(tts_task_ids) & selected
+    empty_character_tts = {
+        f"tts_{character.get('character_id', str(index))}"
+        for index, character in enumerate(characters)
+        if not state.get("character_scripts", {}).get(character.get("name", ""), "")
+    }
+    for task_id in selected_tts & empty_character_tts:
+        _update_task_status(script_id, task_id, "skipped", "角色个人剧本为空")
+    selected_tts -= empty_character_tts
+    if settings.MIMO_API_KEY and selected_tts:
+        phase_jobs.append(
+            _run_tts(
+                script_id,
+                state,
+                characters,
+                tts_task_callback,
+                selected_tts,
+                edit_mode,
+            )
+        )
     else:
-        for task_id in tts_task_ids:
+        for task_id in selected_tts:
             _update_task_status(script_id, task_id, "skipped", "未配置 MIMO_API_KEY")
 
     results = await asyncio.gather(*phase_jobs, return_exceptions=True)
@@ -214,50 +252,74 @@ async def _generate_assets(state: ScriptGenState) -> dict:
     return updates
 
 
-async def _run_vectorize(script_id: str, state: ScriptGenState, characters: list):
+async def _run_vectorize(
+    script_id: str,
+    state: ScriptGenState,
+    characters: list,
+    selected_task_ids: set[str],
+):
     """向量嵌入阶段"""
     import asyncio
 
-    _update_task_status(script_id, "vectorize_all", "running")
-    await asyncio.sleep(0.1)  # yield to let SSE deliver "running" state
-    try:
-        from app.script_editor.services.chroma_ingest import ingest_script_async
+    scripts = state.get("character_scripts", {})
 
-        await ingest_script_async(
-            script_id=script_id,
-            characters=characters,
-            character_scripts=state.get("character_scripts", {}),
-        )
-        _update_task_status(script_id, "vectorize_all", "complete")
-    except Exception as e:
-        logger.error(f"ChromaDB ingestion failed: {e}")
-        _update_task_status(script_id, "vectorize_all", "failed")
+    async def run_one(character: dict):
+        task_id = f"vector_{character.get('character_id', '')}"
+        if task_id not in selected_task_ids:
+            return
+        _update_task_status(script_id, task_id, "running")
+        await asyncio.sleep(0.1)
+        try:
+            from app.script_editor.services.chroma_ingest import ingest_character_async
+
+            await ingest_character_async(
+                script_id, character, scripts.get(character.get("name", ""), "")
+            )
+            _update_task_status(script_id, task_id, "complete")
+        except Exception as error:
+            logger.error("ChromaDB ingestion failed for %s: %s", task_id, error)
+            _update_task_status(script_id, task_id, "failed", str(error))
+
+    await asyncio.gather(*(run_one(character) for character in characters))
 
 
-async def _run_images(script_id: str, state: ScriptGenState, characters: list):
+async def _run_images(
+    script_id: str,
+    state: ScriptGenState,
+    characters: list,
+    selected_task_ids: set[str],
+    force: bool,
+):
     """图片生成阶段（封面 + 角色头像）— 全部并行"""
     import asyncio
 
     tasks = []
 
     # 封面
-    tasks.append(
-        _run_single_image(
-            script_id,
-            "cover",
-            "generate_cover_image",
-            {
-                "script_id": script_id,
-                "story_synopsis": state.get("final_draft", "")[:500],
-                "title": state.get("script_title", ""),
-            },
+    sections = state.get("game_data_sections", {})
+    if "cover" in selected_task_ids:
+        tasks.append(
+            _run_single_image(
+                script_id,
+                "cover",
+                "generate_cover_image",
+                {
+                    "script_id": script_id,
+                    "story_synopsis": "\n".join(
+                        [sections.get("overview", ""), sections.get("description", "")]
+                    )[:500],
+                    "title": state.get("script_title", ""),
+                    "force": force,
+                },
+            )
         )
-    )
 
     # 角色头像
     for i, c in enumerate(characters):
         char_id = c.get("character_id", str(i))
         task_id = f"avatar_{char_id}"
+        if task_id not in selected_task_ids:
+            continue
         tasks.append(
             _run_single_image(
                 script_id,
@@ -269,6 +331,7 @@ async def _run_images(script_id: str, state: ScriptGenState, characters: list):
                     "name": c.get("name", ""),
                     "appearance": c.get("appearance", ""),
                     "gender": c.get("gender", ""),
+                    "force": force,
                 },
             )
         )
@@ -298,7 +361,8 @@ async def _run_tts(
     state: ScriptGenState,
     characters: list,
     task_callback,
-    task_ids: list[str],
+    task_ids: set[str],
+    force: bool,
 ):
     """TTS 生成阶段"""
     try:
@@ -310,6 +374,8 @@ async def _run_tts(
             characters=characters,
             game_full_process=state.get("game_full_process", []),
             task_callback=task_callback,
+            selected_task_ids=task_ids,
+            force=force,
         )
     except Exception as e:
         logger.error(f"TTS generation failed: {e}")
@@ -366,23 +432,36 @@ async def _retry_single_asset(script_id: str, task_id: str, state: ScriptGenStat
 
     try:
         result = TaskResult(ok=False, error=f"未知任务: {task_id}")
-        if task_id == "vectorize_all":
-            from app.script_editor.services.chroma_ingest import ingest_script
+        if task_id.startswith("vector_"):
+            from app.script_editor.services.chroma_ingest import ingest_character
 
-            ingest_script(
-                script_id=script_id,
-                characters=characters,
-                character_scripts=state.get("character_scripts", {}),
+            char_id = task_id.removeprefix("vector_")
+            character = next(
+                (item for item in characters if item.get("character_id") == char_id), None
             )
-            result = TaskResult(ok=True)
+            if character:
+                ingest_character(
+                    script_id,
+                    character,
+                    state.get("character_scripts", {}).get(character.get("name", ""), ""),
+                )
+                result = TaskResult(ok=True)
+            else:
+                result = TaskResult(ok=False, error="角色不存在")
 
         elif task_id == "cover":
             from app.script_editor.services.image_gen import generate_cover_image
 
             cover_url = await generate_cover_image(
                 script_id=script_id,
-                story_synopsis=state.get("final_draft", "")[:500],
+                story_synopsis="\n".join(
+                    [
+                        state.get("game_data_sections", {}).get("overview", ""),
+                        state.get("game_data_sections", {}).get("description", ""),
+                    ]
+                )[:500],
                 title=state.get("script_title", ""),
+                force=True,
             )
             if cover_url:
                 import aiosqlite
@@ -414,6 +493,7 @@ async def _retry_single_asset(script_id: str, task_id: str, state: ScriptGenStat
                     name=char.get("name", ""),
                     appearance=char.get("appearance", ""),
                     gender=char.get("gender", ""),
+                    force=True,
                 )
                 if avatar_url:
                     import aiosqlite
@@ -439,10 +519,6 @@ async def _retry_single_asset(script_id: str, task_id: str, state: ScriptGenStat
                 generate_single_char_audio,
                 generate_single_system_audio,
             )
-
-            # Delete existing audio file to force regeneration
-            # (avoid idempotency skip when a bad/corrupt file was written previously)
-            _delete_tts_audio(script_id, task_id)
 
             game_full_process = state.get("game_full_process", [])
             character_scripts = state.get("character_scripts", {})

@@ -1,6 +1,14 @@
 import { useState, useEffect, useRef, useCallback, memo } from "react";
-import { Send, Loader2, ArrowRight, Plus, X } from "lucide-react";
+import { Send, Loader2, ArrowRight, Plus, X, CircleHelp } from "lucide-react";
+import * as Tooltip from "@radix-ui/react-tooltip";
+import * as Switch from "@radix-ui/react-switch";
 import { DynamicDot } from "@/components/ui/DynamicDot";
+import type { Character } from "@/types/game";
+import { MentionText } from "./MentionText";
+import {
+  MentionComposer,
+  type MentionComposerHandle,
+} from "./MentionComposer";
 
 interface ChatInputAreaProps {
   stage: string;
@@ -19,6 +27,11 @@ interface ChatInputAreaProps {
   onAdvanceStage: () => void;
   onEndGame: () => void;
   onSetPendingHumanSpeech: (speech: string | null) => void;
+  characters: Character[];
+  mentionRequest?: { character: Character; nonce: number } | null;
+  pauseAutoSpeak: boolean;
+  onPauseAutoSpeakChange: (value: boolean) => void;
+  onHumanSpeechCompleted: () => void;
 }
 
 export const ChatInputArea = memo(function ChatInputArea({
@@ -38,10 +51,15 @@ export const ChatInputArea = memo(function ChatInputArea({
   onAdvanceStage,
   onEndGame,
   onSetPendingHumanSpeech,
+  characters,
+  mentionRequest,
+  pauseAutoSpeak,
+  onPauseAutoSpeakChange,
+  onHumanSpeechCompleted,
 }: ChatInputAreaProps) {
   const [input, setInput] = useState("");
   const [pendingLines, setPendingLines] = useState<string[]>([]);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const inputRef = useRef<MentionComposerHandle>(null);
 
   // Focus input when it's human's turn
   useEffect(() => {
@@ -50,12 +68,21 @@ export const ChatInputArea = memo(function ChatInputArea({
     }
   }, [isHumanTurn, isStreaming, stage]);
 
+  useEffect(() => {
+    if (mentionRequest) inputRef.current?.insertMention(mentionRequest.character);
+  }, [mentionRequest]);
+
+  const clearInput = () => {
+    inputRef.current?.clear();
+    setInput("");
+  };
+
   // Handle message submit
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isStreaming || !isHumanTurn) return;
     setPendingLines((prev) => [...prev, input.trim()]);
-    setInput("");
+    clearInput();
   };
 
   // Handle end speech - submit all pending lines
@@ -67,19 +94,20 @@ export const ChatInputArea = memo(function ChatInputArea({
     if (allLines.length === 0) return;
 
     const fullSpeech = allLines.join("\n");
+    onHumanSpeechCompleted();
 
     // 自由发言阶段且AI正在发言：暂存发言，等待AI完成
     if (stage === "free_discussion" && (isStreaming || isProcessingReactions)) {
       onSetPendingHumanSpeech(fullSpeech);
       setPendingLines([]);
-      setInput("");
+      clearInput();
       return;
     }
 
     // 其他阶段或AI未发言：直接发送
     onSendMessage(fullSpeech);
     setPendingLines([]);
-    setInput("");
+    clearInput();
   }, [
     input,
     pendingLines,
@@ -88,23 +116,8 @@ export const ChatInputArea = memo(function ChatInputArea({
     isProcessingReactions,
     onSendMessage,
     onSetPendingHumanSpeech,
+    onHumanSpeechCompleted,
   ]);
-
-  // Handle key press
-  const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && e.ctrlKey) {
-      e.preventDefault();
-      if (input.trim() || pendingLines.length > 0) {
-        handleEndSpeech();
-      }
-    } else if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey) {
-      e.preventDefault();
-      if (input.trim()) {
-        setPendingLines((prev) => [...prev, input.trim()]);
-        setInput("");
-      }
-    }
-  };
 
   const inputDisabled =
     !!pendingHumanSpeech ||
@@ -185,7 +198,7 @@ export const ChatInputArea = memo(function ChatInputArea({
                     key={index}
                     className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-primary/20 text-sm text-primary group"
                   >
-                    {line}
+                    <MentionText text={line} characters={characters} />
                     <button
                       type="button"
                       onClick={() =>
@@ -219,20 +232,19 @@ export const ChatInputArea = memo(function ChatInputArea({
               </div>
             )}
             <div className="flex gap-2 lg:gap-3">
-              <div className="flex-1 relative">
-                <textarea
-                  ref={inputRef as React.RefObject<HTMLTextAreaElement>}
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={handleKeyPress}
-                  placeholder="输入你的发言..."
-                  maxLength={3000}
+              <div className="flex-1 relative flex">
+                <MentionComposer
+                  ref={inputRef}
+                  characters={characters}
                   disabled={inputDisabled}
-                  rows={3}
-                  className="w-full pl-3 pr-14 py-2 lg:pl-4 lg:pr-14 lg:py-3 rounded-xl bg-secondary/30 border border-border/50
-                           focus:outline-none focus:ring-2 focus:ring-primary/50
-                           disabled:opacity-50 disabled:cursor-not-allowed resize-none text-sm
-                           scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent"
+                  maxLength={3000}
+                  onChange={setInput}
+                  onCtrlEnter={handleEndSpeech}
+                  onEnter={() => {
+                    if (!input.trim()) return;
+                    setPendingLines((prev) => [...prev, input.trim()]);
+                    clearInput();
+                  }}
                 />
                 <span
                   className={`absolute top-1.5 right-3 text-[10px] leading-none pointer-events-none select-none ${
@@ -268,8 +280,6 @@ export const ChatInputArea = memo(function ChatInputArea({
                     !!pendingHumanSpeech ||
                     (pendingLines.length === 0 && !input.trim()) ||
                     (stage === "free_discussion" &&
-                      (isStreaming || isProcessingReactions)) ||
-                    (stage === "free_discussion" &&
                       humanRemainingSpeechCount !== undefined &&
                       humanRemainingSpeechCount <= 0)
                   }
@@ -282,17 +292,50 @@ export const ChatInputArea = memo(function ChatInputArea({
                 </button>
               </div>
             </div>
-            {/* Speech count indicator */}
-            {stage === "free_discussion" &&
-              humanRemainingSpeechCount !== undefined && (
-                <p className="text-xs text-muted-foreground text-center">
-                  剩余发言次数: {humanRemainingSpeechCount}
-                  <span className="hidden lg:inline">
-                    {" "}
-                    · Enter 添加更多内容 · Ctrl+Enter 发送全部发言并完成
-                  </span>
-                </p>
-              )}
+            {/* Free-discussion controls and speech count share one compact row. */}
+            {stage === "free_discussion" && (
+              <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                <div className="inline-flex items-center gap-1.5">
+                  <Switch.Root
+                    checked={pauseAutoSpeak}
+                    onCheckedChange={onPauseAutoSpeakChange}
+                    aria-label="让我想想"
+                    className="relative h-5 w-9 shrink-0 rounded-full bg-secondary shadow-inner outline-none transition-colors data-[state=checked]:bg-primary focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                  >
+                    <Switch.Thumb className="block h-4 w-4 translate-x-0.5 rounded-full bg-white shadow-sm transition-transform will-change-transform data-[state=checked]:translate-x-[18px]" />
+                  </Switch.Root>
+                  <span>让我想想</span>
+                  <Tooltip.Provider delayDuration={200}>
+                    <Tooltip.Root>
+                      <Tooltip.Trigger asChild>
+                        <button
+                          type="button"
+                          aria-label="让我想想功能说明"
+                          className="rounded-full hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                        >
+                          <CircleHelp className="h-3.5 w-3.5" />
+                        </button>
+                      </Tooltip.Trigger>
+                      <Tooltip.Portal>
+                        <Tooltip.Content side="top" className="z-[70] max-w-xs rounded-lg border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-xl">
+                          开启后会暂停自动邀请下一位 AI，给你留出阅读和输入时间；完成一次发言后会自动关闭并恢复讨论。
+                          <Tooltip.Arrow className="fill-popover" />
+                        </Tooltip.Content>
+                      </Tooltip.Portal>
+                    </Tooltip.Root>
+                  </Tooltip.Provider>
+                </div>
+                {humanRemainingSpeechCount !== undefined && (
+                  <>
+                    <span aria-hidden="true">·</span>
+                    <span>剩余发言次数: {humanRemainingSpeechCount}</span>
+                  </>
+                )}
+                <span className="hidden lg:inline">
+                  · Enter 添加更多内容 · Ctrl+Enter 发送全部发言并完成
+                </span>
+              </div>
+            )}
             {stage !== "free_discussion" && (
               <p className="text-xs text-muted-foreground text-center hidden lg:block">
                 Enter 添加更多内容 · Ctrl+Enter 发送全部发言并完成

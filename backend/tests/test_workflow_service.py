@@ -56,6 +56,8 @@ def test_interrupt_reconstruction_and_state_serialization_are_stable():
     assert interrupt["generated_content"] == "线索大纲"
     assert interrupt["prompt_used"] == "提示词"
     assert "owner_uuid" not in ScriptEditorWorkflowService.serialize_state(state.values)
+    assert "owner_key_hash" not in ScriptEditorWorkflowService.serialize_state(state.values)
+    assert "original_snapshot" not in ScriptEditorWorkflowService.serialize_state(state.values)
 
 
 def test_history_and_checkpoint_use_same_wire_contract():

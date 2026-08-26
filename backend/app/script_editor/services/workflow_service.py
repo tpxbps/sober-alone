@@ -9,12 +9,18 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.types import Command
 
 from app.api.schemas.script_editor import ResumeWorkflowRequest, StartWorkflowRequest
+from app.script_editor.editing import hydrate_completed_script
 from app.script_editor.graph import get_script_gen_graph
+from app.script_editor.ownership import owner_hash_matches
 from app.script_editor.prompts.defaults import DEFAULT_PROMPTS
 from app.script_editor.state import INTERRUPT_STEPS, STEP_INIT, STEP_LABELS, ScriptGenState
 
 
 class WorkflowNotFoundError(LookupError):
+    pass
+
+
+class WorkflowAuthorizationError(PermissionError):
     pass
 
 
@@ -31,7 +37,7 @@ class ScriptEditorWorkflowService:
             configurable["checkpoint_id"] = checkpoint_id
         return cast(RunnableConfig, {"configurable": configurable})
 
-    async def start(self, request: StartWorkflowRequest) -> dict[str, Any]:
+    async def start(self, request: StartWorkflowRequest, owner_key_hash: str) -> dict[str, Any]:
         thread_id = str(uuid.uuid4())
         config = self.config(thread_id)
         initial_state: dict[str, Any] = {
@@ -39,6 +45,8 @@ class ScriptEditorWorkflowService:
             "player_count": request.player_count,
             "difficulty": request.difficulty,
             "num_clue_rounds": request.num_clue_rounds,
+            "workflow_mode": "create",
+            "owner_key_hash": owner_key_hash,
         }
         if request.prompts:
             initial_state["prompts"] = request.prompts
@@ -46,6 +54,24 @@ class ScriptEditorWorkflowService:
         response = self._live_response(thread_id, self.graph.get_state(config))
         response.pop("is_complete", None)
         return response
+
+    async def start_edit(self, script, characters: list, owner_key_hash: str) -> dict[str, Any]:
+        if not owner_hash_matches(script.owner_key_hash, owner_key_hash):
+            raise WorkflowAuthorizationError("无权编辑该剧本")
+        thread_id = str(uuid.uuid4())
+        config = self.config(thread_id)
+        initial_state = hydrate_completed_script(script, characters, owner_key_hash)
+        await self.graph.ainvoke(initial_state, config)
+        response = self._live_response(thread_id, self.graph.get_state(config))
+        response.pop("is_complete", None)
+        return response
+
+    def authorize(self, thread_id: str, owner_key_hash: str) -> None:
+        snapshot = self.graph.get_state(self.config(thread_id))
+        if not snapshot.values:
+            raise WorkflowNotFoundError("工作流不存在")
+        if not owner_hash_matches(snapshot.values.get("owner_key_hash"), owner_key_hash):
+            raise WorkflowAuthorizationError("无权访问该工作流")
 
     def get_state(self, thread_id: str) -> dict[str, Any]:
         snapshot = self.graph.get_state(self.config(thread_id))
@@ -65,6 +91,7 @@ class ScriptEditorWorkflowService:
             "character_scripts",
             "human_review",
             "game_data_sections",
+            "selected_asset_ids",
         ):
             value = getattr(request, field)
             if value is not None:
@@ -172,7 +199,16 @@ class ScriptEditorWorkflowService:
     ) -> dict[str, Any]:
         checkpoint_config = self.config(thread_id, checkpoint_id)
         if state_updates:
-            self.graph.update_state(checkpoint_config, state_updates)
+            private_fields = {
+                "owner_key_hash",
+                "original_snapshot",
+                "workflow_mode",
+                "script_id",
+            }
+            safe_updates = {
+                key: value for key, value in state_updates.items() if key not in private_fields
+            }
+            self.graph.update_state(checkpoint_config, safe_updates)
         snapshot = self.graph.get_state(checkpoint_config)
         if not snapshot.values:
             raise WorkflowNotFoundError("检查点不存在")
@@ -253,6 +289,9 @@ class ScriptEditorWorkflowService:
                     "prompt_used": value.get("prompt_used", ""),
                     "rejected": value.get("rejected", False),
                     "reason": value.get("reason", ""),
+                    "workflow_mode": value.get("workflow_mode", "create"),
+                    "asset_plan": value.get("asset_plan", []),
+                    "validation_errors": value.get("validation_errors", []),
                 }
         values = getattr(snapshot, "values", {})
         for node_name in getattr(snapshot, "next", ()):
@@ -277,6 +316,9 @@ class ScriptEditorWorkflowService:
             "prompt_used": "",
             "rejected": False,
             "reason": "",
+            "workflow_mode": state.get("workflow_mode", "create"),
+            "asset_plan": state.get("asset_plan", []),
+            "validation_errors": state.get("data_validation_errors", []),
         }
         if step == "review_outline":
             info["generated_content"] = state.get("outline", "")
@@ -291,6 +333,8 @@ class ScriptEditorWorkflowService:
             info["prompt_used"] = prompts.get("convert_to_game_data", "")
         elif step == "safety_check":
             info["rejected"] = not state.get("safety_passed", False)
+        elif step == "review_asset_plan":
+            info["asset_plan"] = state.get("asset_plan", [])
         return info
 
     @staticmethod
@@ -315,6 +359,8 @@ class ScriptEditorWorkflowService:
             "error_message": "",
             "safety_passed": False,
             "safety_rejection_reason": "",
+            "workflow_mode": "create",
+            "data_validation_errors": [],
         }
         return {key: values.get(key, default) for key, default in defaults.items()}
 

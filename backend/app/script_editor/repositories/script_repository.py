@@ -22,7 +22,7 @@ def _calc_estimated_duration(state: ScriptGenState) -> int:
 
 
 async def _save_generated_script(state: ScriptGenState) -> dict:
-    """将最终数据保存到数据库"""
+    """Persist canonical text first, without replacing parent rows or resources."""
     import re
 
     import aiosqlite
@@ -30,10 +30,7 @@ async def _save_generated_script(state: ScriptGenState) -> dict:
     script_id = state.get("script_id", str(uuid.uuid4()))
     db_path = settings.DATABASE_URL.replace("sqlite+aiosqlite:///", "")
 
-    # 从 game_data_sections 中获取用户可能编辑过的数据
     game_data_sections = state.get("game_data_sections", {})
-
-    # 优先使用 game_data_sections 中的数据（用户可能编辑过）
     game_full_process = game_data_sections.get("game_flow", state.get("game_full_process", []))
     full_truth = game_data_sections.get("full_truth", state.get("full_truth", ""))
     free_speech_limits = game_data_sections.get(
@@ -44,14 +41,12 @@ async def _save_generated_script(state: ScriptGenState) -> dict:
     )
     character_data_list = game_data_sections.get("character_data", [])
 
-    # 构建 character_data 映射（convert 使用 "name" 字段）
-    char_data_map = {}
-    for cd in character_data_list:
-        name = cd.get("name", "") or cd.get("character_name", "")
-        if name:
-            char_data_map[name] = cd
+    char_data_by_id = {
+        str(item.get("character_id", "")): item
+        for item in character_data_list
+        if item.get("character_id")
+    }
 
-    # overview: 优先使用 game_data_sections（由 metadata LLM 生成），否则从大纲提取
     overview = game_data_sections.get("overview", "")
     if not overview:
         outline_raw = state.get("outline", "")
@@ -60,64 +55,70 @@ async def _save_generated_script(state: ScriptGenState) -> dict:
         overview = re.sub(r"[`*\[\]()>_~|]", "", overview)
         overview = overview.strip()[:300]
 
-    # description: 优先使用 game_data_sections.description
     description = game_data_sections.get("description", "") or game_data_sections.get(
         "opening", state.get("final_draft", "")
     )
-
-    # tags: 使用 AI 生成的标签
     tags = game_data_sections.get("tags", "AI创作,剧本杀")
+    workflow_mode = state.get("workflow_mode", "create")
+    characters = list(state.get("characters", []))
+    system_prompts = state.get("system_prompts_map", {})
+    character_voice_ids = state.get("character_voice_ids", {})
 
     try:
         async with aiosqlite.connect(db_path) as db:
-            # 插入 scripts 记录
-            await db.execute(
-                """INSERT OR REPLACE INTO scripts
-                (script_id, title, overview, description, tags, difficulty, player_count,
-                 estimated_duration, game_full_process, full_truth, cover_image_url,
-                 free_speech_limits, is_ai_generated, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    script_id,
-                    state.get("script_title", "未命名剧本"),
-                    overview,
-                    description,
-                    tags,
-                    state.get("difficulty", 1),
-                    state.get("player_count", 4),
-                    _calc_estimated_duration(state),
-                    json.dumps(game_full_process, ensure_ascii=False),
-                    full_truth,
-                    state.get("cover_image_url", ""),
-                    json.dumps(free_speech_limits),
-                    1,  # is_ai_generated
-                    datetime.now().isoformat(sep=" "),
-                ),
+            await db.execute("BEGIN")
+            common_values = (
+                state.get("script_title", "未命名剧本"),
+                overview,
+                description,
+                tags,
+                state.get("difficulty", 1),
+                state.get("player_count", 4),
+                _calc_estimated_duration(state),
+                json.dumps(game_full_process, ensure_ascii=False),
+                full_truth,
+                json.dumps(free_speech_limits),
             )
-
-            # 插入 characters 记录
-            characters = state.get("characters", [])
-            if not characters and character_data_list:
-                characters = []
-                for cd in character_data_list:
-                    characters.append(
-                        {
-                            "character_id": str(uuid.uuid4()),
-                            "name": cd.get("name", "") or cd.get("character_name", ""),
-                            "gender": cd.get("gender", ""),
-                            "age": cd.get("age"),
-                            "occupation": cd.get("occupation", ""),
-                        }
-                    )
-
-            system_prompts = state.get("system_prompts_map", {})
-            character_voice_ids = state.get("character_voice_ids", {})
+            if workflow_mode == "edit":
+                cursor = await db.execute(
+                    """UPDATE scripts SET title = ?, overview = ?, description = ?, tags = ?,
+                    difficulty = ?, player_count = ?, estimated_duration = ?,
+                    game_full_process = ?, full_truth = ?, free_speech_limits = ?
+                    WHERE script_id = ?""",
+                    (*common_values, script_id),
+                )
+                if cursor.rowcount != 1:
+                    raise ValueError("要编辑的剧本不存在")
+                rows = await db.execute_fetchall(
+                    "SELECT character_id FROM characters WHERE script_id = ? ORDER BY character_id",
+                    (script_id,),
+                )
+                persisted_ids = [row[0] for row in rows]
+                submitted_ids = sorted(str(item.get("character_id", "")) for item in characters)
+                if persisted_ids != submitted_ids:
+                    raise ValueError("角色结构已变化，已拒绝覆盖保存")
+            else:
+                await db.execute(
+                    """INSERT INTO scripts
+                    (script_id, title, overview, description, tags, difficulty, player_count,
+                     estimated_duration, game_full_process, full_truth, cover_image_url,
+                     free_speech_limits, is_ai_generated, owner_key_hash, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        script_id,
+                        *common_values[:9],
+                        state.get("cover_image_url", ""),
+                        common_values[9],
+                        1,
+                        state.get("owner_key_hash"),
+                        datetime.now().isoformat(sep=" "),
+                    ),
+                )
 
             for c in characters:
                 name = c.get("name", "")
                 char_id = c.get("character_id", str(uuid.uuid4()))
-
-                cd = char_data_map.get(name, {})
+                cd = char_data_by_id.get(char_id, c)
                 profile = cd.get("profile", c.get("profile", ""))
                 appearance = cd.get("appearance", c.get("appearance", ""))
                 system_prompt = cd.get("system_prompt", system_prompts.get(name, ""))
@@ -130,29 +131,38 @@ async def _save_generated_script(state: ScriptGenState) -> dict:
 
                 voice_id = cd.get("step_voice_id", "") or character_voice_ids.get(char_id, "")
 
-                await db.execute(
-                    """INSERT OR REPLACE INTO characters
-                    (script_id, character_id, name, gender, age, occupation,
-                     character_script, character_script_summary, profile, appearance,
-                     system_prompt, avatar_url, portrait_url, voice_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        script_id,
-                        char_id,
-                        name,
-                        c.get("gender", "") or cd.get("gender", ""),
-                        c.get("age") or cd.get("age"),
-                        c.get("occupation", "") or cd.get("occupation", ""),
-                        char_script,
-                        script_summary,
-                        profile,
-                        appearance,
-                        system_prompt,
-                        state.get("character_avatars", {}).get(char_id, ""),
-                        state.get("character_avatars", {}).get(char_id, ""),
-                        voice_id,
-                    ),
+                values = (
+                    name,
+                    c.get("gender", "") or cd.get("gender", ""),
+                    c.get("age") if c.get("age") is not None else cd.get("age"),
+                    c.get("occupation", "") or cd.get("occupation", ""),
+                    char_script,
+                    script_summary,
+                    profile,
+                    appearance,
+                    system_prompt,
+                    voice_id,
                 )
+                if workflow_mode == "edit":
+                    cursor = await db.execute(
+                        """UPDATE characters SET name = ?, gender = ?, age = ?,
+                        occupation = ?, character_script = ?, character_script_summary = ?,
+                        profile = ?, appearance = ?, system_prompt = ?, voice_id = ?
+                        WHERE script_id = ? AND character_id = ?""",
+                        (*values, script_id, char_id),
+                    )
+                    if cursor.rowcount != 1:
+                        raise ValueError(f"角色 {char_id} 不存在")
+                else:
+                    avatar = state.get("character_avatars", {}).get(char_id, "")
+                    await db.execute(
+                        """INSERT INTO characters
+                        (script_id, character_id, name, gender, age, occupation,
+                         character_script, character_script_summary, profile, appearance,
+                         system_prompt, avatar_url, portrait_url, voice_id)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (script_id, char_id, *values[:9], avatar, avatar, values[9]),
+                    )
 
             await db.commit()
 

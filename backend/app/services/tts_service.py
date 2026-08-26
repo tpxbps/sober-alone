@@ -287,6 +287,7 @@ class TTSService:
         audio_type: str,
         identifier: str,
         voice: str = "冰糖",
+        force: bool = False,
     ) -> str | None:
         """
         生成静态音频并保存到文件
@@ -305,7 +306,7 @@ class TTSService:
         file_path = TTSService.get_static_audio_path(script_id, audio_type, identifier)
 
         # 幂等：已存在且大小合理、时长正常则跳过
-        if file_path.exists() and file_path.stat().st_size > 1000:
+        if not force and file_path.exists() and file_path.stat().st_size > 1000:
             actual_duration = get_wav_duration(file_path)
             expected_duration = estimate_tts_duration(text)
             max_duration = expected_duration * 4
@@ -325,11 +326,11 @@ class TTSService:
 
         audio_data = await TTSService.synthesize_static(text, style_prompt, voice=voice)
         if audio_data:
-            file_path.write_bytes(audio_data)
-            logger.info(f"Saved audio: {file_path} ({len(audio_data)} bytes)")
+            temp_path = file_path.with_suffix(f"{file_path.suffix}.tmp")
+            temp_path.write_bytes(audio_data)
 
             # Validate audio duration — reject abnormally long files (model hallucination)
-            actual_duration = get_wav_duration(file_path)
+            actual_duration = get_wav_duration(temp_path)
             if actual_duration is not None:
                 expected_duration = estimate_tts_duration(text)
                 max_duration = expected_duration * 4  # generous upper bound
@@ -337,10 +338,13 @@ class TTSService:
                     logger.warning(
                         f"Audio duration abnormal: {actual_duration:.1f}s "
                         f"(expected ~{expected_duration:.1f}s, max {max_duration:.1f}s). "
-                        f"Deleting corrupt file: {file_path}"
+                        f"Deleting corrupt file: {temp_path}"
                     )
-                    file_path.unlink(missing_ok=True)
+                    temp_path.unlink(missing_ok=True)
                     return None
+
+            temp_path.replace(file_path)
+            logger.info(f"Saved audio: {file_path} ({len(audio_data)} bytes)")
 
             return TTSService.get_static_audio_url(script_id, audio_type, identifier)
 

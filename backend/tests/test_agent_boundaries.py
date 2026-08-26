@@ -12,6 +12,15 @@ def test_non_rag_prompt_contains_only_supplied_personal_script():
     assert "recall_personal_script_memory" not in prompt
 
 
+def test_role_prompt_requires_markdown_and_tools_before_visible_speech():
+    prompt = build_role_system_prompt("角色设定", "个人剧本", rag_enabled=True)
+
+    assert "最终发言默认使用简洁 Markdown" in prompt
+    assert "必须先完成全部工具调用并等待结果" in prompt
+    assert "严禁“先说半段 → 调工具 → 再继续说”" in prompt
+    assert "逐个点评场上所有玩家" in prompt
+
+
 def test_rag_tool_registration_is_capability_driven():
     without_rag = {tool.name for tool in get_tools(rag_enabled=False)}
     with_rag = {tool.name for tool in get_tools(rag_enabled=True)}

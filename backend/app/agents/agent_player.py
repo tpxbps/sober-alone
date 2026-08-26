@@ -320,6 +320,7 @@ class AgentPlayer:
 4. 可以适度怀疑其他玩家，但要有理由
 
 提示：你可以使用 update_role_reaction 工具记录你对其他玩家的怀疑。
+若需要调用该工具，必须先调用并等待结果，之后再输出完整的 Markdown 发言；不要先发言再调用工具。
 """,
             "free_discussion": """
 【当前阶段：自由讨论】
@@ -328,6 +329,9 @@ class AgentPlayer:
 1. 主动回应他人的质疑，有针对性
 2. 可以质疑其他玩家的发言，但要有理有据
 3. 保持角色立场，不要暴露关键秘密
+4. 只选一个最值得回应或推进的重点展开；其他次要观点简单提及即可
+5. 禁止逐个点名点评所有玩家，尽量用精简的 2-4 个短段落完成发言
+6. 如需回忆个人剧本，先完成检索工具调用，再输出一段完整的 Markdown 发言
 
 注意：你的心理状态（你怀疑谁、谁怀疑了你）已在上下文中提供。
 """,
@@ -478,10 +482,15 @@ submit_final_vote(suspect_name="角色全名", reasoning="1-2句投票理由")
 
         # 构建玩家知识上下文（怀疑图谱、被怀疑记录、 其他玩家发言要点）
         knowledge_context = await self._build_knowledge_context(game_state)
+        human_speech_context = game_state.get("human_speech_context", "")
 
         # 组合最终消息
         if stage_prompt:
-            user_message = f"{stage_prompt}\n\n{knowledge_context}\n\n{context}"
+            user_message = (
+                f"{stage_prompt}\n\n{human_speech_context}\n\n{knowledge_context}\n\n{context}"
+            )
+        elif human_speech_context:
+            user_message = f"{human_speech_context}\n\n{knowledge_context}\n\n{context}"
         elif knowledge_context:
             user_message = f"{knowledge_context}\n\n{context}"
         else:

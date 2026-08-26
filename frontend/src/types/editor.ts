@@ -24,9 +24,13 @@ export interface EditorInterruptInfo {
   prompt_used: string;
   rejected?: boolean;
   reason?: string;
+  workflow_mode?: "create" | "edit";
+  asset_plan?: AssetPlanItem[];
+  validation_errors?: string[];
 }
 
 export interface EditorWorkflowState {
+  workflow_mode: "create" | "edit";
   script_title: string;
   script_id: string;
   user_idea: string;
@@ -54,6 +58,7 @@ export interface EditorWorkflowState {
   error_message: string;
   safety_passed?: boolean;
   safety_rejection_reason?: string;
+  data_validation_errors?: string[];
 }
 
 export interface StartWorkflowResponse {
@@ -120,10 +125,16 @@ export function getPhaseFromStep(step: string): WorkflowPhaseKey {
   if (
     step === "convert_to_game_data" ||
     step === "review_game_data" ||
+    step === "normalize_game_data" ||
     step === "safety_check"
   )
     return "game_data";
-  if (step === "save_to_database" || step === "generate_assets")
+  if (
+    step === "prepare_asset_plan" ||
+    step === "review_asset_plan" ||
+    step === "save_to_database" ||
+    step === "generate_assets"
+  )
     return "assets";
   return "idea";
 }
@@ -144,6 +155,7 @@ export interface ClueStage {
 }
 
 export interface CharacterGameData {
+  character_id: string;
   name: string;
   gender?: string;
   age?: number;
@@ -158,6 +170,9 @@ export interface CharacterGameData {
 }
 
 export interface GameDataSections {
+  title?: string;
+  difficulty?: number;
+  player_count?: number;
   opening: string;
   clue_stages: ClueStage[];
   truth_reveal: string;
@@ -169,6 +184,19 @@ export interface GameDataSections {
   overview?: string;
   tags?: string;
   description?: string;
+}
+
+export interface AssetPlanItem {
+  id: string;
+  phase: "vectorize" | "image" | "tts";
+  phase_label: string;
+  label: string;
+  changed: boolean;
+  missing: boolean;
+  available: boolean;
+  unavailable_reason: string;
+  default_selected: boolean;
+  change_reason: string;
 }
 
 // === Asset progress (granular task tree) ===

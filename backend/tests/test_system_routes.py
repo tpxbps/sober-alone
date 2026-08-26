@@ -48,6 +48,32 @@ async def test_lifespan_fails_fast_until_schema_exists(monkeypatch):
     await engine.dispose()
 
 
+@pytest.mark.asyncio
+async def test_lifespan_fails_fast_when_schema_is_outdated(monkeypatch):
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    monkeypatch.setattr("app.main.engine", engine)
+
+    async with engine.begin() as connection:
+        for table_name in (
+            "scripts",
+            "characters",
+            "game_sessions",
+            "player_states",
+            "game_records",
+        ):
+            await connection.exec_driver_sql(f'CREATE TABLE "{table_name}" (placeholder INTEGER)')
+
+    with pytest.raises(DatabaseNotInitializedError, match="out of date") as exc_info:
+        async with lifespan(app):
+            pass
+
+    assert "scripts.owner_key_hash" in str(exc_info.value)
+    assert "player_states.last_seen_human_record_id" in str(exc_info.value)
+    assert "uv run python -m app.cli init" in str(exc_info.value)
+
+    await engine.dispose()
+
+
 def test_public_openapi_has_system_routes_and_no_ownership_endpoint():
     paths = app.openapi()["paths"]
 
@@ -67,6 +93,7 @@ def test_script_editor_route_split_preserves_public_paths_and_methods():
         "/api/v1/script-editor/prompts/defaults": {"get"},
         "/api/v1/script-editor/steps/info": {"get"},
         "/api/v1/script-editor/scripts/{script_id}": {"delete"},
+        "/api/v1/script-editor/scripts/{script_id}/edit": {"post"},
         "/api/v1/script-editor/{thread_id}/asset-progress": {"get"},
         "/api/v1/script-editor/{thread_id}/convert-progress": {"get"},
         "/api/v1/script-editor/{thread_id}/retry-asset/{task_id}": {"post"},
