@@ -60,14 +60,15 @@ def test_interrupt_reconstruction_and_state_serialization_are_stable():
     assert "original_snapshot" not in ScriptEditorWorkflowService.serialize_state(state.values)
 
 
-def test_history_and_checkpoint_use_same_wire_contract():
+@pytest.mark.asyncio
+async def test_history_and_checkpoint_use_same_wire_contract():
     checkpoint = snapshot({"current_step": "review_final", "final_draft": "终稿"})
     service = ScriptEditorWorkflowService(
         FakeGraph({"live": checkpoint, "cp-1": checkpoint, "history": [checkpoint]})
     )
 
-    history = service.get_history("thread")
-    selected = service.get_checkpoint("thread", "cp-1")
+    history = await service.get_history("thread")
+    selected = await service.get_checkpoint("thread", "cp-1")
 
     assert history["checkpoints"][0]["checkpoint_id"] == "cp-1"
     assert selected["checkpoint_id"] == "cp-1"
@@ -88,14 +89,16 @@ async def test_forking_init_checkpoint_is_read_only_and_does_not_reinvoke_graph(
     assert graph.invocations == []
 
 
-def test_missing_workflow_raises_domain_error():
+@pytest.mark.asyncio
+async def test_missing_workflow_raises_domain_error():
     service = ScriptEditorWorkflowService(FakeGraph({}))
 
     with pytest.raises(WorkflowNotFoundError):
-        service.get_state("missing")
+        await service.get_state("missing")
 
 
-def test_terminal_error_is_not_reported_as_completed():
+@pytest.mark.asyncio
+async def test_terminal_error_is_not_reported_as_completed():
     failed = snapshot(
         {
             "current_step": "save_to_database",
@@ -105,7 +108,7 @@ def test_terminal_error_is_not_reported_as_completed():
     )
     service = ScriptEditorWorkflowService(FakeGraph({"live": failed}))
 
-    result = service.get_state("thread")
+    result = await service.get_state("thread")
 
     assert result["is_complete"] is False
     assert result["state"]["error_message"] == "保存失败: database is locked"

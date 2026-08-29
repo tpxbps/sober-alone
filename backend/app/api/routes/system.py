@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.readiness import DatabaseNotInitializedError, ensure_database_ready
 from app.db.session import get_db
 from app.services.capabilities import get_capabilities
+from app.services.model_health import get_model_health
 
 router = APIRouter(tags=["system"])
 
@@ -20,3 +21,8 @@ async def healthz(db: AsyncSession = Depends(get_db)) -> dict:
 @router.get("/api/v1/system/capabilities")
 async def capabilities() -> dict:
     return get_capabilities()
+
+
+@router.get("/api/v1/system/model-health")
+async def model_health() -> dict:
+    return await get_model_health()

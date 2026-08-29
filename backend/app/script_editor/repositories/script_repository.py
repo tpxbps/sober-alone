@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime
 
 from app.core.config import settings
+from app.game.clues import CLUE_SCHEMA_VERSION, derive_game_process, normalize_clue_stages
 from app.script_editor.state import STEP_SAVE, ScriptGenState
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,12 @@ async def _save_generated_script(state: ScriptGenState) -> dict:
 
     game_data_sections = state.get("game_data_sections", {})
     game_full_process = game_data_sections.get("game_flow", state.get("game_full_process", []))
+    clue_stages = normalize_clue_stages(
+        game_data_sections.get("clue_stages", state.get("clue_stages", [])),
+        script_id=script_id,
+        game_full_process=game_full_process,
+    )
+    game_full_process = derive_game_process(game_full_process, clue_stages)
     full_truth = game_data_sections.get("full_truth", state.get("full_truth", ""))
     free_speech_limits = game_data_sections.get(
         "free_speech_limits", state.get("free_speech_limits", [2, 2])
@@ -83,9 +90,15 @@ async def _save_generated_script(state: ScriptGenState) -> dict:
                 cursor = await db.execute(
                     """UPDATE scripts SET title = ?, overview = ?, description = ?, tags = ?,
                     difficulty = ?, player_count = ?, estimated_duration = ?,
-                    game_full_process = ?, full_truth = ?, free_speech_limits = ?
+                    game_full_process = ?, full_truth = ?, free_speech_limits = ?,
+                    clue_stages = ?, clue_schema_version = ?
                     WHERE script_id = ?""",
-                    (*common_values, script_id),
+                    (
+                        *common_values,
+                        json.dumps(clue_stages, ensure_ascii=False),
+                        CLUE_SCHEMA_VERSION,
+                        script_id,
+                    ),
                 )
                 if cursor.rowcount != 1:
                     raise ValueError("要编辑的剧本不存在")
@@ -102,8 +115,9 @@ async def _save_generated_script(state: ScriptGenState) -> dict:
                     """INSERT INTO scripts
                     (script_id, title, overview, description, tags, difficulty, player_count,
                      estimated_duration, game_full_process, full_truth, cover_image_url,
-                     free_speech_limits, is_ai_generated, owner_key_hash, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                     free_speech_limits, is_ai_generated, owner_key_hash, created_at,
+                     clue_stages, clue_schema_version)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         script_id,
                         *common_values[:9],
@@ -112,6 +126,8 @@ async def _save_generated_script(state: ScriptGenState) -> dict:
                         1,
                         state.get("owner_key_hash"),
                         datetime.now().isoformat(sep=" "),
+                        json.dumps(clue_stages, ensure_ascii=False),
+                        CLUE_SCHEMA_VERSION,
                     ),
                 )
 

@@ -43,7 +43,6 @@ export function ScriptEditorPage({ onBack, editScriptId }: ScriptEditorPageProps
     restoreSession,
     openProgressStream,
     closeProgressStream,
-    retryConvert,
     retryAsset: retryAssetStore,
     viewingCheckpoint,
     history,
@@ -131,12 +130,16 @@ export function ScriptEditorPage({ onBack, editScriptId }: ScriptEditorPageProps
     await retryAssetStore(taskId);
   };
 
-  const handleRetryConvert = async (taskId: string) => {
-    await retryConvert(taskId);
+  const handleRetryConvert = async () => {
+    await resumeWorkflow("regenerate");
   };
 
   const handleBackToLobby = () => {
-    useEditorStore.getState().reset();
+    // The back arrow pauses the UI only. The durable background operation and
+    // local resume pointer must survive so the user can continue later.
+    closeProgressStream();
+    viewCheckpoint(null);
+    if (!threadId || isComplete) reset();
     onBack();
   };
 
@@ -184,6 +187,8 @@ export function ScriptEditorPage({ onBack, editScriptId }: ScriptEditorPageProps
         <div className="lg:max-w-[70%] w-full mx-auto px-3 py-3 flex items-center gap-3">
           <button
             onClick={handleBackToLobby}
+            aria-label="返回剧本大厅"
+            title={threadId && !isComplete ? "返回大厅，稍后可继续" : "返回剧本大厅"}
             className="p-2 rounded-lg hover:bg-secondary/50 transition-colors"
           >
             <ArrowLeft className="w-5 h-5" />

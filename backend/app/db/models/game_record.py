@@ -9,7 +9,7 @@ from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -55,6 +55,7 @@ class GameRecord(Base):
     # 内容
     raw_content: Mapped[str | None] = mapped_column(Text, nullable=True)
     summary_content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    clue_refs: Mapped[list] = mapped_column(JSON, default=list)
 
     # 额外元数据 (注意: 不能使用 'metadata' 作为列名，SQLAlchemy保留字)
     extra_data: Mapped[str | None] = mapped_column(String(500), nullable=True)
@@ -83,6 +84,7 @@ class GameRecord(Base):
             "speaker_name": self.speaker_name,
             "raw_content": self.raw_content,
             "summary_content": self.summary_content,
+            "clue_refs": self.clue_refs or [],
             "audio_url": self.audio_url,
             "timestamp": (self.timestamp.isoformat() if self.timestamp is not None else None),
         }
@@ -107,6 +109,7 @@ class GameRecord(Base):
                 else None  # System messages don't have speaker_name
             ),
             "content": self.raw_content,
+            "clue_refs": self.clue_refs or [],
             "audio_url": self.audio_url,
             "timestamp": (self.timestamp.isoformat() if self.timestamp is not None else None),
         }

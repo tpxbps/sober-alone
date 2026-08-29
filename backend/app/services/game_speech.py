@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import Awaitable, Callable
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +14,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import GameStage
 
 logger = logging.getLogger(__name__)
+_ai_speech_locks: dict[str, asyncio.Lock] = {}
+
+
+def release_speech_lock(session_id: str) -> None:
+    lock = _ai_speech_locks.get(session_id)
+    if lock is not None and not lock.locked():
+        _ai_speech_locks.pop(session_id, None)
+
 
 EnsureController = Callable[[str, AsyncSession], Awaitable[Any | None]]
 
@@ -26,6 +36,13 @@ class GameSpeechService:
         self._ensure_controller = ensure_controller
 
     async def stream_human(self, session_id: str, content: str):
+        """Serialize human and AI writes for one session."""
+        lock = _ai_speech_locks.setdefault(session_id, asyncio.Lock())
+        async with lock:
+            async for event in self._stream_human_locked(session_id, content):
+                yield event
+
+    async def _stream_human_locked(self, session_id: str, content: str):
         """
         处理真人玩家发言（流式SSE）
 
@@ -51,6 +68,7 @@ class GameSpeechService:
             return
 
         # 记录真人发言
+        flow_controller.session.last_active_at = datetime.now()
         yield encode_sse({"type": "speech_recorded", "message": "发言已记录"})
 
         result = await flow_controller.process_speech(
@@ -90,6 +108,35 @@ class GameSpeechService:
         )
 
     async def stream_ai(self, session_id: str, character_id: str):
+        """Serialize one in-flight AI turn and reject stale duplicate requests."""
+
+        from sqlalchemy import select
+
+        from app.db.models import GameSession
+
+        lock = _ai_speech_locks.setdefault(session_id, asyncio.Lock())
+        async with lock:
+            if not hasattr(self.db, "expire_all"):
+                async for event in self._stream_ai_locked(session_id, character_id):
+                    yield event
+                return
+            self.db.expire_all()
+            result = await self.db.execute(
+                select(GameSession).where(GameSession.session_id == session_id)
+            )
+            session = result.scalar_one_or_none()
+            if not session:
+                yield encode_sse({"type": "error", "message": "游戏会话不存在或已结束"})
+                return
+            if session.current_speaker != character_id:
+                yield encode_sse({"type": "error", "message": "该发言请求已过期，当前发言者已变化"})
+                return
+            session.last_active_at = datetime.now()
+            await self.db.commit()
+            async for event in self._stream_ai_locked(session_id, character_id):
+                yield event
+
+    async def _stream_ai_locked(self, session_id: str, character_id: str):
         """
         处理AI玩家发言（流式）
 

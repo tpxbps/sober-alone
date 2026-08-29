@@ -243,11 +243,11 @@ export function PlayerScriptTooltip({
                     onClick={handlePlayScriptAudio}
                     size={16}
                   />
-                  <span className="text-[9px] text-muted-foreground/60">
-                    {audioCapability.enabled
-                      ? "AI 生成语音"
-                      : audioCapability.reason}
-                  </span>
+                  {!audioCapability.enabled && (
+                    <span className="text-[9px] text-muted-foreground/60">
+                      {audioCapability.reason}
+                    </span>
+                  )}
                 </div>
                 <button
                   type="button"

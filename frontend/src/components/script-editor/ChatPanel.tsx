@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Send, X, Loader2 } from "lucide-react";
-import { AI_MODELS } from "@/types/game";
+import type { AIModelOption } from "@/types/game";
 import type { ChatMessage } from "@/types/editor";
 import { editorApi } from "@/lib/editorApi";
 import { systemApi } from "@/lib/api";
@@ -24,8 +24,8 @@ export function ChatPanel({ threadId, onClose }: ChatPanelProps) {
   const [chatSessionId] = useState(() => generateSessionId());
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
-  const [model, setModel] = useState(AI_MODELS[0].id);
-  const [availableModels, setAvailableModels] = useState<typeof AI_MODELS>([]);
+  const [model, setModel] = useState("deepseek-v4-flash");
+  const [availableModels, setAvailableModels] = useState<AIModelOption[]>([]);
   const [modelReason, setModelReason] = useState("正在检查模型能力…");
   const [isStreaming, setIsStreaming] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -36,7 +36,7 @@ export function ChatPanel({ threadId, onClose }: ChatPanelProps) {
     systemApi
       .getCapabilities()
       .then((capabilities) => {
-        const models = configuredModels(AI_MODELS, capabilities);
+        const models = configuredModels(capabilities);
         setAvailableModels(models);
         setModelReason(models.length ? "" : "没有已配置的模型");
         if (models[0]) setModel(models[0].id);

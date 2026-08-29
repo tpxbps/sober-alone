@@ -74,6 +74,10 @@ async def test_each_ai_consumes_complete_human_speech_independently():
 
         assert "原话必须完整保留" in first_context
         assert "你被真人玩家直接点名" in first_context
+        assert "真人发言｜自由讨论｜第1轮｜真人" in first_context
+        assert "free_discussion" not in first_context
+        assert "[记录" not in first_context
+        assert f"记录 {record_id}" not in first_context
         assert "直接点名" not in other_context
         assert record_id == other_record_id > 0
 

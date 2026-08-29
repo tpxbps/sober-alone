@@ -4,13 +4,24 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 REQUIRED_TABLES = frozenset(
-    {"scripts", "characters", "game_sessions", "player_states", "game_records"}
+    {
+        "scripts",
+        "characters",
+        "game_sessions",
+        "player_states",
+        "game_records",
+        "editor_workflows",
+        "editor_operations",
+    }
 )
 REQUIRED_COLUMNS = {
-    "scripts": frozenset({"owner_key_hash"}),
+    "scripts": frozenset({"owner_key_hash", "clue_stages", "clue_schema_version"}),
     "player_states": frozenset({"last_seen_human_record_id"}),
+    "game_sessions": frozenset({"runtime_snapshot", "revealed_clues", "last_active_at"}),
+    "game_records": frozenset({"clue_refs"}),
 }
 INIT_COMMAND = "uv run python -m app.cli init"
+CORE_TABLES = frozenset({"scripts", "characters", "game_sessions", "player_states", "game_records"})
 
 
 class DatabaseNotInitializedError(RuntimeError):
@@ -20,15 +31,19 @@ class DatabaseNotInitializedError(RuntimeError):
         self,
         missing_tables: set[str] | None = None,
         missing_columns: set[str] | None = None,
+        partially_initialized: bool = False,
     ) -> None:
         self.missing_tables = frozenset(missing_tables or set())
         self.missing_columns = frozenset(missing_columns or set())
+        detail_parts = []
         if self.missing_tables:
-            details = f"missing tables: {', '.join(sorted(self.missing_tables))}"
-            state = "not initialized"
-        else:
-            details = f"missing columns: {', '.join(sorted(self.missing_columns))}"
-            state = "out of date"
+            detail_parts.append(f"missing tables: {', '.join(sorted(self.missing_tables))}")
+        if self.missing_columns:
+            detail_parts.append(f"missing columns: {', '.join(sorted(self.missing_columns))}")
+        details = "; ".join(detail_parts)
+        state = (
+            "out of date" if partially_initialized or self.missing_columns else "not initialized"
+        )
         super().__init__(
             f"Local database schema is {state} ({details}). "
             f"Stop the backend and, from the backend directory, run: {INIT_COMMAND}"
@@ -41,8 +56,9 @@ async def ensure_database_ready(db: AsyncConnection | AsyncSession) -> None:
     result = await db.execute(text("SELECT name FROM sqlite_master WHERE type = 'table'"))
     existing_tables = set(result.scalars())
     missing_tables = set(REQUIRED_TABLES - existing_tables)
-    if missing_tables:
-        raise DatabaseNotInitializedError(missing_tables)
+    partially_initialized = bool(existing_tables & CORE_TABLES)
+    if missing_tables and not partially_initialized:
+        raise DatabaseNotInitializedError(missing_tables, partially_initialized=False)
 
     missing_columns: set[str] = set()
     for table_name, required_columns in REQUIRED_COLUMNS.items():
@@ -51,5 +67,9 @@ async def ensure_database_ready(db: AsyncConnection | AsyncSession) -> None:
         missing_columns.update(
             f"{table_name}.{column_name}" for column_name in required_columns - existing_columns
         )
-    if missing_columns:
-        raise DatabaseNotInitializedError(missing_columns=missing_columns)
+    if missing_tables or missing_columns:
+        raise DatabaseNotInitializedError(
+            missing_tables=missing_tables,
+            missing_columns=missing_columns,
+            partially_initialized=partially_initialized,
+        )

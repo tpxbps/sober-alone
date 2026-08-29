@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -7,6 +9,7 @@ from app.db.models import Character, Script
 from app.script_editor.asset_generation import service as asset_service
 from app.script_editor.nodes import save
 from app.script_editor.repositories.script_repository import ScriptRepository
+from app.script_editor.services import chroma_ingest
 from app.script_editor.services.progress_registry import asset_progress_registry
 
 
@@ -17,7 +20,7 @@ async def test_optional_asset_tasks_are_skipped_without_keys(monkeypatch):
     monkeypatch.setattr(save.settings, "MIMO_API_KEY", None)
     script_id = "test-no-assets"
 
-    await save.generate_assets(
+    result = await save.generate_assets(
         {
             "script_id": script_id,
             "characters": [{"character_id": "char-a", "name": "甲"}],
@@ -27,6 +30,7 @@ async def test_optional_asset_tasks_are_skipped_without_keys(monkeypatch):
     progress = save.get_asset_progress(script_id)
 
     assert progress is not None
+    assert result["asset_progress"] == progress
     assert progress["isComplete"] is True
     tasks = [task for phase in progress["phases"] for task in phase["tasks"]]
     assert tasks
@@ -123,3 +127,93 @@ async def test_retry_missing_avatar_target_fails_instead_of_completing():
     assert result.error == "角色不存在"
     assert matching[0]["status"] == "failed"
     assert matching[0]["reason"] == "角色不存在"
+
+
+def test_character_vector_replacement_keeps_old_documents_when_add_fails(monkeypatch):
+    events: list[tuple[str, object]] = []
+
+    class Collection:
+        def get(self, **_kwargs):
+            return {"ids": ["old-document"]}
+
+        def add(self, **_kwargs):
+            events.append(("add", None))
+            raise RuntimeError("write failed")
+
+        def delete(self, **kwargs):
+            events.append(("delete", kwargs))
+
+    class ChromaClient:
+        def get_or_create_collection(self, **_kwargs):
+            return Collection()
+
+    class Embeddings:
+        @staticmethod
+        def create(**_kwargs):
+            return type("Response", (), {"data": [type("Item", (), {"embedding": [0.1]})()]})()
+
+    monkeypatch.setattr(
+        chroma_ingest.chromadb, "PersistentClient", lambda **_kwargs: ChromaClient()
+    )
+    monkeypatch.setattr(
+        chroma_ingest,
+        "ZhipuAI",
+        lambda **_kwargs: type("Client", (), {"embeddings": Embeddings()})(),
+    )
+    monkeypatch.setattr(chroma_ingest.settings, "ZHIPUAI_API_KEY", "test-key")
+
+    with pytest.raises(RuntimeError, match="write failed"):
+        chroma_ingest.ingest_character(
+            "script", {"character_id": "char-a", "name": "甲"}, "个人剧本"
+        )
+
+    assert events == [("add", None)]
+
+
+@pytest.mark.asyncio
+async def test_vectorization_serializes_shared_collection_writes_and_retries(monkeypatch):
+    active = 0
+    max_active = 0
+    attempts: dict[str, int] = {}
+    statuses: list[tuple[str, str]] = []
+
+    async def fake_ingest(_script_id, character, _script_text):
+        nonlocal active, max_active
+        character_id = character["character_id"]
+        attempts[character_id] = attempts.get(character_id, 0) + 1
+        active += 1
+        max_active = max(max_active, active)
+        try:
+            await asyncio.sleep(0)
+            if attempts[character_id] == 1:
+                raise RuntimeError("temporary collection lock")
+        finally:
+            active -= 1
+
+    monkeypatch.setattr(chroma_ingest, "ingest_character_async", fake_ingest)
+    monkeypatch.setattr(
+        asset_service,
+        "_update_task_status",
+        lambda _script_id, task_id, status, _reason="": statuses.append((task_id, status)),
+    )
+    monkeypatch.setattr(asset_service, "VECTORIZE_RETRY_DELAY_SECONDS", 0)
+
+    characters = [
+        {"character_id": "char-a", "name": "甲"},
+        {"character_id": "char-b", "name": "乙"},
+        {"character_id": "char-c", "name": "丙"},
+    ]
+    await asset_service._run_vectorize(
+        "script",
+        {"character_scripts": {"甲": "甲剧本", "乙": "乙剧本", "丙": "丙剧本"}},
+        characters,
+        {"vector_char-a", "vector_char-b", "vector_char-c"},
+    )
+
+    assert max_active == 1
+    assert attempts == {"char-a": 2, "char-b": 2, "char-c": 2}
+    assert {(task_id, status) for task_id, status in statuses if status == "complete"} == {
+        ("vector_char-a", "complete"),
+        ("vector_char-b", "complete"),
+        ("vector_char-c", "complete"),
+    }

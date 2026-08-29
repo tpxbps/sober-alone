@@ -79,6 +79,10 @@ class GameSession(Base):
     current_speaker: Mapped[str | None] = mapped_column(String(36), nullable=True)
     # 本轮已发言的角色列表 (用于自由发言阶段判断是否所有人都发过言)
     round_speakers: Mapped[list] = mapped_column(JSON, default=list)
+    # Immutable script/character/model snapshot captured when the game starts.
+    runtime_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Flat list of clue items already published to this session.
+    revealed_clues: Mapped[list] = mapped_column(JSON, default=list)
 
     # 投票结果: {"voter_id": {"suspect_id": xxx, "reasoning": xxx}}
     votes: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -97,6 +101,7 @@ class GameSession(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now, onupdate=datetime.now
     )
+    last_active_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
@@ -126,6 +131,10 @@ class GameSession(Base):
             "speech_queue": self.speech_queue,
             "current_speaker": self.current_speaker,
             "round_speakers": self.round_speakers,
+            "revealed_clues": self.revealed_clues,
+            "last_active_at": (
+                self.last_active_at.isoformat() if self.last_active_at is not None else None
+            ),
             "votes": self.votes,
             "created_at": (self.created_at.isoformat() if self.created_at is not None else None),
             "started_at": (self.started_at.isoformat() if self.started_at is not None else None),

@@ -9,6 +9,7 @@ from typing import Any
 
 from app.core.config import settings
 from app.db.models import Character, Script
+from app.game.clues import derive_game_process, normalize_clue_stages, render_clue_tts
 from app.script_editor.state import (
     STEP_NORMALIZE_GAME_DATA,
     STEP_PREPARE_ASSET_PLAN,
@@ -73,6 +74,12 @@ def hydrate_completed_script(
     owner_key_hash: str,
 ) -> ScriptGenState:
     game_flow = copy.deepcopy(script.game_full_process or [])
+    clue_stages = normalize_clue_stages(
+        script.clue_stages or [],
+        script_id=script.script_id,
+        game_full_process=game_flow,
+    )
+    game_flow = derive_game_process(game_flow, clue_stages)
     limits = list(script.free_speech_limits or [])
     character_data: list[dict[str, Any]] = []
     character_scripts: dict[str, str] = {}
@@ -106,7 +113,7 @@ def hydrate_completed_script(
         "difficulty": script.difficulty,
         "player_count": script.player_count,
         "opening": _extract_opening(game_flow),
-        "clue_stages": _extract_clue_stages(game_flow, limits),
+        "clue_stages": clue_stages,
         "truth_reveal": _extract_truth_reveal(game_flow),
         "full_truth": script.full_truth or "",
         "game_flow": game_flow,
@@ -130,6 +137,7 @@ def hydrate_completed_script(
         "system_prompts_map": {c.name: c.system_prompt or "" for c in characters},
         "character_voice_ids": voice_ids,
         "game_full_process": game_flow,
+        "clue_stages": clue_stages,
         "full_truth": script.full_truth or "",
         "free_speech_limits": limits,
         "game_data_sections": sections,
@@ -144,6 +152,8 @@ def hydrate_completed_script(
         "character_ids": [c.character_id for c in characters],
         "player_count": script.player_count,
         "flow_shape": _flow_shape(game_flow),
+        "clue_stage_numbers": [stage["stage"] for stage in clue_stages],
+        "clue_ids": [item["id"] for stage in clue_stages for item in stage["items"]],
         "asset_dependencies": asset_dependencies(state),
     }
     return state
@@ -152,6 +162,7 @@ def hydrate_completed_script(
 def normalize_game_data(state: ScriptGenState) -> dict[str, Any]:
     sections = copy.deepcopy(state.get("game_data_sections", {}))
     game_flow = sections.get("game_flow") or []
+    submitted_clue_stages = sections.get("clue_stages") or state.get("clue_stages") or []
     character_data = sections.get("character_data") or []
     errors: list[str] = []
 
@@ -192,6 +203,33 @@ def normalize_game_data(state: ScriptGenState) -> dict[str, Any]:
         limits = []
     if len(limits) != round_count or any(value < 1 or value > 3 for value in limits):
         errors.append("每轮自由讨论发言次数必须为 1-3，且数量与轮次一致")
+
+    try:
+        clue_stages = normalize_clue_stages(
+            submitted_clue_stages,
+            script_id=str(state.get("script_id", "")),
+            game_full_process=game_flow,
+        )
+    except (TypeError, ValueError) as exc:
+        clue_stages = []
+        errors.append(str(exc))
+    if len(clue_stages) != round_count:
+        errors.append("线索阶段数量必须与既有线索轮次一致")
+    original_stage_numbers = original.get("clue_stage_numbers", [])
+    if (
+        original_stage_numbers
+        and [stage["stage"] for stage in clue_stages] != original_stage_numbers
+    ):
+        errors.append("编辑完成剧本时不能修改线索所属轮次")
+    original_clue_ids = set(original.get("clue_ids", []))
+    submitted_ids = {
+        str(item.get("id", ""))
+        for stage in submitted_clue_stages
+        for item in (stage.get("items") or [])
+        if item.get("id")
+    }
+    if original_clue_ids and any(clue_id not in original_clue_ids for clue_id in submitted_ids):
+        errors.append("既有线索 ID 不可修改；新增线索请留空 ID 由系统生成")
 
     if errors:
         return {
@@ -234,6 +272,7 @@ def normalize_game_data(state: ScriptGenState) -> dict[str, Any]:
         prompts[name] = canonical["system_prompt"]
         voices[character_id] = canonical["step_voice_id"]
 
+    game_flow = derive_game_process(game_flow, clue_stages)
     sections.update(
         {
             "title": title,
@@ -241,7 +280,8 @@ def normalize_game_data(state: ScriptGenState) -> dict[str, Any]:
             "player_count": len(characters),
             "opening": _extract_opening(game_flow),
             "truth_reveal": _extract_truth_reveal(game_flow),
-            "clue_stages": _extract_clue_stages(game_flow, limits),
+            "clue_stages": clue_stages,
+            "game_flow": game_flow,
             "character_data": canonical_data,
             "character_scripts": scripts,
             "free_speech_limits": limits,
@@ -257,6 +297,7 @@ def normalize_game_data(state: ScriptGenState) -> dict[str, Any]:
         "num_clue_rounds": round_count,
         "game_data_sections": sections,
         "game_full_process": game_flow,
+        "clue_stages": clue_stages,
         "full_truth": str(sections.get("full_truth", "") or ""),
         "free_speech_limits": limits,
         "characters": characters,
@@ -313,6 +354,10 @@ def _task_dependencies(state: ScriptGenState) -> list[dict[str, Any]]:
                 },
             }
         )
+    clue_stage_by_number = {
+        int(stage.get("stage", 0)): stage for stage in state.get("clue_stages", [])
+    }
+    clue_round = 0
     for index, stage in enumerate(state.get("game_full_process", [])):
         stage_type = stage.get("type", "")
         if stage_type in ("initial", "review"):
@@ -332,8 +377,14 @@ def _task_dependencies(state: ScriptGenState) -> list[dict[str, Any]]:
                 }
             )
         elif stage_type in ("advancement", "vote"):
+            if stage_type == "advancement":
+                clue_round += 1
             for child_index, child in enumerate(stage.get("children", [])):
                 notice = child.get("system_notice", "")
+                if stage_type == "advancement" and child_index == 0:
+                    clue_stage = clue_stage_by_number.get(clue_round)
+                    if clue_stage:
+                        notice = render_clue_tts(clue_stage)
                 if not notice:
                     continue
                 tasks.append(

@@ -11,16 +11,18 @@ from app.agents import remove_agent_manager
 from app.core.config import settings
 from app.db.models import Character, GameSession, Script
 from app.db.session import get_db
+from app.script_editor.editing import hydrate_completed_script
 from app.script_editor.graph import get_script_gen_graph
 from app.script_editor.ownership import owner_hash_matches, require_author_key_hash
+from app.script_editor.services.operation_service import editor_operation_runner
 from app.script_editor.services.progress_registry import (
     asset_progress_registry,
     convert_progress_registry,
 )
 from app.script_editor.services.workflow_service import (
-    ScriptEditorWorkflowService,
     WorkflowAuthorizationError,
 )
+from app.services.checkpoint_runtime import delete_game_checkpoints
 from app.services.game_service import remove_flow_controller
 
 logger = logging.getLogger(__name__)
@@ -42,16 +44,29 @@ async def delete_script(
         if not owner_hash_matches(existing.owner_key_hash, owner_key_hash):
             raise HTTPException(status_code=403, detail="无权删除该剧本")
 
-        session_ids = list(
-            await db.scalars(
-                select(GameSession.session_id).where(GameSession.script_id == script_id)
-            )
+        session_rows = list(
+            (
+                await db.execute(
+                    select(GameSession.session_id, GameSession.runtime_snapshot).where(
+                        GameSession.script_id == script_id
+                    )
+                )
+            ).all()
         )
 
         await db.execute(delete(Script).where(Script.script_id == script_id))
         await db.commit()
 
-        for session_id in session_ids:
+        for session_id, runtime_snapshot in session_rows:
+            characters = (runtime_snapshot or {}).get("characters", [])
+            await delete_game_checkpoints(
+                session_id,
+                [
+                    str(item.get("character_id", ""))
+                    for item in characters
+                    if item.get("character_id")
+                ],
+            )
             remove_agent_manager(session_id)
             remove_flow_controller(session_id)
 
@@ -82,7 +97,7 @@ async def delete_script(
         raise HTTPException(status_code=500, detail=str(error)) from error
 
 
-@router.post("/scripts/{script_id}/edit")
+@router.post("/scripts/{script_id}/edit", status_code=202)
 async def edit_script(
     script_id: str,
     db: AsyncSession = Depends(get_db),
@@ -100,7 +115,14 @@ async def edit_script(
         )
     )
     try:
-        return await ScriptEditorWorkflowService().start_edit(script, characters, owner_key_hash)
+        if not owner_hash_matches(script.owner_key_hash, owner_key_hash):
+            raise WorkflowAuthorizationError("无权编辑该剧本")
+        initial_state = hydrate_completed_script(script, characters, owner_key_hash)
+        return await editor_operation_runner.queue_edit(
+            initial_state=initial_state,
+            owner_key_hash=owner_key_hash,
+            script_id=script_id,
+        )
     except WorkflowAuthorizationError as error:
         raise HTTPException(status_code=403, detail=str(error)) from error
 

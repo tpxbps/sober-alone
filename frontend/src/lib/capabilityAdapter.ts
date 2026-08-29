@@ -2,13 +2,11 @@ import type { SystemCapabilities } from '@/types/capabilities'
 import type { AIModelOption } from '@/types/game'
 
 export function configuredModels(
-  models: AIModelOption[],
   capabilities: SystemCapabilities,
 ): AIModelOption[] {
-  const configured = new Set(
-    capabilities.models.filter((item) => item.configured).map((item) => item.model),
-  )
-  return models.filter((model) => configured.has(model.id))
+  return capabilities.models
+    .filter((item) => item.configured)
+    .map((item) => ({ id: item.id, name: item.name, provider: item.provider }))
 }
 
 export function ttsCapability(capabilities: SystemCapabilities) {

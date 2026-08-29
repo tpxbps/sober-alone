@@ -1,11 +1,12 @@
 import axios from 'axios';
 import type {
-  StartWorkflowResponse,
   WorkflowStateResponse,
   ResumeWorkflowResponse,
   StepInfo,
   AssetProgress,
   CheckpointInfo,
+  EditorOperationAccepted,
+  EditorOperationResponse,
 } from '@/types/editor';
 import { AUTHOR_KEY_HEADER, getOrCreateAuthorKey } from '@/lib/authorKey';
 
@@ -31,12 +32,12 @@ export const editorApi = {
     difficulty?: number;
     num_clue_rounds?: number;
     prompts?: Record<string, string>;
-  }): Promise<StartWorkflowResponse> => {
+  }): Promise<EditorOperationAccepted> => {
     const response = await api.post('/script-editor/start', params);
     return response.data;
   },
 
-  startEditWorkflow: async (scriptId: string): Promise<StartWorkflowResponse> => {
+  startEditWorkflow: async (scriptId: string): Promise<EditorOperationAccepted> => {
     const response = await api.post(`/script-editor/scripts/${scriptId}/edit`);
     return response.data;
   },
@@ -60,8 +61,18 @@ export const editorApi = {
       prompt?: string;
       selected_asset_ids?: string[];
     }
-  ): Promise<ResumeWorkflowResponse> => {
+  ): Promise<EditorOperationAccepted> => {
     const response = await api.post(`/script-editor/${threadId}/resume`, data);
+    return response.data;
+  },
+
+  getOperation: async (
+    threadId: string,
+    operationId: string,
+  ): Promise<EditorOperationResponse> => {
+    const response = await api.get(
+      `/script-editor/${threadId}/operations/${operationId}`,
+    );
     return response.data;
   },
 
@@ -104,12 +115,6 @@ export const editorApi = {
   // Retry a failed asset task
   retryAsset: async (threadId: string, taskId: string): Promise<{ success: boolean; message: string; task_status?: string }> => {
     const response = await api.post(`/script-editor/${threadId}/retry-asset/${taskId}`);
-    return response.data;
-  },
-
-  // Retry a failed convert task
-  retryConvert: async (threadId: string, taskId: string): Promise<{ success: boolean; message: string; task_status?: string }> => {
-    const response = await api.post(`/script-editor/${threadId}/retry-convert/${taskId}`);
     return response.data;
   },
 

@@ -4,6 +4,7 @@ RAG Retriever - ChromaDB向量检索器
 """
 
 import asyncio
+import logging
 from typing import Any, cast
 
 import chromadb
@@ -11,6 +12,8 @@ from chromadb.config import Settings as ChromaSettings
 from zhipuai import ZhipuAI
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class ChromaRetriever:
@@ -63,6 +66,15 @@ class ChromaRetriever:
         )
         return [item.embedding for item in response.data]
 
+    async def collection_exists(self, script_id: str) -> bool:
+        """Check script-level RAG availability without creating an embedding request."""
+        collection_name = self._get_collection_name(script_id)
+        try:
+            await asyncio.to_thread(self.client.get_collection, collection_name)
+            return True
+        except Exception:
+            return False
+
     async def retrieve(
         self, script_id: str, query: str, character_id: str | None = None, top_k: int = 3
     ) -> list[dict[str, Any]]:
@@ -83,7 +95,9 @@ class ChromaRetriever:
         try:
             collection = await asyncio.to_thread(self.client.get_collection, collection_name)
         except Exception as e:
-            print(f"Collection {collection_name} not found: {e}")
+            logger.debug(
+                "Chroma collection unavailable: %s (%s)", collection_name, type(e).__name__
+            )
             return []
 
         # 生成查询向量（同步 HTTP 调用 → 移到线程池）

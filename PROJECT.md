@@ -9,7 +9,7 @@
 项目同时包含剧本创作工作流，允许用户从一句创意出发，逐步生成大纲、初稿、评审稿、终稿和可运行的结构化游戏数据。关键阶段保留人工确认、回退、历史检查点和分叉能力。
 
 当前边界是 `local-first / single-user / single-process`。运行数据只保存在本机，不提供账号、多人在线房间或公网服务能力。
-剧本创作的检查点和进度状态也仅保存在当前后端进程内，重启后不能恢复未完成的创作会话。
+剧本创作操作与游戏 Agent 的 LangGraph 检查点写入本地 SQLite；长任务由后台 operation 执行，前端刷新后按 `operation_id` 恢复轮询。服务重启会重新认领未完成操作，但仍不承诺跨机器或多进程协调。
 
 ## 2. 核心体验
 
@@ -19,7 +19,7 @@
 剧本大厅 → 选择角色 → 自我介绍 → [线索分析 → 自由讨论] × N → 总结发言 → 投票 → 真相复盘
 ```
 
-`GameFlowController` 维护阶段和发言队列；`GameService` 是 API 层使用的稳定外观；角色 Agent 只接收自己的个人剧本，并随着游戏记录更新上下文。发言通过 SSE 流式返回，结束后再执行角色反应分析和服务端状态对账。
+`GameFlowController` 维护阶段和发言队列；`GameService` 是 API 层使用的稳定外观；角色 Agent 只接收自己的个人剧本，并随着游戏记录更新上下文。公开线索以 `ClueStage → ClueItem` 形式保存，阶段消息使用固定 Markdown 模板，真人和 AI 通过稳定 `[clue-id]` 引用。发言通过 SSE 返回，完整结束后才落库并执行角色反应分析和服务端状态对账。
 
 ### 创作链路
 
@@ -52,15 +52,15 @@ backend/tests/      后端关键特征与回归测试
 frontend/e2e/       主游戏浏览器流程
 ```
 
-主要数据表为 `scripts`、`characters`、`game_sessions`、`player_states` 和 `game_records`。数据库、检查点、向量和运行时媒体统一写入被 Git 忽略的 `backend/.local-data/`。
+主要数据表为 `scripts`、`characters`、`game_sessions`、`player_states`、`game_records`、`editor_workflows` 和 `editor_operations`。对局创建时保存不可变剧本快照和已公开线索；数据库、LangGraph SQLite 检查点、向量和运行时媒体统一写入被 Git 忽略的 `backend/.local-data/`。空闲 72 小时只回收 Agent、controller 与锁等内存对象，不删除对局或检查点。
 
 ## 4. 模型与能力边界
 
 - DeepSeek 是最低运行依赖，负责主游戏 Agent 和文本创作。
 - 没有 StepFun 时，摘要回退到当前主模型。
 - 没有智谱 Embedding 时，不注册 RAG 工具，只向角色注入其自己的完整剧本。
-- 图片、静态 TTS、流式 TTS 和额外角色模型按配置动态启用。
-- `/api/v1/system/capabilities` 是前端展示能力状态的唯一来源，不返回 Key。
+- 图片、静态 TTS、流式 TTS 和额外角色模型按配置动态启用；模型枚举由后端统一注册。
+- `/api/v1/system/capabilities` 发布配置能力，`/api/v1/system/model-health` 并行探测发言首字和结构化反应完整耗时；两者都不返回 Key。健康提示只影响自动模型分配和风险提示，不禁止用户手动选择。
 
 提示词、角色剧本、玩家发言和待生成资产会发送给用户主动启用的云模型供应商，并可能产生费用。不要把敏感信息或无权处理的内容输入第三方模型。
 

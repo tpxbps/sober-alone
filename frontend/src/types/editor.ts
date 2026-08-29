@@ -71,6 +71,19 @@ export interface StartWorkflowResponse {
   state: EditorWorkflowState;
 }
 
+export interface EditorOperationAccepted {
+  success: boolean;
+  thread_id: string;
+  operation_id: string;
+  operation_status: 'queued' | 'running' | 'complete' | 'failed';
+  target_step: string;
+  progress?: { message?: string; percent?: number };
+  error_message?: string;
+}
+
+export type EditorOperationResponse = EditorOperationAccepted &
+  Partial<StartWorkflowResponse & ResumeWorkflowResponse>;
+
 export interface WorkflowStateResponse {
   success: boolean;
   thread_id: string;
@@ -142,16 +155,15 @@ export function getPhaseFromStep(step: string): WorkflowPhaseKey {
 // === Game data sections ===
 
 export interface ClueStage {
-  round_number: number;
-  stage_title: string;
-  system_notice: string;
-  discussion_notice: string;
-  clues: Array<{
-    description: string;
-    pointing_to: string;
-    is_misleading: boolean;
+  stage: number;
+  overview: string;
+  items: Array<{
+    id: string;
+    summary: string;
+    content: string;
+    stage: number;
   }>;
-  free_speech_limit: number;
+  free_discussion_notice: string;
 }
 
 export interface CharacterGameData {

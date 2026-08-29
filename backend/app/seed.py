@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from textwrap import dedent
 
@@ -9,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Character, Script
+from app.game.clues import CLUE_SCHEMA_VERSION, normalize_clue_stages
 
 SAMPLE_SCRIPT_ID = "sample-midnight-call-v1"
 SAMPLE_TITLE = "零点来电"
@@ -165,6 +167,33 @@ def _game_process() -> list[dict]:
             "system_notice": FULL_TRUTH,
         },
     ]
+
+
+def _sample_clue_stages() -> list[dict]:
+    """Turn the curated numbered sample clues into first-class clue items."""
+    process = _game_process()
+    stages = []
+    for stage_number, source in enumerate((ROUND_ONE_CLUES, ROUND_TWO_CLUES), start=1):
+        lines = [line.strip() for line in source.splitlines() if line.strip()]
+        overview = lines[0].strip("【】") if lines else f"第 {stage_number} 轮公开线索"
+        items = []
+        for match in re.finditer(
+            r"^\s*\d+\.\s*([^\n]+)\n(.*?)(?=^\s*\d+\.|\Z)",
+            source,
+            flags=re.MULTILINE | re.DOTALL,
+        ):
+            content = re.split(r"\n\s*请", match.group(2).strip(), maxsplit=1)[0].strip()
+            items.append({"summary": match.group(1).strip(), "content": content})
+        discussion = process[stage_number]["children"][1]["system_notice"]
+        stages.append(
+            {
+                "stage": stage_number,
+                "overview": overview,
+                "items": items,
+                "free_discussion_notice": discussion,
+            }
+        )
+    return normalize_clue_stages(stages, script_id=SAMPLE_SCRIPT_ID)
 
 
 CHARACTERS = [
@@ -394,6 +423,8 @@ async def seed_sample_if_empty(session: AsyncSession) -> bool:
         player_count=4,
         estimated_duration=25,
         game_full_process=_game_process(),
+        clue_stages=_sample_clue_stages(),
+        clue_schema_version=CLUE_SCHEMA_VERSION,
         full_truth=FULL_TRUTH,
         cover_image_url="",
         free_speech_limits=[2, 2],

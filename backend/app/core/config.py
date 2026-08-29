@@ -10,15 +10,6 @@ def _sqlite_url(path: Path) -> str:
     return f"sqlite+aiosqlite:///{path.resolve().as_posix()}"
 
 
-# LLM提供商对应的默认模型
-DEFAULT_MODELS: dict[str, str] = {
-    "deepseek": "deepseek-v4-flash",
-    "stepfun": "step-3.5-flash",
-    "alibaba": "qwen3.5-flash-2026-02-23",
-    "bytedance": "doubao-seed-2-0-mini-260215",
-}
-
-
 class Settings(BaseSettings):
     """Application settings"""
 
@@ -39,6 +30,7 @@ class Settings(BaseSettings):
     STEPFUN_API_KEY: str | None = None
     QWEN_API_KEY: str | None = None
     DOUBAO_API_KEY: str | None = None
+    HUNYUAN_API_KEY: str | None = None
 
     # TTS API Keys
     MIMO_API_KEY: str | None = None
@@ -51,6 +43,7 @@ class Settings(BaseSettings):
     QWEN_API_BASE_URL: str | None = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     DOUBAO_API_BASE_URL: str | None = "https://ark.cn-beijing.volces.com/api/v3"
     MIMO_API_BASE_URL: str | None = "https://api.xiaomimimo.com/v1"
+    HUNYUAN_API_BASE_URL: str | None = "https://tokenhub.tencentmaas.com/v1"
 
     # 默认LLM提供商
     DEFAULT_LLM_PROVIDER: str = "deepseek"
@@ -78,8 +71,18 @@ class Settings(BaseSettings):
     def image_dir(self) -> Path:
         return LOCAL_DATA_DIR / "images"
 
+    @property
+    def workflow_checkpoint_path(self) -> Path:
+        return LOCAL_DATA_DIR / "workflow-checkpoints.sqlite"
+
+    @property
+    def game_checkpoint_path(self) -> Path:
+        return LOCAL_DATA_DIR / "game-checkpoints.sqlite"
+
     def get_llm_model_name(self, provider: str | None = None) -> str:
         """获取LLM模型名称"""
+        from app.core.model_registry import DEFAULT_MODELS
+
         provider = provider or self.DEFAULT_LLM_PROVIDER
         if provider == self.DEFAULT_LLM_PROVIDER and self.DEFAULT_LLM_MODEL:
             return self.DEFAULT_LLM_MODEL
@@ -94,6 +97,7 @@ class Settings(BaseSettings):
             "alibaba": self.QWEN_API_KEY,
             "bytedance": self.DOUBAO_API_KEY,
             "mimo": self.MIMO_API_KEY,
+            "hunyuan": self.HUNYUAN_API_KEY,
         }
         return key_mapping.get(provider)
 
@@ -106,6 +110,7 @@ class Settings(BaseSettings):
             "alibaba": self.QWEN_API_BASE_URL,
             "bytedance": self.DOUBAO_API_BASE_URL,
             "mimo": self.MIMO_API_BASE_URL,
+            "hunyuan": self.HUNYUAN_API_BASE_URL,
         }
         return url_mapping.get(provider)
 

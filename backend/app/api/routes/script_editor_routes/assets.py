@@ -8,8 +8,10 @@ from typing import cast
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
+from app.api.schemas.script_editor import ResumeWorkflowRequest
 from app.script_editor.graph import get_script_gen_graph
 from app.script_editor.ownership import require_author_key_hash
+from app.script_editor.services.operation_service import editor_operation_runner
 from app.script_editor.services.workflow_service import (
     ScriptEditorWorkflowService,
     WorkflowAuthorizationError,
@@ -22,15 +24,15 @@ operation_router = APIRouter()
 stream_router = APIRouter()
 
 
-def _script_id_for_thread(thread_id: str) -> str:
+async def _script_id_for_thread(thread_id: str) -> str:
     graph = get_script_gen_graph()
-    state_snapshot = graph.get_state(ScriptEditorWorkflowService.config(thread_id))
+    state_snapshot = await graph.aget_state(ScriptEditorWorkflowService.config(thread_id))
     return state_snapshot.values.get("script_id", "")
 
 
-def _authorize_thread(thread_id: str, owner_key_hash: str) -> None:
+async def _authorize_thread(thread_id: str, owner_key_hash: str) -> None:
     try:
-        ScriptEditorWorkflowService().authorize(thread_id, owner_key_hash)
+        await ScriptEditorWorkflowService().authorize(thread_id, owner_key_hash)
     except WorkflowNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except WorkflowAuthorizationError as error:
@@ -52,14 +54,17 @@ async def get_asset_progress_endpoint(
 ):
     """Poll asset-generation progress."""
     try:
-        _authorize_thread(thread_id, owner_key_hash)
-        script_id = _script_id_for_thread(thread_id)
+        await _authorize_thread(thread_id, owner_key_hash)
+        script_id = await _script_id_for_thread(thread_id)
         if not script_id:
             return {"success": True, "progress": None}
 
         from app.script_editor.nodes.save import get_asset_progress
 
-        return {"success": True, "progress": get_asset_progress(script_id)}
+        graph = get_script_gen_graph()
+        snapshot = await graph.aget_state(ScriptEditorWorkflowService.config(thread_id))
+        progress = get_asset_progress(script_id) or snapshot.values.get("asset_progress")
+        return {"success": True, "progress": progress}
     except Exception as error:
         logger.error("Failed to get asset progress: %s", error)
         raise HTTPException(status_code=500, detail=str(error)) from error
@@ -71,14 +76,17 @@ async def get_convert_progress_endpoint(
 ):
     """Poll structured-conversion progress."""
     try:
-        _authorize_thread(thread_id, owner_key_hash)
-        script_id = _script_id_for_thread(thread_id)
+        await _authorize_thread(thread_id, owner_key_hash)
+        script_id = await _script_id_for_thread(thread_id)
         if not script_id:
             return {"success": True, "progress": None}
 
         from app.script_editor.nodes.convert import get_convert_progress
 
-        return {"success": True, "progress": get_convert_progress(script_id)}
+        graph = get_script_gen_graph()
+        snapshot = await graph.aget_state(ScriptEditorWorkflowService.config(thread_id))
+        progress = get_convert_progress(script_id) or snapshot.values.get("convert_progress")
+        return {"success": True, "progress": progress}
     except Exception as error:
         logger.error("Failed to get conversion progress: %s", error)
         raise HTTPException(status_code=500, detail=str(error)) from error
@@ -92,9 +100,9 @@ async def retry_asset_task(
 ):
     """Retry one failed asset-generation task."""
     try:
-        _authorize_thread(thread_id, owner_key_hash)
+        await _authorize_thread(thread_id, owner_key_hash)
         graph = get_script_gen_graph()
-        state_snapshot = graph.get_state(ScriptEditorWorkflowService.config(thread_id))
+        state_snapshot = await graph.aget_state(ScriptEditorWorkflowService.config(thread_id))
         script_id = state_snapshot.values.get("script_id", "")
         if not script_id:
             raise HTTPException(status_code=404, detail="工作流不存在")
@@ -103,7 +111,12 @@ async def retry_asset_task(
         from app.script_editor.state import ScriptGenState
 
         await retry_single_asset(script_id, task_id, cast(ScriptGenState, state_snapshot.values))
-        status = _task_status(get_asset_progress(script_id), task_id)
+        progress = get_asset_progress(script_id)
+        await graph.aupdate_state(
+            ScriptEditorWorkflowService.config(thread_id),
+            {"asset_progress": progress or {}},
+        )
+        status = _task_status(progress, task_id)
         return {"success": True, "message": f"任务 {task_id} 重试完成", "task_status": status}
     except HTTPException:
         raise
@@ -111,33 +124,30 @@ async def retry_asset_task(
         raise HTTPException(status_code=500, detail=str(error)) from error
 
 
-@operation_router.post("/{thread_id}/retry-convert/{task_id}")
+@operation_router.post("/{thread_id}/retry-convert/{task_id}", status_code=202)
 async def retry_convert_task(
     thread_id: str,
     task_id: str,
     owner_key_hash: str = Depends(require_author_key_hash),
 ):
-    """Retry one failed structured-conversion task."""
+    """Backward-compatible entry point that safely reruns the full conversion.
+
+    Conversion tasks contribute to one normalized state object, so replaying one
+    task without rebuilding the aggregate can report success while retaining old
+    fallback data. New clients use the normal ``resume(regenerate)`` operation.
+    """
     try:
-        _authorize_thread(thread_id, owner_key_hash)
-        graph = get_script_gen_graph()
-        state_snapshot = graph.get_state(ScriptEditorWorkflowService.config(thread_id))
-        script_id = state_snapshot.values.get("script_id", "")
-        if not script_id:
-            raise HTTPException(status_code=404, detail="工作流不存在")
-
-        ScriptEditorWorkflowService.register_script_thread(script_id, thread_id)
-
-        from app.script_editor.nodes.convert import get_convert_progress, retry_single_convert
-        from app.script_editor.state import ScriptGenState
-
-        await retry_single_convert(script_id, task_id, cast(ScriptGenState, state_snapshot.values))
-        status = _task_status(get_convert_progress(script_id), task_id)
-        return {
-            "success": True,
-            "message": f"转换任务 {task_id} 重试完成",
-            "task_status": status,
-        }
+        await _authorize_thread(thread_id, owner_key_hash)
+        logger.info(
+            "Deprecated conversion retry requested thread=%s task=%s; rerunning full conversion",
+            thread_id,
+            task_id,
+        )
+        return await editor_operation_runner.queue_resume(
+            thread_id,
+            ResumeWorkflowRequest(action="regenerate"),
+            owner_key_hash,
+        )
     except HTTPException:
         raise
     except Exception as error:
@@ -150,7 +160,7 @@ async def progress_stream(thread_id: str, owner_key_hash: str = Depends(require_
     """Stream conversion and asset progress snapshots over SSE."""
     from app.script_editor.services.progress_bus import subscribe, unsubscribe
 
-    _authorize_thread(thread_id, owner_key_hash)
+    await _authorize_thread(thread_id, owner_key_hash)
     queue = subscribe(thread_id)
 
     async def event_generator():
@@ -158,7 +168,7 @@ async def progress_stream(thread_id: str, owner_key_hash: str = Depends(require_
             yield _sse({"type": "connected"})
 
             try:
-                script_id = _script_id_for_thread(thread_id)
+                script_id = await _script_id_for_thread(thread_id)
                 if script_id:
                     from app.script_editor.nodes.convert import get_convert_progress
                     from app.script_editor.nodes.save import get_asset_progress

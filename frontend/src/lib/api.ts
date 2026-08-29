@@ -11,7 +11,7 @@ import type {
   StreamingMessage,
   LLMConfig,
 } from '@/types/game';
-import type { SystemCapabilities } from '@/types/capabilities';
+import type { ModelHealthResponse, SystemCapabilities } from '@/types/capabilities';
 import { AUTHOR_KEY_HEADER, getStoredAuthorKey } from '@/lib/authorKey';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api/v1';
@@ -23,6 +23,13 @@ const api = axios.create({
   },
 });
 
+const MODEL_HEALTH_FRONTEND_TTL_MS = 15 * 60 * 1000;
+let modelHealthCache: { value: ModelHealthResponse; expiresAt: number } | null = null;
+let modelHealthRequest: Promise<ModelHealthResponse> | null = null;
+const CAPABILITIES_FRONTEND_TTL_MS = 60 * 1000;
+let capabilitiesCache: { value: SystemCapabilities; expiresAt: number } | null = null;
+let capabilitiesRequest: Promise<SystemCapabilities> | null = null;
+
 api.interceptors.request.use((config) => {
   const authorKey = getStoredAuthorKey();
   if (authorKey) config.headers.set(AUTHOR_KEY_HEADER, authorKey);
@@ -31,8 +38,48 @@ api.interceptors.request.use((config) => {
 
 export const systemApi = {
   getCapabilities: async (): Promise<SystemCapabilities> => {
-    const response = await api.get('/system/capabilities');
-    return response.data;
+    if (capabilitiesCache && capabilitiesCache.expiresAt > Date.now()) {
+      return capabilitiesCache.value;
+    }
+    if (!capabilitiesRequest) {
+      capabilitiesRequest = api
+        .get<SystemCapabilities>('/system/capabilities')
+        .then((response) => {
+          capabilitiesCache = {
+            value: response.data,
+            expiresAt: Date.now() + CAPABILITIES_FRONTEND_TTL_MS,
+          };
+          return response.data;
+        })
+        .finally(() => {
+          capabilitiesRequest = null;
+        });
+    }
+    return capabilitiesRequest;
+  },
+  getModelHealth: async (): Promise<ModelHealthResponse> => {
+    if (modelHealthCache && modelHealthCache.expiresAt > Date.now()) {
+      return modelHealthCache.value;
+    }
+    if (!modelHealthRequest) {
+      modelHealthRequest = api
+        .get<ModelHealthResponse>('/system/model-health')
+        .then((response) => {
+          const value: ModelHealthResponse = {
+            models: Array.isArray(response.data?.models) ? response.data.models : [],
+            cached: Boolean(response.data?.cached),
+          };
+          modelHealthCache = {
+            value,
+            expiresAt: Date.now() + MODEL_HEALTH_FRONTEND_TTL_MS,
+          };
+          return value;
+        })
+        .finally(() => {
+          modelHealthRequest = null;
+        });
+    }
+    return modelHealthRequest;
   },
 };
 
@@ -59,15 +106,9 @@ export const gameApi = {
     const llmConfigs: Record<string, LLMConfig> | undefined = request.ai_models
       ? Object.fromEntries(
           Object.entries(request.ai_models).map(([charId, modelId]) => {
-            const providerByModel: Record<string, string> = {
-              'deepseek-v4-flash': 'deepseek',
-              'step-3.5-flash': 'stepfun',
-              'qwen3.5-flash-2026-02-23': 'alibaba',
-              'doubao-seed-2-0-mini-260215': 'bytedance',
-            };
             return [
               charId,
-              { provider: providerByModel[modelId] || 'deepseek', model: modelId },
+              { model: modelId },
             ];
           })
         )

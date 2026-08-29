@@ -107,7 +107,7 @@ def _route_after_save(state: ScriptGenState) -> Literal["generate_assets", "end"
 # === 构建图 ===
 
 
-def build_script_gen_graph():
+def build_script_gen_graph(checkpointer=None):
     """
     构建剧本生成工作流图
 
@@ -210,9 +210,7 @@ def build_script_gen_graph():
     )
     builder.add_edge("generate_assets", END)
 
-    # 使用 MemorySaver 编译
-    memory = MemorySaver()
-    graph = builder.compile(checkpointer=memory)
+    graph = builder.compile(checkpointer=checkpointer or MemorySaver())
 
     return graph
 
@@ -227,3 +225,9 @@ def get_script_gen_graph():
     if _graph is None:
         _graph = build_script_gen_graph()
     return _graph
+
+
+def set_script_gen_graph(checkpointer) -> None:
+    """Install the process-wide graph backed by the lifespan-owned checkpointer."""
+    global _graph
+    _graph = build_script_gen_graph(checkpointer)

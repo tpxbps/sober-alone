@@ -10,6 +10,7 @@ AI角色扮演智能体的工具集
 """
 
 from app.agents.tools.reaction import update_role_reaction
+from app.agents.tools.recall_clues import RecallCluesInput, recall_public_clues
 from app.agents.tools.recall_memory import RecallInput, recall_personal_script_memory
 from app.agents.tools.vote import VoteInput, submit_final_vote
 
@@ -18,11 +19,12 @@ ALL_TOOLS = [
     recall_personal_script_memory,
     update_role_reaction,
     submit_final_vote,
+    recall_public_clues,
 ]
 
 
 def get_tools(*, rag_enabled: bool) -> list:
-    tools = [update_role_reaction, submit_final_vote]
+    tools = [recall_public_clues, update_role_reaction, submit_final_vote]
     if rag_enabled:
         tools.insert(0, recall_personal_script_memory)
     return tools
@@ -33,9 +35,11 @@ __all__ = [
     "recall_personal_script_memory",
     "update_role_reaction",
     "submit_final_vote",
+    "recall_public_clues",
     # Input schemas
     "RecallInput",
     "VoteInput",
+    "RecallCluesInput",
     # Tool collections
     "ALL_TOOLS",
     "get_tools",

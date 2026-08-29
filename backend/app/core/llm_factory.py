@@ -6,6 +6,9 @@ LLM Factory - LangChain模型初始化统一管理
 - stepfun: Step (阶跃星辰) — 使用 ChatOpenAI
 - alibaba: 千问 (阿里巴巴) — 使用 ChatOpenAI
 - bytedance: 豆包 (字节跳动) — 使用 ChatOpenAI
+- mimo: 小米 MiMo — 使用 ChatOpenAI
+- hunyuan: 腾讯混元 — 使用 ChatOpenAI
+- zhipuai: 智谱 GLM — 使用 ChatOpenAI
 
 规则:
 - deepseek 提供商统一使用 ChatDeepSeek
@@ -16,30 +19,23 @@ LLM Factory - LangChain模型初始化统一管理
 """
 
 import logging
-from typing import Literal, cast
+from typing import cast
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 
 from app.core.config import settings
+from app.core.model_registry import MODEL_BY_ID, get_model_spec
 
 logger = logging.getLogger(__name__)
 
 # 支持的模型类型
-SupportedModel = Literal[
-    "deepseek-v4-flash",
-    "step-3.5-flash",
-    "qwen3.5-flash-2026-02-23",
-    "doubao-seed-2-0-mini-260215",
-]
+SupportedModel = str
 
 # 模型 -> 提供商 映射
 MODEL_PROVIDER_MAP: dict[str, str] = {
-    "deepseek-v4-flash": "deepseek",
-    "step-3.5-flash": "stepfun",
-    "qwen3.5-flash-2026-02-23": "alibaba",
-    "doubao-seed-2-0-mini-260215": "bytedance",
+    model_id: spec.provider for model_id, spec in MODEL_BY_ID.items()
 }
 
 
@@ -62,12 +58,8 @@ def create_llm(
             2. 结构化输出（with_structured_output）— 思考模式与 function_calling 不兼容
     """
     model_lower = model.lower()
-    provider = MODEL_PROVIDER_MAP.get(model_lower)
-
-    if not provider:
-        raise ValueError(
-            f"不支持的模型: {model}。支持的模型: {', '.join(sorted(MODEL_PROVIDER_MAP.keys()))}"
-        )
+    spec = get_model_spec(model_lower)
+    provider = spec.provider
 
     resolved_key = api_key or settings.get_api_key(provider)
     if not resolved_key:
@@ -95,6 +87,11 @@ def create_llm(
         temperature,
         timeout,
         max_retries,
+        extra_body=(
+            {"enable_thinking": False}
+            if disable_thinking and spec.disable_thinking_extra == "qwen"
+            else None
+        ),
     )
 
 
@@ -144,6 +141,7 @@ def _create_openai_compatible(
     temperature: float,
     timeout: int | None,
     max_retries: int | None,
+    extra_body: dict | None = None,
 ) -> BaseChatModel:
     """使用 ChatOpenAI 创建兼容 OpenAI 协议的模型"""
     kwargs: dict = dict(
@@ -156,6 +154,8 @@ def _create_openai_compatible(
         kwargs["timeout"] = timeout
     if max_retries is not None:
         kwargs["max_retries"] = max_retries
+    if extra_body:
+        kwargs["extra_body"] = extra_body
 
     return ChatOpenAI(**kwargs)  # type: ignore[arg-type]
 

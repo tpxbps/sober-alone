@@ -37,8 +37,28 @@ class ScriptEditorWorkflowService:
             configurable["checkpoint_id"] = checkpoint_id
         return cast(RunnableConfig, {"configurable": configurable})
 
-    async def start(self, request: StartWorkflowRequest, owner_key_hash: str) -> dict[str, Any]:
-        thread_id = str(uuid.uuid4())
+    async def _get_snapshot(self, config: RunnableConfig):
+        if hasattr(self.graph, "aget_state"):
+            return await self.graph.aget_state(config)
+        return self.graph.get_state(config)
+
+    async def _update_state(self, config: RunnableConfig, values: dict[str, Any]):
+        if hasattr(self.graph, "aupdate_state"):
+            return await self.graph.aupdate_state(config, values)
+        return self.graph.update_state(config, values)
+
+    async def _history(self, config: RunnableConfig) -> list[Any]:
+        if hasattr(self.graph, "aget_state_history"):
+            return [state async for state in self.graph.aget_state_history(config)]
+        return list(self.graph.get_state_history(config))
+
+    async def start(
+        self,
+        request: StartWorkflowRequest,
+        owner_key_hash: str,
+        thread_id: str | None = None,
+    ) -> dict[str, Any]:
+        thread_id = thread_id or str(uuid.uuid4())
         config = self.config(thread_id)
         initial_state: dict[str, Any] = {
             "user_idea": request.user_idea,
@@ -51,30 +71,36 @@ class ScriptEditorWorkflowService:
         if request.prompts:
             initial_state["prompts"] = request.prompts
         await self.graph.ainvoke(cast(ScriptGenState, initial_state), config)
-        response = self._live_response(thread_id, self.graph.get_state(config))
+        response = self._live_response(thread_id, await self._get_snapshot(config))
         response.pop("is_complete", None)
         return response
 
-    async def start_edit(self, script, characters: list, owner_key_hash: str) -> dict[str, Any]:
+    async def start_edit(
+        self,
+        script,
+        characters: list,
+        owner_key_hash: str,
+        thread_id: str | None = None,
+    ) -> dict[str, Any]:
         if not owner_hash_matches(script.owner_key_hash, owner_key_hash):
             raise WorkflowAuthorizationError("无权编辑该剧本")
-        thread_id = str(uuid.uuid4())
+        thread_id = thread_id or str(uuid.uuid4())
         config = self.config(thread_id)
         initial_state = hydrate_completed_script(script, characters, owner_key_hash)
         await self.graph.ainvoke(initial_state, config)
-        response = self._live_response(thread_id, self.graph.get_state(config))
+        response = self._live_response(thread_id, await self._get_snapshot(config))
         response.pop("is_complete", None)
         return response
 
-    def authorize(self, thread_id: str, owner_key_hash: str) -> None:
-        snapshot = self.graph.get_state(self.config(thread_id))
+    async def authorize(self, thread_id: str, owner_key_hash: str) -> None:
+        snapshot = await self._get_snapshot(self.config(thread_id))
         if not snapshot.values:
             raise WorkflowNotFoundError("工作流不存在")
         if not owner_hash_matches(snapshot.values.get("owner_key_hash"), owner_key_hash):
             raise WorkflowAuthorizationError("无权访问该工作流")
 
-    def get_state(self, thread_id: str) -> dict[str, Any]:
-        snapshot = self.graph.get_state(self.config(thread_id))
+    async def get_state(self, thread_id: str) -> dict[str, Any]:
+        snapshot = await self._get_snapshot(self.config(thread_id))
         if not snapshot.values:
             raise WorkflowNotFoundError("工作流不存在")
         response = self._live_response(thread_id, snapshot)
@@ -98,36 +124,36 @@ class ScriptEditorWorkflowService:
                 resume_data[field] = value
 
         if request.prompt is not None:
-            snapshot = self.graph.get_state(config)
+            snapshot = await self._get_snapshot(config)
             prompts = dict(snapshot.values.get("prompts", {}))
             prompt_key = self.prompt_key_for_action(
                 snapshot.values.get("current_step", ""), request.action
             )
             if prompt_key:
                 prompts[prompt_key] = request.prompt
-                self.graph.update_state(config, {"prompts": prompts})
+                await self._update_state(config, {"prompts": prompts})
 
-        pre_state = self.graph.get_state(config)
+        pre_state = await self._get_snapshot(config)
         self._register_from_values(pre_state.values, thread_id)
         await self.graph.ainvoke(Command(resume=resume_data), config)
-        response = self._live_response(thread_id, self.graph.get_state(config))
+        response = self._live_response(thread_id, await self._get_snapshot(config))
         response.pop("script_id", None)
         response.pop("script_title", None)
         return response
 
-    def update_prompt(self, thread_id: str, step: str, prompt: str) -> dict[str, Any]:
+    async def update_prompt(self, thread_id: str, step: str, prompt: str) -> dict[str, Any]:
         config = self.config(thread_id)
-        snapshot = self.graph.get_state(config)
+        snapshot = await self._get_snapshot(config)
         prompts = dict(snapshot.values.get("prompts", {}))
         prompts[step] = prompt
-        self.graph.update_state(config, {"prompts": prompts})
+        await self._update_state(config, {"prompts": prompts})
         return {"success": True, "message": f"提示词已更新: {step}"}
 
-    def update_title(self, thread_id: str, title: str) -> dict[str, Any]:
+    async def update_title(self, thread_id: str, title: str) -> dict[str, Any]:
         title = title.strip()
         if not title:
             raise ValueError("标题不能为空")
-        self.graph.update_state(self.config(thread_id), {"script_title": title})
+        await self._update_state(self.config(thread_id), {"script_title": title})
         return {"success": True, "script_title": title}
 
     @staticmethod
@@ -162,9 +188,9 @@ class ScriptEditorWorkflowService:
             ],
         }
 
-    def get_history(self, thread_id: str) -> dict[str, Any]:
+    async def get_history(self, thread_id: str) -> dict[str, Any]:
         checkpoints = []
-        for state in self.graph.get_state_history(self.config(thread_id)):
+        for state in await self._history(self.config(thread_id)):
             if not state.values:
                 continue
             configurable = (
@@ -182,8 +208,8 @@ class ScriptEditorWorkflowService:
             )
         return {"success": True, "checkpoints": checkpoints}
 
-    def get_checkpoint(self, thread_id: str, checkpoint_id: str) -> dict[str, Any]:
-        snapshot = self.graph.get_state(self.config(thread_id, checkpoint_id))
+    async def get_checkpoint(self, thread_id: str, checkpoint_id: str) -> dict[str, Any]:
+        snapshot = await self._get_snapshot(self.config(thread_id, checkpoint_id))
         if not snapshot.values:
             raise WorkflowNotFoundError("检查点不存在")
         return {
@@ -208,8 +234,8 @@ class ScriptEditorWorkflowService:
             safe_updates = {
                 key: value for key, value in state_updates.items() if key not in private_fields
             }
-            self.graph.update_state(checkpoint_config, safe_updates)
-        snapshot = self.graph.get_state(checkpoint_config)
+            await self._update_state(checkpoint_config, safe_updates)
+        snapshot = await self._get_snapshot(checkpoint_config)
         if not snapshot.values:
             raise WorkflowNotFoundError("检查点不存在")
         current_step = snapshot.values.get("current_step", "")
@@ -231,13 +257,13 @@ class ScriptEditorWorkflowService:
             matching = next(
                 (
                     state
-                    for state in self.graph.get_state_history(self.config(thread_id))
+                    for state in await self._history(self.config(thread_id))
                     if target_interrupt in list(state.next or [])
                 ),
                 None,
             )
             await self.graph.ainvoke(None, matching.config if matching else checkpoint_config)
-        response = self._live_response(thread_id, self.graph.get_state(self.config(thread_id)))
+        response = self._live_response(thread_id, await self._get_snapshot(self.config(thread_id)))
         response.pop("script_id", None)
         response.pop("script_title", None)
         return response

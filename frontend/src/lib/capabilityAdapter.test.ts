@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
 import type { SystemCapabilities } from '../types/capabilities'
-import { AI_MODELS } from '../types/game'
 import { configuredModels, ttsCapability } from './capabilityAdapter'
 
 const capabilities: SystemCapabilities = {
   mode: 'local-first-single-user-single-process',
   models: [
     {
+      id: 'deepseek-v4-flash',
+      name: 'DeepSeek V4 Flash',
       provider: 'deepseek',
       provider_name: 'DeepSeek',
       model: 'deepseek-v4-flash',
@@ -15,6 +16,8 @@ const capabilities: SystemCapabilities = {
       reason: '已配置',
     },
     {
+      id: 'step-3.5-flash',
+      name: 'Step 3.5 Flash',
       provider: 'stepfun',
       provider_name: '阶跃星辰',
       model: 'step-3.5-flash',
@@ -32,7 +35,7 @@ const capabilities: SystemCapabilities = {
 
 describe('capability adapters', () => {
   it('exposes only models whose provider key is configured', () => {
-    expect(configuredModels(AI_MODELS, capabilities).map((model) => model.id)).toEqual([
+    expect(configuredModels(capabilities).map((model) => model.id)).toEqual([
       'deepseek-v4-flash',
     ])
   })

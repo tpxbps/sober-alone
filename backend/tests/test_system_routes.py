@@ -79,6 +79,7 @@ def test_public_openapi_has_system_routes_and_no_ownership_endpoint():
 
     assert "/healthz" in paths
     assert "/api/v1/system/capabilities" in paths
+    assert "/api/v1/system/model-health" in paths
     assert not any("ownership" in path for path in paths)
 
 
@@ -88,6 +89,7 @@ def test_script_editor_route_split_preserves_public_paths_and_methods():
         "/api/v1/script-editor/start": {"post"},
         "/api/v1/script-editor/{thread_id}/state": {"get"},
         "/api/v1/script-editor/{thread_id}/resume": {"post"},
+        "/api/v1/script-editor/{thread_id}/operations/{operation_id}": {"get"},
         "/api/v1/script-editor/{thread_id}/prompt/{step}": {"put"},
         "/api/v1/script-editor/{thread_id}/title": {"put"},
         "/api/v1/script-editor/prompts/defaults": {"get"},

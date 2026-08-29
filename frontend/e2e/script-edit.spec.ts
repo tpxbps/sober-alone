@@ -11,6 +11,7 @@ function json(route: Route, body: unknown) {
 test('作者从大厅编辑结构化数据并选择性更新资源', async ({ page }) => {
   let title = '可编辑剧本'
   let resumeCount = 0
+  const operationResponses = new Map<string, unknown>()
   const characters = [
     {
       character_id: 'c1',
@@ -94,9 +95,12 @@ test('作者从大厅编辑结构化数据并选择性更新资源', async ({ pa
     }
     if (path.endsWith('/scripts/owned-script/edit')) {
       expect(route.request().headers()['x-sober-author-key']).toBeTruthy()
-      return json(route, {
+      operationResponses.set('edit-start', {
         success: true,
         thread_id: 'edit-thread',
+        operation_id: 'edit-start',
+        operation_status: 'complete',
+        target_step: 'review_game_data',
         script_id: 'owned-script',
         script_title: title,
         current_step: 'review_game_data',
@@ -109,6 +113,13 @@ test('作者从大厅编辑结构化数据并选择性更新资源', async ({ pa
         },
         state: state(),
       })
+      return json(route, {
+        success: true,
+        thread_id: 'edit-thread',
+        operation_id: 'edit-start',
+        operation_status: 'queued',
+        target_step: 'review_game_data',
+      })
     }
     if (path.endsWith('/edit-thread/resume')) {
       expect(route.request().headers()['x-sober-author-key']).toBeTruthy()
@@ -116,9 +127,12 @@ test('作者从大厅编辑结构化数据并选择性更新资源', async ({ pa
       resumeCount += 1
       if (resumeCount === 1) {
         title = request.game_data_sections.title
-        return json(route, {
+        operationResponses.set('resume-1', {
           success: true,
           thread_id: 'edit-thread',
+          operation_id: 'resume-1',
+          operation_status: 'complete',
+          target_step: 'review_game_data',
           current_step: 'review_asset_plan',
           is_complete: false,
           interrupt: {
@@ -154,16 +168,37 @@ test('作者从大厅编辑结构化数据并选择性更新资源', async ({ pa
           },
           state: state(),
         })
+        return json(route, {
+          success: true,
+          thread_id: 'edit-thread',
+          operation_id: 'resume-1',
+          operation_status: 'queued',
+          target_step: 'review_game_data',
+        })
       }
       expect(request.selected_asset_ids).toEqual(['cover'])
-      return json(route, {
+      operationResponses.set('resume-2', {
         success: true,
         thread_id: 'edit-thread',
+        operation_id: 'resume-2',
+        operation_status: 'complete',
+        target_step: 'review_asset_plan',
         current_step: 'generate_assets',
         is_complete: true,
         interrupt: null,
         state: state(),
       })
+      return json(route, {
+        success: true,
+        thread_id: 'edit-thread',
+        operation_id: 'resume-2',
+        operation_status: 'queued',
+        target_step: 'review_asset_plan',
+      })
+    }
+    if (path.includes('/edit-thread/operations/')) {
+      const operationId = path.split('/').at(-1) || ''
+      return json(route, operationResponses.get(operationId) || { operation_status: 'running' })
     }
     if (path.endsWith('/progress-stream')) {
       return route.fulfill({

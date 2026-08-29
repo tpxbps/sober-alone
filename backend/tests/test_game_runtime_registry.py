@@ -1,9 +1,12 @@
+from datetime import datetime, timedelta
+
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db.base import Base
 from app.db.models import GameSession, Script
+from app.services.checkpoint_runtime import delete_game_checkpoints, set_game_checkpointer
 from app.services.game_runtime import FlowControllerRegistry
 from app.services.game_service import GameService
 
@@ -26,6 +29,40 @@ async def test_registry_restores_once_and_remove_is_idempotent():
     registry.remove("session")
     registry.remove("session")
     assert registry.get("session") is None
+
+
+def test_registry_prunes_only_expired_process_objects():
+    registry = FlowControllerRegistry()
+    registry.put("stale", object())
+    registry.put("active", object())
+    registry._last_access["stale"] = datetime.now() - timedelta(hours=73)
+
+    assert registry.prune_inactive(timedelta(hours=72)) == ["stale"]
+    assert registry.get("stale") is None
+    assert registry.get("active") is not None
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_cleanup_uses_snapshot_character_ids_without_live_manager():
+    class Checkpointer:
+        def __init__(self):
+            self.deleted: list[str] = []
+
+        async def adelete_thread(self, thread_id):
+            self.deleted.append(thread_id)
+
+    checkpointer = Checkpointer()
+    set_game_checkpointer(checkpointer)
+    try:
+        await delete_game_checkpoints("session", ["human", "ai-one", "ai-two"])
+    finally:
+        set_game_checkpointer(None)
+
+    assert checkpointer.deleted == [
+        "session_ai-one",
+        "session_ai-two",
+        "session_human",
+    ]
 
 
 @pytest.mark.asyncio

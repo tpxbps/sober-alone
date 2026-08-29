@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { editorApi } from '@/lib/editorApi';
-import type { EditorInterruptInfo, EditorWorkflowState, AssetProgress, CheckpointInfo } from '@/types/editor';
+import type { EditorInterruptInfo, EditorWorkflowState, AssetProgress, CheckpointInfo, EditorOperationResponse, StartWorkflowResponse, ResumeWorkflowResponse } from '@/types/editor';
 
 const EDITOR_SESSION_KEY = 'editorSession';
 
@@ -81,6 +81,10 @@ function reconstructInterruptInfo(
 
 interface EditorSession {
   threadId: string;
+  operationId?: string;
+  targetStep?: string;
+  currentStep?: string;
+  pendingKind?: 'start' | 'edit' | 'resume';
 }
 
 function loadSession(): EditorSession | null {
@@ -97,6 +101,106 @@ function saveSession(session: EditorSession) {
 
 function clearSession() {
   localStorage.removeItem(EDITOR_SESSION_KEY);
+}
+
+export function hasStoredEditorSession(): boolean {
+  return Boolean(loadSession()?.threadId);
+}
+
+class OperationPollCancelled extends Error {}
+
+let _operationPollEpoch = 0;
+const OPERATION_POLL_INTERVAL_MS = 5000;
+
+function operationErrorStatus(error: unknown): number | null {
+  if (!error || typeof error !== 'object' || !('response' in error)) return null;
+  const response = (error as { response?: { status?: unknown } }).response;
+  return typeof response?.status === 'number' ? response.status : null;
+}
+
+function isFatalRestoreError(error: unknown): boolean {
+  const status = operationErrorStatus(error);
+  return status === 401 || status === 403 || status === 404;
+}
+
+async function pollDelay(epoch: number): Promise<void> {
+  // Long-running LLM work continues independently on the backend. A slower
+  // status poll keeps database traffic bounded without delaying the operation.
+  await new Promise((resolve) => window.setTimeout(resolve, OPERATION_POLL_INTERVAL_MS));
+  if (epoch !== _operationPollEpoch) throw new OperationPollCancelled();
+}
+
+async function waitForOperation(
+  threadId: string,
+  operationId: string,
+  epoch: number,
+  onPending?: () => Promise<void>,
+): Promise<EditorOperationResponse & (StartWorkflowResponse | ResumeWorkflowResponse)> {
+  for (;;) {
+    if (epoch !== _operationPollEpoch) throw new OperationPollCancelled();
+    let result: EditorOperationResponse;
+    try {
+      result = await editorApi.getOperation(threadId, operationId);
+    } catch (error) {
+      if (isFatalRestoreError(error)) throw error;
+      await pollDelay(epoch);
+      continue;
+    }
+    if (epoch !== _operationPollEpoch) throw new OperationPollCancelled();
+    if (result.operation_status === 'failed') {
+      throw new Error(result.error_message || '后台操作失败');
+    }
+    if (result.operation_status === 'complete' && result.state && result.current_step) {
+      return result as EditorOperationResponse & (StartWorkflowResponse | ResumeWorkflowResponse);
+    }
+    await onPending?.();
+    await pollDelay(epoch);
+  }
+}
+
+function hasIncompleteTasks(progress: AssetProgress | null): boolean {
+  return Boolean(
+    progress?.phases?.some((phase) =>
+      phase.tasks?.some((task) => !['complete', 'skipped'].includes(task.status)),
+    ),
+  );
+}
+
+function needsDetailedProgress(step: string | undefined): boolean {
+  return [
+    'convert_to_game_data',
+    'safety_check',
+    'save_to_database',
+    'generate_assets',
+  ].includes(step || '');
+}
+
+async function loadProgressSnapshots(threadId: string): Promise<{
+  convertProgress: AssetProgress | null;
+  assetProgress: AssetProgress | null;
+}> {
+  const [convertResult, assetResult] = await Promise.allSettled([
+    editorApi.getConvertProgress(threadId),
+    editorApi.getAssetProgress(threadId),
+  ]);
+  return {
+    convertProgress:
+      convertResult.status === 'fulfilled' ? convertResult.value.progress : null,
+    assetProgress:
+      assetResult.status === 'fulfilled' ? assetResult.value.progress : null,
+  };
+}
+
+async function waitForWorkflowState(threadId: string, epoch: number) {
+  for (;;) {
+    if (epoch !== _operationPollEpoch) throw new OperationPollCancelled();
+    try {
+      return await editorApi.getState(threadId);
+    } catch (error) {
+      if (isFatalRestoreError(error)) throw error;
+      await pollDelay(epoch);
+    }
+  }
 }
 
 interface EditorState {
@@ -140,7 +244,6 @@ interface EditorState {
   restoreSession: () => Promise<boolean>;
   openProgressStream: () => void;
   closeProgressStream: () => void;
-  retryConvert: (taskId: string) => Promise<void>;
   retryAsset: (taskId: string) => Promise<void>;
   updateTitle: (title: string) => Promise<void>;
   reset: () => void;
@@ -172,14 +275,21 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   history: [],
 
   startWorkflow: async (params) => {
+    const pollEpoch = ++_operationPollEpoch;
     set({ isStarting: true, error: null });
     try {
-      const result = await editorApi.startWorkflow(params);
+      const accepted = await editorApi.startWorkflow(params);
 
-      // Persist session
-      if (result.thread_id) {
-        saveSession({ threadId: result.thread_id });
-      }
+      saveSession({
+        threadId: accepted.thread_id,
+        operationId: accepted.operation_id,
+        targetStep: accepted.target_step,
+        currentStep: accepted.target_step,
+        pendingKind: 'start',
+      });
+      set({ threadId: accepted.thread_id, currentStep: accepted.target_step });
+      const result = await waitForOperation(accepted.thread_id, accepted.operation_id, pollEpoch);
+      saveSession({ threadId: result.thread_id, currentStep: result.current_step });
 
       set({
         threadId: result.thread_id,
@@ -193,16 +303,27 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         isStarting: false,
       });
     } catch (err: unknown) {
+      if (err instanceof OperationPollCancelled) return;
       const message = err instanceof Error ? err.message : '启动失败';
       set({ error: message, isStarting: false });
     }
   },
 
   startEditWorkflow: async (scriptId) => {
+    const pollEpoch = ++_operationPollEpoch;
     set({ isStarting: true, error: null });
     try {
-      const result = await editorApi.startEditWorkflow(scriptId);
-      saveSession({ threadId: result.thread_id });
+      const accepted = await editorApi.startEditWorkflow(scriptId);
+      saveSession({
+        threadId: accepted.thread_id,
+        operationId: accepted.operation_id,
+        targetStep: accepted.target_step,
+        currentStep: accepted.target_step,
+        pendingKind: 'edit',
+      });
+      set({ threadId: accepted.thread_id, currentStep: accepted.target_step });
+      const result = await waitForOperation(accepted.thread_id, accepted.operation_id, pollEpoch);
+      saveSession({ threadId: result.thread_id, currentStep: result.current_step });
       set({
         threadId: result.thread_id,
         scriptId: result.script_id,
@@ -215,6 +336,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         isStarting: false,
       });
     } catch (err: unknown) {
+      if (err instanceof OperationPollCancelled) return;
       const message = err instanceof Error ? err.message : '打开编辑失败';
       set({ error: message, isStarting: false });
     }
@@ -223,6 +345,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   resumeWorkflow: async (action, content, prompt, gameDataSections, humanReview, selectedAssetIds) => {
     const { threadId, currentStep, workflowMode } = get();
     if (!threadId) return;
+    const pollEpoch = ++_operationPollEpoch;
 
     // Optimistic: on confirm, immediately advance timeline to next generation step
     const optimisticStep = workflowMode === 'edit' && currentStep === 'review_game_data'
@@ -248,7 +371,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
     set({ isLoading: true, error: null, currentStep: optimisticStep });
     try {
-      const result = await editorApi.resume(threadId, {
+      const accepted = await editorApi.resume(threadId, {
         action,
         content,
         prompt,
@@ -256,6 +379,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         human_review: humanReview,
         selected_asset_ids: selectedAssetIds,
       });
+      saveSession({
+        threadId,
+        operationId: accepted.operation_id,
+        targetStep: accepted.target_step,
+        currentStep: optimisticStep,
+        pendingKind: 'resume',
+      });
+      const result = await waitForOperation(threadId, accepted.operation_id, pollEpoch);
+      saveSession({ threadId, currentStep: result.current_step });
 
       // Clear session on completion
       if (result.is_complete) {
@@ -289,6 +421,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       // Refresh checkpoint history so timeline nodes for new phases are clickable
       get().fetchHistory();
     } catch (err: unknown) {
+      if (err instanceof OperationPollCancelled) return;
       const message = err instanceof Error ? err.message : '操作失败';
       set({ error: message, isLoading: false, currentStep });
     }
@@ -315,15 +448,69 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   restoreSession: async () => {
     const session = loadSession();
     if (!session) return false;
+    const pollEpoch = ++_operationPollEpoch;
 
-    set({ threadId: session.threadId });
+    const pendingStart = session.pendingKind === 'start' || session.pendingKind === 'edit';
+    set({
+      threadId: session.threadId,
+      currentStep: session.targetStep || session.currentStep || '',
+      isStarting: Boolean(session.operationId && pendingStart),
+      isLoading: Boolean(session.operationId && !pendingStart) || !session.operationId,
+      error: null,
+    });
 
     try {
-      const result = await editorApi.getState(session.threadId);
-      if (result.is_complete) {
-        clearSession();
-        return false;
+      const refreshProgress = async () => {
+        if (!needsDetailedProgress(session.currentStep || session.targetStep)) {
+          return { convertProgress: null, assetProgress: null };
+        }
+        const progress = await loadProgressSnapshots(session.threadId);
+        set(progress);
+        return progress;
+      };
+
+      if (session.operationId) {
+        await refreshProgress();
+        const pending = await waitForOperation(
+          session.threadId,
+          session.operationId,
+          pollEpoch,
+          async () => {
+            await refreshProgress();
+          },
+        );
+        const progress = await refreshProgress();
+        const convertIncomplete = hasIncompleteTasks(progress.convertProgress);
+        const assetIncomplete = hasIncompleteTasks(progress.assetProgress);
+        const restoredComplete =
+          pending.is_complete && !convertIncomplete && !assetIncomplete;
+        saveSession({ threadId: session.threadId, currentStep: pending.current_step });
+        if (restoredComplete) clearSession();
+        set({
+          currentStep: convertIncomplete
+            ? 'convert_to_game_data'
+            : assetIncomplete
+              ? 'generate_assets'
+              : pending.current_step,
+          isComplete: restoredComplete,
+          workflowState: pending.state,
+          interruptInfo: convertIncomplete || assetIncomplete ? null : pending.interrupt,
+          scriptId: pending.state?.script_id || null,
+          scriptTitle: pending.state?.script_title || '',
+          workflowMode: pending.state?.workflow_mode || 'create',
+          convertProgress: progress.convertProgress,
+          assetProgress: progress.assetProgress,
+          isLoading: false,
+          isStarting: false,
+        });
+        return !restoredComplete;
       }
+      const result = await waitForWorkflowState(session.threadId, pollEpoch);
+      const progress = await refreshProgress();
+      const convertIncomplete = hasIncompleteTasks(progress.convertProgress);
+      const assetIncomplete = hasIncompleteTasks(progress.assetProgress);
+      const restoredComplete = result.is_complete && !convertIncomplete && !assetIncomplete;
+      if (restoredComplete) clearSession();
 
       // Use backend interrupt info, or reconstruct from state if missing
       const interruptInfo = result.interrupt || reconstructInterruptInfo(
@@ -332,68 +519,36 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       );
 
       set({
-        currentStep: interruptInfo?.step || result.current_step,
+        currentStep: convertIncomplete
+          ? 'convert_to_game_data'
+          : assetIncomplete
+            ? 'generate_assets'
+            : interruptInfo?.step || result.current_step,
         workflowMode: result.state.workflow_mode || 'create',
-        isComplete: result.is_complete,
+        isComplete: restoredComplete,
         workflowState: result.state,
-        interruptInfo,
+        interruptInfo: convertIncomplete || assetIncomplete ? null : interruptInfo,
         scriptTitle: result.state?.script_title || '',
         scriptId: result.state?.script_id || null,
+        convertProgress: progress.convertProgress,
+        assetProgress: progress.assetProgress,
+        isLoading: false,
+        isStarting: false,
       });
-      return true;
-    } catch {
-      clearSession();
-      set({ threadId: null });
+      return !restoredComplete;
+    } catch (error) {
+      if (error instanceof OperationPollCancelled) return false;
+      if (isFatalRestoreError(error)) {
+        clearSession();
+        set({ threadId: null, isLoading: false, isStarting: false });
+      } else {
+        set({
+          error: error instanceof Error ? error.message : '工作流恢复失败',
+          isLoading: false,
+          isStarting: false,
+        });
+      }
       return false;
-    }
-  },
-
-  retryConvert: async (taskId: string) => {
-    const { threadId, convertProgress } = get();
-    if (!threadId) return;
-
-    // Optimistically set the task to "running" in local state
-    if (convertProgress?.phases) {
-      const updated = JSON.parse(JSON.stringify(convertProgress));
-      for (const phase of updated.phases) {
-        for (const task of phase.tasks) {
-          if (task.id === taskId) {
-            task.status = "running";
-          }
-        }
-      }
-      set({ convertProgress: updated });
-    }
-
-    try {
-      const result = await editorApi.retryConvert(threadId, taskId);
-      // Update with actual status from backend
-      if (result.task_status && convertProgress?.phases) {
-        const updated = JSON.parse(JSON.stringify(get().convertProgress || convertProgress));
-        for (const phase of updated.phases) {
-          for (const task of phase.tasks) {
-            if (task.id === taskId) {
-              task.status = result.task_status;
-            }
-          }
-        }
-        set({ convertProgress: updated });
-      }
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : '重试失败';
-      set({ error: message });
-      // Revert optimistic update on error — set back to "failed"
-      if (convertProgress?.phases) {
-        const reverted = JSON.parse(JSON.stringify(get().convertProgress || convertProgress));
-        for (const phase of reverted.phases) {
-          for (const task of phase.tasks) {
-            if (task.id === taskId && task.status === "running") {
-              task.status = "failed";
-            }
-          }
-        }
-        set({ convertProgress: reverted });
-      }
     }
   },
 
@@ -458,6 +613,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   reset: () => {
+    _operationPollEpoch += 1;
     clearSession();
     set({
       threadId: null,

@@ -7,9 +7,12 @@ export function ConvertProgressPanel({
   onRetry,
 }: {
   convertProgress: AssetProgress | null;
-  onRetry?: (taskId: string) => Promise<void>;
+  onRetry?: () => Promise<void>;
 }) {
   const phases = convertProgress?.phases || [];
+  const hasFailures = phases.some((phase) =>
+    phase.tasks.some((task) => task.status === "failed")
+  );
 
   return (
     <div className="h-full flex flex-col p-5 overflow-y-auto scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
@@ -22,8 +25,23 @@ export function ConvertProgressPanel({
       {phases.length > 0 ? (
         <div className="space-y-4">
           {phases.map((phase) => (
-            <PhaseCard key={phase.id} phase={phase} onRetry={onRetry} />
+            <PhaseCard key={phase.id} phase={phase} retryable={false} />
           ))}
+          {hasFailures && onRetry && (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+              <p className="mb-2 text-xs leading-relaxed text-muted-foreground">
+                结构化结果由多个任务共同组成。为避免只更新进度、遗漏数据合并，失败后会重新执行完整转换。
+              </p>
+              <button
+                type="button"
+                onClick={() => void onRetry()}
+                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                重新执行结构化转换
+              </button>
+            </div>
+          )}
         </div>
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center gap-3">

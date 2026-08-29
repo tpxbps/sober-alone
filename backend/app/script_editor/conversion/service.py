@@ -7,6 +7,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from app.game.clues import derive_game_process, normalize_clue_stages, render_clue_markdown
 from app.script_editor.conversion.contracts import (
     CharacterDiscoveryResult,
     ClueStagesResult,
@@ -29,7 +30,6 @@ from app.script_editor.conversion.prompts import (
     METADATA_SYSTEM,
     SCENES_SYSTEM,
 )
-from app.script_editor.services.progress_registry import convert_progress_registry
 from app.script_editor.state import STEP_CONVERT, ScriptGenState
 
 logger = logging.getLogger(__name__)
@@ -285,10 +285,11 @@ def _merge_game_process(
     num_rounds: int,
     script_title: str,
     outline: str,
-) -> tuple[list[dict[str, Any]], list[int], str, str]:
+    script_id: str,
+) -> tuple[list[dict[str, Any]], list[int], str, str, list[dict[str, Any]]]:
     """
     将线索和场景结果按固定模板拼接为完整的 game_full_process。
-    返回 (game_full_process, free_speech_limits, full_truth, truth_reveal_notice)
+    返回 (game_full_process, free_speech_limits, full_truth, truth_reveal_notice, clue_stages)
     """
     # 开场
     opening_notice = scenes_result.opening_notice if scenes_result else ""
@@ -303,26 +304,45 @@ def _merge_game_process(
         },
     ]
 
+    raw_clue_stages: list[dict[str, Any]] = []
+    if clues_result:
+        for index, stage_data in enumerate(clues_result.clue_stages[:num_rounds], start=1):
+            raw_clue_stages.append(
+                {
+                    "stage": index,
+                    "overview": stage_data.overview,
+                    "items": [item.model_dump() for item in stage_data.items],
+                    "free_discussion_notice": stage_data.free_discussion_notice,
+                }
+            )
+    while len(raw_clue_stages) < num_rounds:
+        index = len(raw_clue_stages) + 1
+        raw_clue_stages.append(
+            {
+                "stage": index,
+                "overview": f"第 {index} 轮公开线索",
+                "items": [
+                    {
+                        "summary": f"第 {index} 轮待补充线索",
+                        "content": f"第 {index} 轮线索发现，请结合角色剧本进行分析。",
+                    }
+                ],
+                "free_discussion_notice": "进入自由讨论环节。",
+            }
+        )
+    canonical_clue_stages = normalize_clue_stages(raw_clue_stages, script_id=script_id)
+
     # 线索轮次
     free_speech_limits = [2] * num_rounds
     if clues_result:
-        clue_stages = clues_result.clue_stages or []
         if clues_result.free_speech_limits:
             free_speech_limits = _clamp_free_speech_limits(
                 clues_result.free_speech_limits, num_rounds
             )
         for i in range(num_rounds):
-            stage_data = clue_stages[i] if i < len(clue_stages) else None
-            clue_notice = (
-                stage_data.clue_analysis_notice
-                if stage_data and stage_data.clue_analysis_notice
-                else f"第{i + 1}轮线索发现！请分析线索。"
-            )
-            discuss_notice = (
-                stage_data.free_discussion_notice
-                if stage_data and stage_data.free_discussion_notice
-                else "进入自由讨论环节。"
-            )
+            stage_data = canonical_clue_stages[i]
+            clue_notice = render_clue_markdown(stage_data)
+            discuss_notice = stage_data.get("free_discussion_notice", "")
             process.append(
                 {
                     "type": "advancement",
@@ -346,7 +366,7 @@ def _merge_game_process(
                     "children": [
                         {
                             "stage_title": f"第{i + 1}轮-线索分析阶段",
-                            "system_notice": f"第{i + 1}轮线索发现！请分析线索。",
+                            "system_notice": render_clue_markdown(canonical_clue_stages[i]),
                         },
                         {
                             "stage_title": f"第{i + 1}轮-自由讨论阶段",
@@ -382,7 +402,8 @@ def _merge_game_process(
         }
     )
 
-    return process, free_speech_limits, full_truth, truth_notice
+    process = derive_game_process(process, canonical_clue_stages)
+    return process, free_speech_limits, full_truth, truth_notice, canonical_clue_stages
 
 
 async def _run_metadata(base_llm, script_id: str, state: ScriptGenState):
@@ -572,12 +593,19 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
             c["character_id"] = str(uuid.uuid4())
 
     # === 拼接 game_full_process ===
-    game_full_process, free_speech_limits, full_truth, truth_reveal_notice = _merge_game_process(
+    (
+        game_full_process,
+        free_speech_limits,
+        full_truth,
+        truth_reveal_notice,
+        clue_stages,
+    ) = _merge_game_process(
         clues_result,
         scenes_result,
         num_rounds,
         script_title,
         outline,
+        script_id,
     )
 
     # === 元数据 ===
@@ -645,7 +673,7 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
 
     game_data_sections = {
         "opening": _extract_opening(game_full_process),
-        "clue_stages": _extract_clue_stages(game_full_process),
+        "clue_stages": clue_stages,
         "truth_reveal": truth_reveal_notice,
         "full_truth": full_truth,
         "game_flow": game_full_process,
@@ -701,8 +729,11 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
         logger.warning(f"Convert has failures for script {script_id}, not marking complete")
         _publish_convert_progress(script_id)
 
+    persisted_progress = get_convert_progress(script_id) or {}
+
     return {
         "game_full_process": game_full_process,
+        "clue_stages": clue_stages,
         "full_truth": full_truth,
         "free_speech_limits": free_speech_limits,
         "character_scripts": character_scripts,
@@ -711,6 +742,7 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
         "characters": characters,
         "character_voice_ids": character_voice_ids,
         "prompts": updated_prompts,
+        "convert_progress": persisted_progress,
         "current_step": STEP_CONVERT,
     }
 
@@ -760,60 +792,6 @@ def _extract_truth_reveal(game_full_process: list[dict[str, Any]]) -> str:
         if stage.get("type") == "review":
             return stage.get("system_notice", "")
     return ""
-
-
-# === 单任务重试 ===
-
-
-async def retry_single_convert(script_id: str, task_id: str, state: ScriptGenState):
-    """重试单个失败的 convert 任务。
-    Note: _run_* functions already update task status internally.
-    """
-    try:
-        if task_id == "discover_chars":
-            discovered = await _discover_characters(
-                state.get("final_draft", ""),
-                state.get("player_count", 4),
-            )
-            if discovered:
-                _add_character_tasks(script_id, discovered)
-
-        else:
-            chars_summary = _build_characters_summary(state.get("characters", []))
-            base_llm = _get_structured_llm()
-
-            if task_id == "game_flow":
-                await _run_game_clues(base_llm, script_id, state, chars_summary)
-
-            elif task_id == "game_scenes":
-                await _run_game_scenes(base_llm, script_id, state, chars_summary)
-
-            elif task_id == "metadata":
-                await _run_metadata(base_llm, script_id, state)
-
-            elif task_id.startswith("char_"):
-                char_name = task_id[5:]
-                char = next(
-                    (c for c in state.get("characters", []) if c.get("name") == char_name),
-                    None,
-                )
-                if not char:
-                    _update_convert_task(script_id, task_id, "failed")
-                    return None
-                await _run_character(base_llm, script_id, char, state, chars_summary)
-
-        # Check if all tasks are now complete (only marks done if all are "complete")
-        _check_and_mark_convert_complete(script_id)
-
-    except Exception as e:
-        logger.error(f"Convert retry failed for task {task_id}: {e}", exc_info=True)
-        _update_convert_task(script_id, task_id, "failed")
-
-
-def _check_and_mark_convert_complete(script_id: str):
-    """Check if all convert tasks are complete; if so, mark progress as done."""
-    if convert_progress_registry.complete_if_all(script_id, {"complete"}):
-        _publish_convert_progress(script_id)
 
 
 def _create_fallback_process(state: dict[str, Any]) -> list[dict[str, Any]]:

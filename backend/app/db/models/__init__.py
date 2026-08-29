@@ -2,6 +2,7 @@
 Database models package
 """
 
+from app.db.models.editor_workflow import EditorOperation, EditorWorkflow
 from app.db.models.game_record import GameRecord, RecordType
 from app.db.models.game_session import GameSession, GameStage, GameStatus
 from app.db.models.player_state import PlayerState
@@ -16,4 +17,6 @@ __all__ = [
     "RecordType",
     "Script",
     "Character",
+    "EditorWorkflow",
+    "EditorOperation",
 ]

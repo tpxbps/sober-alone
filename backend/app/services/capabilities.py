@@ -4,14 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.core.config import DEFAULT_MODELS, settings
-
-PROVIDERS = (
-    ("deepseek", "DeepSeek"),
-    ("stepfun", "StepFun"),
-    ("alibaba", "Qwen"),
-    ("bytedance", "Doubao"),
-)
+from app.core.config import settings
+from app.core.model_registry import MODEL_SPECS, public_model_spec
 
 
 def _feature(enabled: bool, enabled_reason: str, disabled_reason: str) -> dict[str, Any]:
@@ -20,15 +14,18 @@ def _feature(enabled: bool, enabled_reason: str, disabled_reason: str) -> dict[s
 
 def get_capabilities() -> dict[str, Any]:
     models = []
-    for provider, display_name in PROVIDERS:
-        configured = bool(settings.get_api_key(provider))
+    for spec in MODEL_SPECS:
+        has_key = bool(settings.get_api_key(spec.provider))
+        if not has_key:
+            reason = f"未配置 {spec.provider} API Key"
+        else:
+            reason = "已配置"
         models.append(
             {
-                "provider": provider,
-                "provider_name": display_name,
-                "model": DEFAULT_MODELS[provider],
-                "configured": configured,
-                "reason": "已配置" if configured else f"未配置 {provider} API Key",
+                **public_model_spec(spec),
+                "model": spec.id,
+                "configured": has_key,
+                "reason": reason,
             }
         )
 

@@ -3,12 +3,20 @@
 from pydantic import BaseModel, Field
 
 
+class ClueItemResult(BaseModel):
+    """One independently citable public clue."""
+
+    summary: str = Field(description="不超过 48 字的线索概述，用于快捷选择")
+    content: str = Field(description="该条线索的完整事实与可观察细节")
+
+
 class ClueStageItem(BaseModel):
     """单轮线索阶段的结构"""
 
-    clue_analysis_notice: str = Field(
-        default="",
-        description="线索分析阶段系统消息（含本轮发现的线索描述和分析引导）",
+    overview: str = Field(default="", description="本轮线索的整体摘要与分析引导")
+    items: list[ClueItemResult] = Field(
+        default_factory=list,
+        description="本轮逐条拆分的公开线索，至少一条；不得合并无关事实",
     )
     free_discussion_notice: str = Field(
         default="",
@@ -22,7 +30,7 @@ class ClueStagesResult(BaseModel):
     clue_stages: list[ClueStageItem] = Field(
         default_factory=list,
         description=(
-            "恰好 num_rounds 个线索阶段，每个包含 clue_analysis_notice 和 free_discussion_notice"
+            "恰好 num_rounds 个线索阶段，每个包含 overview、items 和 free_discussion_notice"
         ),
     )
     free_speech_limits: list[int] = Field(

@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import type { ReactNode } from "react";
-import { AlertTriangle, ChevronDown, ChevronUp, CircleHelp, Pencil } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, ChevronDown, ChevronUp, CircleHelp, Pencil, Plus, Trash2 } from "lucide-react";
 import * as Tooltip from "@radix-ui/react-tooltip";
 
 import type {
@@ -39,6 +39,7 @@ export function ReviewGameDataStage({
     Record<string, boolean>
   >({
     metadata: false,
+    clues: true,
     flow: false,
     character_scripts: false,
     character_data: false,
@@ -89,7 +90,7 @@ export function ReviewGameDataStage({
         label: (stage.stage_title as string) || type,
         path: ["game_flow", String(i), "system_notice"],
       });
-    } else if (type === "advancement" || type === "vote") {
+    } else if (type === "vote") {
       const children = (stage.children as Record<string, unknown>[]) || [];
       for (let j = 0; j < children.length; j++) {
         flowMessages.push({
@@ -241,6 +242,71 @@ export function ReviewGameDataStage({
                 style={{ minHeight: "30vh" }}
               />
             </div>
+          </div>
+        </CollapsibleSection>
+
+        <CollapsibleSection
+          title="结构化公开线索"
+          expanded={expandedSections.clues ?? true}
+          onToggle={() => toggleSection("clues")}
+        >
+          <div className="space-y-4">
+            {editedGameData.clue_stages.map((clueStage, stageIndex) => (
+              <div key={clueStage.stage} className="rounded-lg border border-amber-300/15 bg-amber-300/[0.03] p-3">
+                <div className="mb-3 flex items-center justify-between">
+                  <span className="text-sm font-medium text-amber-200">第 {clueStage.stage} 轮</span>
+                  <span className="text-[10px] text-muted-foreground">线索 ID 与所属轮次由系统维护</span>
+                </div>
+                <label className="block text-xs text-muted-foreground">
+                  整体摘要总述
+                  <textarea
+                    value={clueStage.overview}
+                    onChange={(event) => updateField(["clue_stages", String(stageIndex), "overview"], event.target.value)}
+                    className="mt-1 h-20 w-full resize-none rounded-md border border-border/30 bg-transparent p-2 text-foreground focus:border-primary/50 focus:outline-none scrollbar-thin"
+                  />
+                </label>
+                <div className="mt-3 space-y-3">
+                  {clueStage.items.map((item, itemIndex) => (
+                    <div key={item.id || `new-${itemIndex}`} className="rounded-md border border-border/25 bg-background/30 p-2.5">
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <code className="truncate text-[10px] text-muted-foreground">{item.id || "保存时生成线索 ID"}</code>
+                        <div className="flex items-center gap-1">
+                          <button type="button" aria-label="上移线索" disabled={itemIndex === 0} onClick={() => {
+                            const updated = JSON.parse(JSON.stringify(editedGameData)) as GameDataSections;
+                            [updated.clue_stages[stageIndex].items[itemIndex - 1], updated.clue_stages[stageIndex].items[itemIndex]] = [updated.clue_stages[stageIndex].items[itemIndex], updated.clue_stages[stageIndex].items[itemIndex - 1]];
+                            setEditedGameData(updated);
+                          }} className="rounded p-1 hover:bg-secondary disabled:opacity-30"><ArrowUp className="h-3.5 w-3.5" /></button>
+                          <button type="button" aria-label="下移线索" disabled={itemIndex === clueStage.items.length - 1} onClick={() => {
+                            const updated = JSON.parse(JSON.stringify(editedGameData)) as GameDataSections;
+                            [updated.clue_stages[stageIndex].items[itemIndex], updated.clue_stages[stageIndex].items[itemIndex + 1]] = [updated.clue_stages[stageIndex].items[itemIndex + 1], updated.clue_stages[stageIndex].items[itemIndex]];
+                            setEditedGameData(updated);
+                          }} className="rounded p-1 hover:bg-secondary disabled:opacity-30"><ArrowDown className="h-3.5 w-3.5" /></button>
+                          <button type="button" aria-label="删除线索" disabled={clueStage.items.length <= 1} onClick={() => {
+                            const updated = JSON.parse(JSON.stringify(editedGameData)) as GameDataSections;
+                            updated.clue_stages[stageIndex].items.splice(itemIndex, 1);
+                            setEditedGameData(updated);
+                          }} className="rounded p-1 text-destructive hover:bg-destructive/10 disabled:opacity-30"><Trash2 className="h-3.5 w-3.5" /></button>
+                        </div>
+                      </div>
+                      <label className="block text-xs text-muted-foreground">单条概述
+                        <input value={item.summary} maxLength={48} onChange={(event) => updateField(["clue_stages", String(stageIndex), "items", String(itemIndex), "summary"], event.target.value)} className="mt-1 w-full rounded-md border border-border/30 bg-transparent p-2 text-foreground focus:border-primary/50 focus:outline-none" />
+                      </label>
+                      <label className="mt-2 block text-xs text-muted-foreground">完整线索细节
+                        <textarea value={item.content} onChange={(event) => updateField(["clue_stages", String(stageIndex), "items", String(itemIndex), "content"], event.target.value)} className="mt-1 h-28 w-full resize-none rounded-md border border-border/30 bg-transparent p-2 text-foreground focus:border-primary/50 focus:outline-none scrollbar-thin" />
+                      </label>
+                    </div>
+                  ))}
+                </div>
+                <button type="button" onClick={() => {
+                  const updated = JSON.parse(JSON.stringify(editedGameData)) as GameDataSections;
+                  updated.clue_stages[stageIndex].items.push({ id: "", summary: "", content: "", stage: clueStage.stage });
+                  setEditedGameData(updated);
+                }} className="mt-2 inline-flex items-center gap-1 rounded-md border border-border/30 px-2 py-1 text-xs hover:bg-secondary/50"><Plus className="h-3.5 w-3.5" />新增线索</button>
+                <label className="mt-3 block text-xs text-muted-foreground">自由讨论引导
+                  <textarea value={clueStage.free_discussion_notice} onChange={(event) => updateField(["clue_stages", String(stageIndex), "free_discussion_notice"], event.target.value)} className="mt-1 h-20 w-full resize-none rounded-md border border-border/30 bg-transparent p-2 text-foreground focus:border-primary/50 focus:outline-none scrollbar-thin" />
+                </label>
+              </div>
+            ))}
           </div>
         </CollapsibleSection>
 

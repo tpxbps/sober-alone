@@ -3,8 +3,8 @@ import { Send, Loader2, ArrowRight, Plus, X, CircleHelp } from "lucide-react";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import * as Switch from "@radix-ui/react-switch";
 import { DynamicDot } from "@/components/ui/DynamicDot";
-import type { Character } from "@/types/game";
-import { MentionText } from "./MentionText";
+import type { Character, PublicClue } from "@/types/game";
+import { GameMessageMarkdown } from "@/components/ui/GameMessageMarkdown";
 import {
   MentionComposer,
   type MentionComposerHandle,
@@ -28,6 +28,7 @@ interface ChatInputAreaProps {
   onEndGame: () => void;
   onSetPendingHumanSpeech: (speech: string | null) => void;
   characters: Character[];
+  publicClues: PublicClue[];
   mentionRequest?: { character: Character; nonce: number } | null;
   pauseAutoSpeak: boolean;
   onPauseAutoSpeakChange: (value: boolean) => void;
@@ -52,6 +53,7 @@ export const ChatInputArea = memo(function ChatInputArea({
   onEndGame,
   onSetPendingHumanSpeech,
   characters,
+  publicClues,
   mentionRequest,
   pauseAutoSpeak,
   onPauseAutoSpeakChange,
@@ -198,7 +200,9 @@ export const ChatInputArea = memo(function ChatInputArea({
                     key={index}
                     className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-primary/20 text-sm text-primary group"
                   >
-                    <MentionText text={line} characters={characters} />
+                    <GameMessageMarkdown characters={characters} publicClues={publicClues} preserveWhitespace>
+                      {line}
+                    </GameMessageMarkdown>
                     <button
                       type="button"
                       onClick={() =>
@@ -236,6 +240,7 @@ export const ChatInputArea = memo(function ChatInputArea({
                 <MentionComposer
                   ref={inputRef}
                   characters={characters}
+                  clues={publicClues}
                   disabled={inputDisabled}
                   maxLength={3000}
                   onChange={setInput}
@@ -318,7 +323,7 @@ export const ChatInputArea = memo(function ChatInputArea({
                       </Tooltip.Trigger>
                       <Tooltip.Portal>
                         <Tooltip.Content side="top" className="z-[70] max-w-xs rounded-lg border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-xl">
-                          开启后会暂停自动邀请下一位 AI，给你留出阅读和输入时间；完成一次发言后会自动关闭并恢复讨论。
+                          开启后会暂停自由讨论中 AI 角色的主动发言；当您完成一次发言后会自动关闭并恢复讨论。
                           <Tooltip.Arrow className="fill-popover" />
                         </Tooltip.Content>
                       </Tooltip.Portal>

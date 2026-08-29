@@ -7,6 +7,7 @@ from app.seed import (
     SAMPLE_TITLE,
     STORY_BACKGROUND,
     _game_process,
+    _sample_clue_stages,
 )
 
 
@@ -26,6 +27,9 @@ def test_sample_has_a_complete_two_round_mystery_structure():
     assert process[1]["children"][0]["system_notice"] == ROUND_ONE_CLUES
     assert process[2]["children"][0]["system_notice"] == ROUND_TWO_CLUES
     assert process[-1]["system_notice"] == FULL_TRUTH
+    clue_stages = _sample_clue_stages()
+    assert [len(stage["items"]) for stage in clue_stages] == [6, 6]
+    assert len({item["id"] for stage in clue_stages for item in stage["items"]}) == 12
 
 
 def test_sample_characters_are_distinct_and_have_staged_private_scripts():

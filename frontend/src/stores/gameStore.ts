@@ -76,6 +76,7 @@ const initialState: GameState = {
   characters: [],
   playerStates: [],
   records: [],
+  publicClues: [],
   currentSpeakerId: null,
   speechQueue: [],
   agentLlmInfo: {}, // character_id -> { model, provider, is_human }
@@ -167,6 +168,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
           currentRound: state.current_round,
           votes: state.votes || {},
           voteResults: state.vote_results || null,
+          publicClues: state.public_clues || [],
           isAdvancingStage: false,
         });
 

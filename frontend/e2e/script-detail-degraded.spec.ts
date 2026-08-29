@@ -61,6 +61,9 @@ test('未配置主模型时选角安全降级且不会产生页面异常', async
         },
       })
     }
+    if (path === '/api/v1/system/model-health') {
+      return json(route, { models: [], cached: false })
+    }
     return json(route, { success: true })
   })
 
@@ -71,4 +74,90 @@ test('未配置主模型时选角安全降级且不会产生页面异常', async
   await expect(page.getByText(/暂不可分配 AI 模型/)).toBeVisible()
   await expect(page.getByRole('button', { name: '开始游戏' })).toBeDisabled()
   expect(pageErrors).toEqual([])
+})
+
+test('模型服务偏慢时只提示体验风险且仍可选择并开始游戏', async ({ page }) => {
+  await page.route(/https?:\/\/(?!127\.0\.0\.1:4173).*$/i, (route) =>
+    route.abort('blockedbyclient'),
+  )
+  await page.route('**/api/v1/**', async (route) => {
+    const path = new URL(route.request().url()).pathname
+    if (path === '/api/v1/game/scripts') {
+      return json(route, { success: true, scripts: [script] })
+    }
+    if (path.endsWith('/characters')) {
+      return json(route, { success: true, characters })
+    }
+    if (path === '/api/v1/system/capabilities') {
+      return json(route, {
+        mode: 'local-first-single-user-single-process',
+        models: [
+          {
+            id: 'deepseek-v4-flash',
+            name: 'deepseek-v4-flash',
+            provider: 'deepseek',
+            provider_name: 'DeepSeek',
+            model: 'deepseek-v4-flash',
+            configured: true,
+            reason: '已配置',
+          },
+          {
+            id: 'hy3',
+            name: 'hy3',
+            provider: 'hunyuan',
+            provider_name: 'Tencent Hunyuan',
+            model: 'hy3',
+            configured: true,
+            reason: '已配置',
+          },
+        ],
+        features: {
+          rag: { enabled: false, reason: '未配置' },
+          image: { enabled: false, reason: '未配置' },
+          static_tts: { enabled: false, reason: '未配置' },
+          streaming_tts: { enabled: false, reason: '未配置' },
+        },
+      })
+    }
+    if (path === '/api/v1/system/model-health') {
+      return json(route, {
+        cached: false,
+        models: [
+          {
+            model: 'deepseek-v4-flash',
+            status: 'normal',
+            latency_ms: 420,
+            first_token_latency_ms: 420,
+            reaction_latency_ms: 1480,
+            slow_dimensions: [],
+            message: '响应正常',
+            checked_at: '2026-08-28T00:00:00Z',
+          },
+          {
+            model: 'hy3',
+            status: 'slow',
+            latency_ms: 920,
+            first_token_latency_ms: 920,
+            reaction_latency_ms: 15420,
+            slow_dimensions: ['reaction'],
+            message: '该模型当前反应分析稍慢，可能影响每轮讨论节奏',
+            checked_at: '2026-08-28T00:00:00Z',
+          },
+        ],
+      })
+    }
+    return json(route, { success: true })
+  })
+
+  await page.goto('/')
+  await page.getByText('零点来电').first().click()
+  await page.getByText('陆鸣', { exact: true }).click()
+  await page.getByRole('combobox').click()
+  const slowOption = page.getByRole('option', { name: 'hy3' })
+  await expect(slowOption).toBeVisible()
+  await expect(page.getByText('当前响应稍慢', { exact: true })).toBeVisible()
+  await slowOption.click()
+
+  await expect(page.getByText('该模型当前反应分析稍慢，可能影响每轮讨论节奏')).toBeVisible()
+  await expect(page.getByRole('button', { name: '开始游戏' })).toBeEnabled()
 })

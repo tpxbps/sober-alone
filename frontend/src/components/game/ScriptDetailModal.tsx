@@ -6,8 +6,10 @@ import * as Select from "@radix-ui/react-select";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { scriptApi, gameApi, systemApi } from "@/lib/api";
 import { configuredModels } from "@/lib/capabilityAdapter";
+import { assignModelsToAICharacters } from "@/lib/modelAssignment";
 import type { Script, Character } from "@/types/game";
-import { DIFFICULTY_COLORS, AI_MODELS } from "@/types/game";
+import { DIFFICULTY_COLORS, type AIModelOption } from "@/types/game";
+import type { ModelHealthItem } from "@/types/capabilities";
 
 // Component for text with conditional tooltip
 function TruncatedText({ text }: { text: string }) {
@@ -90,10 +92,15 @@ export function ScriptDetailModal({
   const [actionError, setActionError] = useState("");
   const [reloadToken, setReloadToken] = useState(0);
   const [openSelectId, setOpenSelectId] = useState<string | null>(null);
-  const [availableModels, setAvailableModels] = useState<typeof AI_MODELS>([]);
+  const [availableModels, setAvailableModels] = useState<AIModelOption[]>([]);
   const [modelCapabilityReason, setModelCapabilityReason] = useState(
     "正在检查模型能力…"
   );
+  const [modelHealthById, setModelHealthById] = useState<
+    Record<string, ModelHealthItem>
+  >({});
+  const [modelHealthResolved, setModelHealthResolved] = useState(false);
+  const manuallySelectedModelIdsRef = useRef(new Set<string>());
 
   const difficultyInfo =
     DIFFICULTY_COLORS[script.difficulty] || DIFFICULTY_COLORS[1];
@@ -110,7 +117,24 @@ export function ScriptDetailModal({
     setSelectedCharacter(null);
     setAiModels({});
     setAvailableModels([]);
+    setModelHealthById({});
+    setModelHealthResolved(false);
+    manuallySelectedModelIdsRef.current.clear();
     setModelCapabilityReason("正在检查模型能力…");
+
+    void systemApi
+      .getModelHealth()
+      .then((result) => {
+        if (cancelled) return;
+        setModelHealthById(
+          Object.fromEntries(result.models.map((item) => [item.model, item]))
+        );
+        setModelHealthResolved(true);
+      })
+      .catch(() => {
+        // Health hints are best-effort and never block model selection.
+        if (!cancelled) setModelHealthResolved(true);
+      });
 
     Promise.allSettled([
       scriptApi.getScriptCharacters(script.script_id),
@@ -139,9 +163,9 @@ export function ScriptDetailModal({
         setLoadError("角色加载失败，请确认后端正常运行后重试。");
       }
 
-      let models: typeof AI_MODELS = [];
+      let models: AIModelOption[] = [];
       if (capabilityResult.status === "fulfilled") {
-        models = configuredModels(AI_MODELS, capabilityResult.value);
+        models = configuredModels(capabilityResult.value);
         setModelCapabilityReason(
           models.length > 0
             ? ""
@@ -153,14 +177,7 @@ export function ScriptDetailModal({
       }
       setAvailableModels(models);
 
-      const defaultModel = models[0];
-      const defaultModels: Record<string, string> = {};
-      if (defaultModel) {
-        chars.forEach((character) => {
-          defaultModels[character.character_id] = defaultModel.id;
-        });
-      }
-      setAiModels(defaultModels);
+      setAiModels({});
       setIsLoading(false);
     });
 
@@ -172,12 +189,52 @@ export function ScriptDetailModal({
   // Handle character selection
   const handleCharacterSelect = (characterId: string) => {
     setSelectedCharacter(characterId);
+    manuallySelectedModelIdsRef.current.clear();
+    setAiModels(
+      assignModelsToAICharacters({
+        characters,
+        humanCharacterId: characterId,
+        models: availableModels,
+        healthById: modelHealthById,
+      })
+    );
   };
 
   // Handle AI model change
   const handleAIModelChange = (characterId: string, modelId: string) => {
+    manuallySelectedModelIdsRef.current.add(characterId);
     setAiModels((prev) => ({ ...prev, [characterId]: modelId }));
   };
+
+  useEffect(() => {
+    if (
+      !selectedCharacter ||
+      !modelHealthResolved ||
+      availableModels.length === 0
+    ) {
+      return;
+    }
+    setAiModels((currentModels) => {
+      const automaticModels = assignModelsToAICharacters({
+        characters,
+        humanCharacterId: selectedCharacter,
+        models: availableModels,
+        healthById: modelHealthById,
+      });
+      manuallySelectedModelIdsRef.current.forEach((characterId) => {
+        if (currentModels[characterId]) {
+          automaticModels[characterId] = currentModels[characterId];
+        }
+      });
+      return automaticModels;
+    });
+  }, [
+    availableModels,
+    characters,
+    modelHealthById,
+    modelHealthResolved,
+    selectedCharacter,
+  ]);
 
   // Start game
   const handleStartGame = async () => {
@@ -187,12 +244,20 @@ export function ScriptDetailModal({
     setIsCreating(true);
     setActionError("");
     try {
+      const automaticModels = assignModelsToAICharacters({
+        characters,
+        humanCharacterId: selectedCharacter,
+        models: availableModels,
+        healthById: modelHealthById,
+      });
       // Prepare AI models for non-human characters
       const aiModelConfig: Record<string, string> = {};
       characters.forEach((char) => {
         if (char.character_id !== selectedCharacter) {
           aiModelConfig[char.character_id] =
-            aiModels[char.character_id] || defaultModel.id;
+            aiModels[char.character_id] ||
+            automaticModels[char.character_id] ||
+            defaultModel.id;
         }
       });
 
@@ -266,9 +331,6 @@ export function ScriptDetailModal({
                         alt={script.title}
                         className="w-full h-auto max-h-64 object-contain"
                       />
-                      <span className="absolute bottom-2 right-2 px-2 py-0.5 rounded bg-black/70 text-white text-[10px]">
-                        AI 生成图片
-                      </span>
                     </div>
                   )}
 
@@ -388,11 +450,6 @@ export function ScriptDetailModal({
                                   ) : (
                                     char.name[0]
                                   )}
-                                  {char.avatar_url && (
-                                    <span className="absolute bottom-0 inset-x-0 bg-black/65 text-white text-[8px] text-center py-0.5">
-                                      AI 生成
-                                    </span>
-                                  )}
                                 </div>
 
                                 {/* Info */}
@@ -450,23 +507,24 @@ export function ScriptDetailModal({
                                       AI 扮演模型
                                     </label>
                                     {availableModels.length > 0 ? (
-                                      <Select.Root
-                                        value={
-                                          aiModels[char.character_id] ||
-                                          availableModels[0]?.id
-                                        }
-                                        onValueChange={(value: string) =>
-                                          handleAIModelChange(
-                                            char.character_id,
-                                            value
-                                          )
-                                        }
-                                        onOpenChange={(open) => {
-                                          setOpenSelectId(
-                                            open ? char.character_id : null
-                                          );
-                                        }}
-                                      >
+                                      <>
+                                        <Select.Root
+                                          value={
+                                            aiModels[char.character_id] ||
+                                            availableModels[0]?.id
+                                          }
+                                          onValueChange={(value: string) =>
+                                            handleAIModelChange(
+                                              char.character_id,
+                                              value
+                                            )
+                                          }
+                                          onOpenChange={(open) => {
+                                            setOpenSelectId(
+                                              open ? char.character_id : null
+                                            );
+                                          }}
+                                        >
                                         <Select.Trigger
                                           className="w-full px-3 py-2 text-sm rounded-lg bg-secondary/30 border border-border
                                                hover:bg-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/50
@@ -484,23 +542,67 @@ export function ScriptDetailModal({
                                             sideOffset={4}
                                           >
                                             <Select.Viewport className="p-1">
-                                              {availableModels.map((model) => (
-                                                <Select.Item
-                                                  key={model.id}
-                                                  value={model.id}
-                                                  className="w-full px-3 py-2 text-sm rounded-md cursor-pointer
-                                                       outline-none hover:bg-secondary/50 focus:bg-secondary/50
-                                                       data-[highlighted]:bg-secondary/50"
-                                                >
-                                                  <Select.ItemText>
-                                                    {model.name}
-                                                  </Select.ItemText>
-                                                </Select.Item>
-                                              ))}
+                                              {availableModels.map((model) => {
+                                                const health = modelHealthById[model.id];
+                                                const hasWarning =
+                                                  health?.status === "slow" ||
+                                                  health?.status === "unavailable";
+                                                return (
+                                                  <Select.Item
+                                                    key={model.id}
+                                                    value={model.id}
+                                                    aria-label={
+                                                      hasWarning
+                                                        ? `${model.name}，当前响应稍慢`
+                                                        : model.name
+                                                    }
+                                                    className="w-full px-3 py-2 text-sm rounded-md cursor-pointer
+                                                         outline-none hover:bg-secondary/50 focus:bg-secondary/50
+                                                         data-[highlighted]:bg-secondary/50 flex items-center justify-between gap-3"
+                                                  >
+                                                    <Select.ItemText>
+                                                      {model.name}
+                                                    </Select.ItemText>
+                                                    {hasWarning && (
+                                                      <span
+                                                        className="shrink-0 text-[11px] text-amber-300"
+                                                        title={health.message}
+                                                      >
+                                                        当前响应稍慢
+                                                      </span>
+                                                    )}
+                                                  </Select.Item>
+                                                );
+                                              })}
                                             </Select.Viewport>
                                           </Select.Content>
                                         </Select.Portal>
-                                      </Select.Root>
+                                        </Select.Root>
+                                        {(() => {
+                                          const selectedModelId =
+                                            aiModels[char.character_id] ||
+                                            availableModels[0]?.id;
+                                          const health = selectedModelId
+                                            ? modelHealthById[selectedModelId]
+                                            : undefined;
+                                          if (
+                                            health?.status !== "slow" &&
+                                            health?.status !== "unavailable"
+                                          ) {
+                                            return null;
+                                          }
+                                          return (
+                                            <p
+                                              role="status"
+                                              className="mt-2 text-xs text-amber-300"
+                                            >
+                                              {health.status === "unavailable"
+                                                ? "该模型当前探测异常，仍可尝试使用"
+                                                : health.message}
+                                            </p>
+                                          );
+                                        })()}
+                                      </>
                                     ) : (
                                       <p
                                         role="status"

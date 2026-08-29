@@ -5,9 +5,11 @@ AgentManager - 多Agent管理器
 
 import asyncio
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 from app.agents.agent_player import AgentPlayer
+from app.agents.reaction import REACTION_TASK_TIMEOUT_SECONDS
 from app.core.config import settings
 
 
@@ -68,6 +70,15 @@ class AgentManager:
         self.human_character_id = human_character_id
         llm_configs = llm_configs or {}
 
+        rag_enabled = False
+        if settings.ZHIPUAI_API_KEY:
+            try:
+                from app.rag.retriever import get_retriever
+
+                rag_enabled = await get_retriever().collection_exists(self.script_id)
+            except Exception:
+                rag_enabled = False
+
         for char in characters:
             character_id = char.get("character_id")
             if not character_id:
@@ -81,6 +92,12 @@ class AgentManager:
             char_llm_config = llm_configs.get(character_id, {})
             llm_provider = char_llm_config.get("provider", settings.DEFAULT_LLM_PROVIDER)
             llm_model = char_llm_config.get("model")
+            if llm_model:
+                from app.core.model_registry import MODEL_BY_ID
+
+                model_spec = MODEL_BY_ID.get(str(llm_model).lower())
+                if model_spec:
+                    llm_provider = model_spec.provider
             if not llm_provider or not settings.get_api_key(llm_provider):
                 llm_provider = settings.DEFAULT_LLM_PROVIDER
                 llm_model = settings.get_llm_model_name(llm_provider)
@@ -96,6 +113,8 @@ class AgentManager:
                     personal_script=char.get("character_script", ""),
                     llm_provider=llm_provider,
                     llm_model=llm_model,
+                    checkpointer=_game_checkpointer(),
+                    rag_enabled=rag_enabled,
                 )
 
                 self.agents[character_id] = AgentInfo(
@@ -235,7 +254,7 @@ class AgentManager:
         agent: AgentPlayer,
         speaker_name: str,
         content: str,
-        timeout: float = 120.0,
+        timeout: float = REACTION_TASK_TIMEOUT_SECONDS,
     ) -> dict[str, Any]:
         """
         带超时的获取单个Agent的反应
@@ -314,6 +333,13 @@ class AgentManager:
 
 # 全局Agent管理器缓存
 _agent_managers: dict[str, AgentManager] = {}
+_agent_manager_access: dict[str, datetime] = {}
+
+
+def _game_checkpointer():
+    from app.services.checkpoint_runtime import get_game_checkpointer
+
+    return get_game_checkpointer()
 
 
 def get_agent_manager(session_id: str, script_id: str | None = None) -> AgentManager:
@@ -331,7 +357,21 @@ def get_agent_manager(session_id: str, script_id: str | None = None) -> AgentMan
         if not script_id:
             raise ValueError("script_id is required when creating new AgentManager")
         _agent_managers[session_id] = AgentManager(session_id, script_id)
+    _agent_manager_access[session_id] = datetime.now(UTC)
     return _agent_managers[session_id]
+
+
+def peek_agent_manager(session_id: str) -> AgentManager | None:
+    return _agent_managers.get(session_id)
+
+
+def prune_agent_managers(max_idle: timedelta) -> list[str]:
+    cutoff = datetime.now(UTC) - max_idle
+    expired = [key for key, touched in _agent_manager_access.items() if touched < cutoff]
+    for session_id in expired:
+        _agent_managers.pop(session_id, None)
+        _agent_manager_access.pop(session_id, None)
+    return expired
 
 
 def remove_agent_manager(session_id: str):
@@ -343,3 +383,4 @@ def remove_agent_manager(session_id: str):
     """
     if session_id in _agent_managers:
         del _agent_managers[session_id]
+    _agent_manager_access.pop(session_id, None)

@@ -19,6 +19,9 @@ from app.script_editor.state import STEP_GENERATE_ASSETS, ScriptGenState
 
 logger = logging.getLogger(__name__)
 
+VECTORIZE_MAX_ATTEMPTS = 2
+VECTORIZE_RETRY_DELAY_SECONDS = 1
+
 
 @dataclass(slots=True)
 class TaskResult:
@@ -244,6 +247,10 @@ async def _generate_assets(state: ScriptGenState) -> dict:
         # Still publish the current progress so frontend shows failures
         _publish_asset_progress(script_id)
 
+    # Persist a checkpoint copy as a restart-safe fallback for the in-memory
+    # progress registry. Retry routes keep this copy synchronized.
+    updates["asset_progress"] = get_asset_progress(script_id) or {}
+
     try:
         await ScriptRepository.update_asset_urls(script_id, cover_url, avatars, state)
     except Exception as e:
@@ -268,19 +275,34 @@ async def _run_vectorize(
         if task_id not in selected_task_ids:
             return
         _update_task_status(script_id, task_id, "running")
-        await asyncio.sleep(0.1)
-        try:
-            from app.script_editor.services.chroma_ingest import ingest_character_async
+        from app.script_editor.services.chroma_ingest import ingest_character_async
 
-            await ingest_character_async(
-                script_id, character, scripts.get(character.get("name", ""), "")
-            )
-            _update_task_status(script_id, task_id, "complete")
-        except Exception as error:
-            logger.error("ChromaDB ingestion failed for %s: %s", task_id, error)
-            _update_task_status(script_id, task_id, "failed", str(error))
+        for attempt in range(1, VECTORIZE_MAX_ATTEMPTS + 1):
+            try:
+                await ingest_character_async(
+                    script_id, character, scripts.get(character.get("name", ""), "")
+                )
+                _update_task_status(script_id, task_id, "complete")
+                return
+            except Exception as error:
+                if attempt < VECTORIZE_MAX_ATTEMPTS:
+                    logger.warning(
+                        "ChromaDB ingestion failed for %s (attempt %s/%s), retrying: %s",
+                        task_id,
+                        attempt,
+                        VECTORIZE_MAX_ATTEMPTS,
+                        error,
+                    )
+                    await asyncio.sleep(VECTORIZE_RETRY_DELAY_SECONDS)
+                    continue
+                logger.error("ChromaDB ingestion failed for %s: %s", task_id, error)
+                _update_task_status(script_id, task_id, "failed", str(error))
 
-    await asyncio.gather(*(run_one(character) for character in characters))
+    # Every character writes into the same persistent Chroma collection. Keep
+    # these writes serial to avoid SQLite/collection-creation races; image and
+    # TTS phases still run in parallel with the vectorization phase.
+    for character in characters:
+        await run_one(character)
 
 
 async def _run_images(
@@ -373,6 +395,7 @@ async def _run_tts(
             character_scripts=state.get("character_scripts", {}),
             characters=characters,
             game_full_process=state.get("game_full_process", []),
+            clue_stages=state.get("clue_stages", []),
             task_callback=task_callback,
             selected_task_ids=task_ids,
             force=force,
@@ -540,6 +563,24 @@ async def _retry_single_asset(script_id: str, task_id: str, state: ScriptGenStat
                         children = stage.get("children", [])
                         if child_idx < len(children):
                             notice = children[child_idx].get("system_notice", "")
+                            if stage_type == "advancement" and child_idx == 0:
+                                from app.game.clues import render_clue_tts
+
+                                round_number = sum(
+                                    1
+                                    for prior in game_full_process[: stage_idx + 1]
+                                    if prior.get("type") == "advancement"
+                                )
+                                clue_stage = next(
+                                    (
+                                        item
+                                        for item in state.get("clue_stages", [])
+                                        if int(item.get("stage", 0)) == round_number
+                                    ),
+                                    None,
+                                )
+                                if clue_stage:
+                                    notice = render_clue_tts(clue_stage)
                             identifier = f"stage_{stage_idx}_child_{child_idx}"
                             if notice:
                                 await generate_single_system_audio(

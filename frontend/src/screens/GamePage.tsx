@@ -52,6 +52,7 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
     characters,
     playerStates,
     records,
+    publicClues,
     currentSpeakerId,
     humanCharacterId,
     humanCharacterScript,
@@ -86,6 +87,7 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
       characters: s.characters,
       playerStates: s.playerStates,
       records: s.records,
+      publicClues: s.publicClues,
       currentSpeakerId: s.currentSpeakerId,
       humanCharacterId: s.humanCharacterId,
       humanCharacterScript: s.humanCharacterScript,
@@ -364,6 +366,7 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
           <ChatArea
             records={records}
             characters={characters}
+            publicClues={publicClues}
             humanCharacterId={humanCharacterId}
             currentSpeakerId={currentSpeakerId}
             stage={stage}

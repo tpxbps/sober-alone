@@ -20,7 +20,7 @@
 
 ### 使用通用 Agent 自动部署
 
-还没有克隆仓库也没关系。把下面整段指令复制给能够访问终端的 Codex、Claude Code、Cursor Agent 等现代通用 Agent，它可以从 GitHub 克隆项目并完成本地部署：
+还没有克隆仓库也没关系。把下面整段指令复制给能够访问终端的 Codex、Claude Code、DeepSeek Harness 等现代通用 Agent，它可以从 GitHub 克隆项目并完成本地部署：
 
 ```text
 请将 https://github.com/tpxbps/sober-alone 克隆到本地合适的目录并完成“独醒”的本地单用户部署；如果当前目录已经是该仓库，则直接复用，保留所有已有改动，不要执行会覆盖用户修改的 Git 操作。
@@ -87,8 +87,25 @@ pnpm dev --host 127.0.0.1
 | 图片生成           | `DOUBAO_API_KEY`   | 图片任务跳过                   |
 | 静态 TTS           | `MIMO_API_KEY`     | 静态语音任务跳过               |
 | 千问角色模型       | `QWEN_API_KEY`     | 不显示对应模型选项             |
+| 腾讯混元角色模型   | `HUNYUAN_API_KEY`  | 不显示 Hy3 模型选项            |
+| 智谱角色模型       | `ZHIPUAI_API_KEY`  | 不显示 GLM 5.3 Flash 模型选项  |
 
-运行时可访问 `GET /api/v1/system/capabilities` 查看实际启用状态。代码结构、核心流程、数据边界和阅读顺序统一记录在 [PROJECT.md](PROJECT.md)。
+角色模型由后端能力接口统一发布；当前注册了 DeepSeek V4 Flash、Step 3.5 Flash、Qwen 3.8 Flash、Doubao Seed 2.0 Mini、MiMo V2.5、Hy3 和 GLM 5.3 Flash。进入剧本大厅后会在后台并行执行一次带缓存的双通道轻量探测：发言链路记录首字时延，反应链路使用与游戏相同的 JSON Schema 和标准发言案例记录结构化结果的完整耗时。任一维度偏慢时，只在选角模型旁提示“当前响应稍慢”，并说明是否会影响每轮反应；不会禁用模型或替用户改选。运行时可访问 `GET /api/v1/system/capabilities` 和 `GET /api/v1/system/model-health` 查看两个维度的实际状态，也可用 `uv run python -m app.cli probe-models` 手动诊断本机已配置端点。
+
+### 存量线索迁移
+
+升级到结构化线索版本后，旧纯文本剧本仍可兼容游玩。需要正式转换时，先在数据库副本上执行默认 dry-run；命令会保存可恢复 manifest，并用 DeepSeek 做结构化转换和第二次事实覆盖审查：
+
+```bash
+cd backend
+uv run python -m app.cli migrate-clues
+uv run python -m app.cli migrate-clues --apply
+uv run python -m app.cli regenerate-clue-tts
+```
+
+`--apply` 会先创建 SQLite 备份，只有审查通过的剧本会被事务性写入。语音命令只备份并替换线索阶段音频，不会改动角色语音、其他系统语音、图片或 Chroma 向量；也可重复传入 `--script-id <ID>` 做小批量验证。不要直接在唯一一份线上数据库上运行这些命令。
+
+代码结构、核心流程、数据边界和阅读顺序统一记录在 [PROJECT.md](PROJECT.md)。
 
 ## 技术栈
 

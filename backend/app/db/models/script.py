@@ -26,6 +26,8 @@ class Script(Base):
     player_count: Mapped[int] = mapped_column(Integer, default=4)
     estimated_duration: Mapped[int] = mapped_column(Integer, default=20)
     game_full_process: Mapped[list] = mapped_column(JSON, default=list)
+    clue_stages: Mapped[list] = mapped_column(JSON, default=list)
+    clue_schema_version: Mapped[int] = mapped_column(Integer, default=0)
     full_truth: Mapped[str] = mapped_column(Text, default="")
     cover_image_url: Mapped[str] = mapped_column(String(500), default="")
     free_speech_limits: Mapped[list] = mapped_column(JSON, default=list)

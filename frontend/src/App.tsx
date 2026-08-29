@@ -6,6 +6,7 @@ import { Homepage } from '@/screens/Homepage';
 import { GamePage } from '@/screens/GamePage';
 import { ScriptEditorPage } from '@/screens/ScriptEditorPage';
 import { useGameStore } from '@/stores/gameStore';
+import { hasStoredEditorSession } from '@/stores/editorStore';
 import { gameApi } from '@/lib/api';
 
 type AppScreen = 'home' | 'game' | 'editor';
@@ -25,6 +26,18 @@ function App() {
   // Try to restore session from URL or localStorage on mount
   useEffect(() => {
     const restoreSession = async () => {
+      const editorTarget = searchParams.get('editor');
+      if (editorTarget) {
+        const requestedEditId = editorTarget.startsWith('edit:')
+          ? editorTarget.slice('edit:'.length)
+          : null;
+        // Once a thread has been accepted, always resume that durable thread.
+        // This prevents a refresh from starting a duplicate edit workflow.
+        setEditScriptId(hasStoredEditorSession() ? null : requestedEditId);
+        setCurrentScreen('editor');
+        return;
+      }
+
       // First check URL params
       const urlSessionId = searchParams.get('session');
 
@@ -76,13 +89,15 @@ function App() {
   const handleOpenEditor = useCallback((scriptId?: string) => {
     setEditScriptId(scriptId || null);
     setCurrentScreen('editor');
-  }, []);
+    setSearchParams({ editor: scriptId ? `edit:${scriptId}` : 'resume' });
+  }, [setSearchParams]);
 
   // Handle exiting editor back to home
   const handleExitEditor = useCallback(() => {
     setEditScriptId(null);
     setCurrentScreen('home');
-  }, []);
+    setSearchParams({});
+  }, [setSearchParams]);
 
   // Handle exiting game
   const handleExitGame = useCallback(() => {

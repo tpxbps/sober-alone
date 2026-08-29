@@ -9,6 +9,7 @@ import logging
 import re
 from collections.abc import Callable, Coroutine
 
+from app.game.clues import render_clue_tts
 from app.services.tts_service import TTSService
 
 logger = logging.getLogger(__name__)
@@ -147,6 +148,7 @@ async def generate_script_tts(
     character_scripts: dict[str, str],
     characters: list[dict],
     game_full_process: list[dict],
+    clue_stages: list[dict] | None = None,
     task_callback: Callable | None = None,
     selected_task_ids: set[str] | None = None,
     force: bool = False,
@@ -179,6 +181,8 @@ async def generate_script_tts(
     tasks: list[tuple[str, Coroutine]] = []
 
     # 1. 系统消息任务
+    clue_stage_by_number = {int(stage.get("stage", 0)): stage for stage in (clue_stages or [])}
+    clue_round = 0
     for i, stage in enumerate(game_full_process):
         stage_type = stage.get("type", "")
 
@@ -203,9 +207,12 @@ async def generate_script_tts(
                     )
 
         elif stage_type == "advancement":
+            clue_round += 1
             children = stage.get("children", [])
             for j, child in enumerate(children):
                 notice = child.get("system_notice", "")
+                if j == 0 and clue_round in clue_stage_by_number:
+                    notice = render_clue_tts(clue_stage_by_number[clue_round])
                 if notice:
                     task_id = f"tts_sys_{i}_{j}"
                     style = get_system_style_for_stage("advancement", j)

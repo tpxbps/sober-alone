@@ -3,6 +3,7 @@ ChromaDB Ingestion Service — 将角色剧本向量化存入 ChromaDB
 """
 
 import logging
+import uuid
 
 import chromadb
 from chromadb.config import Settings as ChromaSettings
@@ -67,16 +68,21 @@ def ingest_character(script_id: str, character: dict, script_text: str) -> None:
         if len(embeddings) != len(chunks):
             raise RuntimeError("Embedding provider returned an incomplete batch")
 
-    # Do not remove the last good vectors until the replacement is ready.
-    collection.delete(where={"character_id": character_id})
+    existing = collection.get(where={"character_id": character_id}, include=[])
+    existing_ids = list(existing.get("ids") or [])
     if chunks:
+        ingest_version = uuid.uuid4().hex
+        replacement_ids = [
+            f"{character_id}_{ingest_version}_chunk_{index}" for index in range(len(chunks))
+        ]
         collection.add(
-            ids=[f"{character_id}_chunk_{index}" for index in range(len(chunks))],
+            ids=replacement_ids,
             documents=chunks,
             metadatas=[
                 {
                     "character_id": character_id,
                     "character_name": name,
+                    "ingest_version": ingest_version,
                     "chunk_index": index,
                     "total_chunks": len(chunks),
                 }
@@ -84,6 +90,10 @@ def ingest_character(script_id: str, character: dict, script_text: str) -> None:
             ],
             embeddings=embeddings,
         )
+    # The replacement is complete before the last good version is removed. If
+    # collection.add fails, execution never reaches this deletion.
+    if existing_ids:
+        collection.delete(ids=existing_ids)
     logger.info("Ingested %s chunks for %s/%s", len(chunks), script_id, character_id)
 
 

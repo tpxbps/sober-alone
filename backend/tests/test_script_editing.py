@@ -132,7 +132,7 @@ def test_asset_plan_selects_only_changed_dependencies(monkeypatch):
     state = hydrate_completed_script(script, characters, script.owner_key_hash or "")
     sections = deepcopy(state["game_data_sections"])
     sections["character_data"][0]["character_script"] = "更新后的秘密"
-    sections["game_flow"][1]["children"][0]["system_notice"] = "更新后的线索"
+    sections["clue_stages"][0]["items"][0]["content"] = "更新后的线索"
     state["game_data_sections"] = sections
     state.update(normalize_game_data(state))
 
@@ -157,7 +157,7 @@ def test_asset_plan_disables_empty_character_tts_and_omits_empty_system_message(
     state = hydrate_completed_script(script, characters, script.owner_key_hash or "")
     sections = deepcopy(state["game_data_sections"])
     sections["character_data"][0]["character_script"] = ""
-    sections["game_flow"][1]["children"][0]["system_notice"] = ""
+    sections["clue_stages"][0]["free_discussion_notice"] = ""
     state["game_data_sections"] = sections
     state.update(normalize_game_data(state))
 
@@ -165,7 +165,7 @@ def test_asset_plan_disables_empty_character_tts_and_omits_empty_system_message(
     monkeypatch.setattr(settings, "MIMO_API_KEY", "test")
     plan = {item["id"]: item for item in prepare_asset_plan(state)["asset_plan"]}
 
-    assert "tts_sys_1_0" not in plan
+    assert "tts_sys_1_1" not in plan
     assert plan["tts_c1"]["available"] is False
     assert plan["tts_c1"]["unavailable_reason"] == "角色个人剧本为空"
 

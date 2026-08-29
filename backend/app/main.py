@@ -1,14 +1,37 @@
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import timedelta
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
+from app.agents.agent_manager import prune_agent_managers
 from app.api.routes import game, script_editor, system
 from app.core.config import settings
 from app.db.readiness import ensure_database_ready
 from app.db.session import engine
+from app.script_editor.graph import set_script_gen_graph
+from app.script_editor.services.operation_service import editor_operation_runner
+from app.services.checkpoint_runtime import set_game_checkpointer
+from app.services.game_service import prune_flow_controllers
+
+
+async def _runtime_janitor(stop: asyncio.Event) -> None:
+    """Release only idle process objects; durable games and checkpoints remain."""
+    while not stop.is_set():
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=3600)
+        except TimeoutError:
+            max_idle = timedelta(hours=72)
+            expired = set(prune_flow_controllers(max_idle))
+            expired.update(prune_agent_managers(max_idle))
+            from app.services.game_speech import release_speech_lock
+
+            for session_id in expired:
+                release_speech_lock(session_id)
 
 
 @asynccontextmanager
@@ -17,7 +40,25 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
     async with engine.connect() as connection:
         await ensure_database_ready(connection)
-    yield
+    settings.local_data_dir.mkdir(parents=True, exist_ok=True)
+    async with (
+        AsyncSqliteSaver.from_conn_string(str(settings.workflow_checkpoint_path)) as workflows,
+        AsyncSqliteSaver.from_conn_string(str(settings.game_checkpoint_path)) as games,
+    ):
+        await workflows.setup()
+        await games.setup()
+        set_script_gen_graph(workflows)
+        set_game_checkpointer(games)
+        await editor_operation_runner.recover_pending()
+        stop = asyncio.Event()
+        janitor = asyncio.create_task(_runtime_janitor(stop))
+        try:
+            yield
+        finally:
+            stop.set()
+            await janitor
+            await editor_operation_runner.shutdown()
+            set_game_checkpointer(None)
 
 
 # Create FastAPI app

@@ -6,13 +6,12 @@ import type {
   Character,
   GameStage,
   AgentLlmInfo,
+  PublicClue,
 } from "@/types/game";
-import { AI_MODELS } from "@/types/game";
 import { Markdown } from "@/components/ui/Markdown";
 import { GameMessageMarkdown } from "@/components/ui/GameMessageMarkdown";
 import { StreamingBubble } from "@/components/game/StreamingBubble";
 import { ChatInputArea } from "@/components/game/ChatInputArea";
-import { MentionText } from "@/components/game/MentionText";
 import { SpeakerIcon, type SpeakerState } from "@/components/ui/SpeakerIcon";
 import { AudioSpeedButton } from "@/components/ui/AudioSpeedButton";
 import { audioPlayerManager } from "@/lib/audioPlayerManager";
@@ -33,6 +32,7 @@ function formatAudioTime(seconds: number): string {
 interface ChatAreaProps {
   records: GameRecord[];
   characters: Character[];
+  publicClues: PublicClue[];
   humanCharacterId: string | null;
   currentSpeakerId: string | null;
   stage: GameStage;
@@ -60,13 +60,13 @@ interface ChatAreaProps {
 // 格式化模型名称显示
 function getModelDisplayName(modelId: string | undefined | null): string {
   if (!modelId) return "";
-  const found = AI_MODELS.find((m) => m.id === modelId);
-  return found ? found.name : modelId;
+  return modelId;
 }
 
 export function ChatArea({
   records,
   characters,
+  publicClues,
   humanCharacterId,
   currentSpeakerId,
   stage,
@@ -411,6 +411,7 @@ export function ChatArea({
                 return (
                   <motion.div
                     key={record.id || index}
+                    data-record-id={record.id}
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
@@ -425,9 +426,6 @@ export function ChatArea({
                           <Info className="w-3.5 h-3.5 text-primary shrink-0" />
                           <span className="text-xs text-primary/60 font-medium">
                             系统消息
-                          </span>
-                          <span className="text-[9px] text-muted-foreground/70">
-                            AI 生成语音
                           </span>
                           <SpeakerIcon
                             state={sysSpeakerState}
@@ -490,6 +488,7 @@ export function ChatArea({
               return (
                 <motion.div
                   key={record.id || index}
+                  data-record-id={record.id}
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
@@ -550,11 +549,6 @@ export function ChatArea({
                           </span>
                         )
                       )}
-                      {isAI && ttsEnabled && (
-                        <span className="ml-1 text-[9px] text-muted-foreground/60">
-                          AI 生成语音
-                        </span>
-                      )}
                     </span>
                     <div
                       className={`px-4 py-3 rounded-2xl ${
@@ -566,6 +560,7 @@ export function ChatArea({
                       <GameMessageMarkdown
                         className="text-sm"
                         characters={characters}
+                        publicClues={publicClues}
                         preserveWhitespace={isHuman}
                       >
                         {record.content}
@@ -615,9 +610,14 @@ export function ChatArea({
                   <span className="ml-1 text-primary/70">(等待发送)</span>
                 </span>
                 <div className="px-4 py-3 rounded-2xl bg-primary/10 border border-primary/20 rounded-tr-sm opacity-70">
-                  <p className="text-sm whitespace-pre-wrap">
-                    <MentionText text={pendingHumanSpeech} characters={characters} />
-                  </p>
+                  <GameMessageMarkdown
+                    className="text-sm"
+                    characters={characters}
+                    publicClues={publicClues}
+                    preserveWhitespace
+                  >
+                    {pendingHumanSpeech}
+                  </GameMessageMarkdown>
                 </div>
               </div>
             </motion.div>
@@ -650,6 +650,7 @@ export function ChatArea({
         onEndGame={onEndGame}
         onSetPendingHumanSpeech={setPendingHumanSpeech}
         characters={characters.filter((item) => item.character_id !== humanCharacterId)}
+        publicClues={publicClues}
         mentionRequest={mentionRequest}
         pauseAutoSpeak={pauseAutoSpeak}
         onPauseAutoSpeakChange={onPauseAutoSpeakChange}

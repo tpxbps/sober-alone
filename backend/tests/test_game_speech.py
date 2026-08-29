@@ -54,9 +54,11 @@ async def test_ai_stream_finishes_with_speech_done_then_done():
     class Controller:
         async def generate_ai_speech(self, _character_id, _db):
             yield {"type": "progress", "status": "正在整理线索"}
-            yield {"type": "token", "text": "结论"}
+            yield {"type": "token", "text": "结"}
+            yield {"type": "token", "text": "论"}
 
-        async def process_speech(self, **_kwargs):
+        async def process_speech(self, **kwargs):
+            assert kwargs["content"] == "结论"
             return {"next_speaker": "human", "next_speaker_name": "林岚"}
 
     async def ensure_controller(_session_id, _db):
@@ -67,6 +69,7 @@ async def test_ai_stream_finishes_with_speech_done_then_done():
 
     assert [event_type(frame) for frame in frames] == [
         "thinking",
+        "token",
         "token",
         "speech_done",
         "done",

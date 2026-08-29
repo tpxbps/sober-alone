@@ -30,6 +30,7 @@ class ScriptGenState(TypedDict, total=False):
 
     # === 最终结构化游戏数据 ===
     game_full_process: list[dict]  # 完整流程 JSON (匹配现有 schema)
+    clue_stages: list[dict]  # canonical structured public clues
     full_truth: str  # 真相揭晓文本
     free_speech_limits: list[int]  # 各轮自由讨论发言次数
     game_data_sections: dict  # 结构化数据各部分 (用于审阅)
@@ -48,6 +49,8 @@ class ScriptGenState(TypedDict, total=False):
     asset_plan: list[dict]
     selected_asset_ids: list[str]
     data_validation_errors: list[str]
+    convert_progress: dict
+    asset_progress: dict
 
     # === 工作流控制 ===
     current_step: str  # 当前步骤标识

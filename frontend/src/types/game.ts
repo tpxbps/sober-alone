@@ -49,6 +49,13 @@ export interface Character {
   voice_id?: string; // StepFun TTS voice ID
 }
 
+export interface PublicClue {
+  id: string;
+  summary: string;
+  content: string;
+  stage: number;
+}
+
 // Player state from backend
 export interface PlayerState {
   character_id: string;
@@ -72,6 +79,7 @@ export interface GameRecord {
   content: string;
   record_type: 'system' | 'speech' | 'action';
   audio_url?: string; // TTS audio file URL
+  clue_refs?: string[];
   created_at: string;
 }
 
@@ -128,13 +136,6 @@ export interface AIModelOption {
   name: string;
   provider: string;
 }
-
-export const AI_MODELS: AIModelOption[] = [
-  { id: "deepseek-v4-flash", name: "deepseek-v4-flash", provider: "deepseek" },
-  { id: "step-3.5-flash", name: "step-3.5-flash", provider: "stepfun" },
-  { id: "qwen3.5-flash-2026-02-23", name: "qwen3.5-flash", provider: "alibaba" },
-  { id: "doubao-seed-2-0-mini-260215", name: "doubao-seed-2.0-mini", provider: "bytedance" },
-];
 
 // LLM config for backend
 export interface LLMConfig {
@@ -211,6 +212,7 @@ export interface GameStateResponse {
   llm_configs?: Record<string, { model: string; provider: string }>;
   votes?: Record<string, VoteInfo>;
   vote_results?: VoteResults | null;
+  public_clues?: PublicClue[];
 }
 
 // Agent LLM info type
@@ -238,6 +240,7 @@ export interface GameState {
   characters: Character[];
   playerStates: PlayerState[];
   records: GameRecord[];
+  publicClues: PublicClue[];
   currentSpeakerId: string | null;
   speechQueue: string[];
   agentLlmInfo: Record<string, AgentLlmInfo>; // character_id -> LLM info

@@ -1,7 +1,8 @@
 import React, { type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { Character } from "@/types/game";
+import type { Character, PublicClue } from "@/types/game";
+import { ClueCitationHover } from "../game/ClueCitationHover";
 
 interface GameMessageMarkdownProps {
   children: string;
@@ -10,6 +11,52 @@ interface GameMessageMarkdownProps {
   characters?: Character[];
   /** 是否保留原始空白符（换行等），用于真人玩家发言 */
   preserveWhitespace?: boolean;
+  publicClues?: PublicClue[];
+}
+
+const CLUE_ID_SOURCE = String.raw`(?:c[0-9]{2,4})|(?:clue-[a-z0-9]{12})`;
+const clueTagPattern = () => new RegExp(`\\[(${CLUE_ID_SOURCE})\\]`, "gi");
+const clueCodeTagPattern = () =>
+  new RegExp("`+\\s*\\[(" + CLUE_ID_SOURCE + ")\\]\\s*`+", "gi");
+const clueMarkdownLinkPattern = () =>
+  new RegExp(
+    "`*\\\\?\\[[^\\]\\n]{1,200}\\\\?\\]\\s*\\\\?\\(\\s*#clue-ref-(" +
+      CLUE_ID_SOURCE +
+      ")\\s*\\\\?\\)`*",
+    "gi",
+  );
+const clueBareIdPattern = () =>
+  new RegExp(
+    "(?<![\\w\\[#/-])(" + CLUE_ID_SOURCE + ")(?![\\w\\]-])",
+    "gi",
+  );
+const CLUE_LINK_PREFIX = "#clue-ref-";
+
+function normalizeClueSyntax(content: string, clueMap: Map<string, PublicClue>) {
+  const canonicalizeVariant = (original: string, id: string) => {
+    const normalizedId = id.toLowerCase();
+    return clueMap.has(normalizedId) ? `[${normalizedId}]` : original;
+  };
+  let normalized = content.replace(clueCodeTagPattern(), canonicalizeVariant);
+  normalized = normalized.replace(clueMarkdownLinkPattern(), canonicalizeVariant);
+
+  const explicitIds = new Set(
+    Array.from(normalized.matchAll(clueTagPattern()), (match) => match[1].toLowerCase()).filter(
+      (id) => clueMap.has(id),
+    ),
+  );
+  return normalized.replace(clueBareIdPattern(), (original, id: string) => {
+    const normalizedId = id.toLowerCase();
+    if (!clueMap.has(normalizedId)) return original;
+    return explicitIds.has(normalizedId) ? "" : `[${normalizedId}]`;
+  });
+}
+
+function escapeMarkdownLabel(value: string) {
+  return value
+    .replaceAll("\\", "\\\\")
+    .replaceAll("[", "\\[")
+    .replaceAll("]", "\\]");
 }
 
 /** 渲染普通角色名高亮和显式 @角色名引用。 */
@@ -143,13 +190,27 @@ export function GameMessageMarkdown({
   className,
   characters = [],
   preserveWhitespace = false,
+  publicClues = [],
 }: GameMessageMarkdownProps) {
-  // Normalize double/multiple @ into a single @ before rendering
-  const normalizedContent = children.replace(/@{2,}/g, "@");
+  // Normalize mentions, keep clue references at their exact sentence position,
+  // and only activate IDs that the server says have already been revealed.
+  const clueMap = new Map(publicClues.map((clue) => [clue.id.toLowerCase(), clue]));
+  const contentWithCompatibilityRefs = normalizeClueSyntax(
+    children.replace(/@{2,}/g, "@"),
+    clueMap,
+  );
+  const normalizedContent = contentWithCompatibilityRefs
+    .replace(clueTagPattern(), (tag, id: string) => {
+      const normalizedId = id.toLowerCase();
+      const clue = clueMap.get(normalizedId);
+      if (!clue) return tag;
+      return `[${escapeMarkdownLabel(clue.summary)}](${CLUE_LINK_PREFIX}${encodeURIComponent(normalizedId)})`;
+    })
+    .trim();
 
   return (
     <div
-      className={`markdown-content max-w-none break-words overflow-hidden ${
+      className={`markdown-content relative max-w-none break-words ${
         preserveWhitespace ? "whitespace-pre-wrap" : ""
       } ${className || ""}`}
     >
@@ -179,6 +240,19 @@ export function GameMessageMarkdown({
             <strong className="font-bold text-primary">{children}</strong>
           ),
           em: ({ children }) => <em className="italic">{children}</em>,
+          a: ({ href, children }) => {
+            if (href?.startsWith(CLUE_LINK_PREFIX)) {
+              const clueId = decodeURIComponent(href.slice(CLUE_LINK_PREFIX.length)).toLowerCase();
+              const clue = clueMap.get(clueId);
+              if (clue) return <ClueCitationHover clue={clue} />;
+              return <>{children}</>;
+            }
+            return (
+              <a href={href} className="text-primary underline underline-offset-2">
+                {children}
+              </a>
+            );
+          },
           // 自定义代码渲染
           code: ({ className: codeClassName, children, ...props }) => {
             const isInline = !codeClassName;

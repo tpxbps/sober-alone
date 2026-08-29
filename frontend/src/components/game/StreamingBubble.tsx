@@ -2,7 +2,6 @@ import { useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Loader2 } from "lucide-react";
 import { useGameStore } from "@/stores/gameStore";
-import { AI_MODELS } from "@/types/game";
 import { DynamicDot } from "@/components/ui/DynamicDot";
 import { GameMessageMarkdown } from "@/components/ui/GameMessageMarkdown";
 
@@ -22,6 +21,7 @@ export function StreamingBubble() {
   const isProcessingReactions = useGameStore((s) => s.isProcessingReactions);
   const characters = useGameStore((s) => s.characters);
   const agentLlmInfo = useGameStore((s) => s.agentLlmInfo);
+  const publicClues = useGameStore((s) => s.publicClues);
 
   // RAF-throttled scroll: only scroll once per animation frame at most
   const scrollRafRef = useRef<number | null>(null);
@@ -102,8 +102,7 @@ export function StreamingBubble() {
 
   const getModelDisplayName = (model: string | undefined | null) => {
     if (!model) return "";
-    const found = AI_MODELS.find((m) => m.id === model);
-    return found ? found.name : model;
+    return model;
   };
 
   return (
@@ -174,7 +173,7 @@ export function StreamingBubble() {
           {/* Keep streaming and persisted messages visually consistent. */}
           {streamingContent.trim() && (
             <div className="text-sm">
-              <GameMessageMarkdown characters={characters}>
+              <GameMessageMarkdown characters={characters} publicClues={publicClues}>
                 {streamingContent}
               </GameMessageMarkdown>
               {isStreaming && (

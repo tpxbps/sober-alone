@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, Check } from "lucide-react";
+import { AlertTriangle, Check, Clock3 } from "lucide-react";
 import { WhackAMole, MoleTrigger } from "./WhackAMole";
 import {
   AssetGenerationProgress,
@@ -54,7 +54,7 @@ interface ContentPanelProps {
   onCloseProgressStream?: () => void;
   onBack: () => void;
   onRetryAsset: (taskId: string) => Promise<void>;
-  onRetryConvert: (taskId: string) => Promise<void>;
+  onRetryConvert: () => Promise<void>;
 }
 
 export function ContentPanel({
@@ -426,7 +426,7 @@ function ContentPanelBody({
     if (!interruptInfo) {
       return (
         <div className="h-full flex flex-col items-center justify-center gap-4 p-6">
-          {isLoading ? (
+          {isLoading || isStarting ? (
             <>
               <div className="w-10 h-10 border-2 border-primary border-t-transparent rounded-full animate-spin" />
               <p className="text-sm text-muted-foreground">
@@ -472,13 +472,26 @@ function ContentPanelBody({
     <div className="h-full relative">
       {content}
       {isWorking && !showMoleGame && (
-        <div className="absolute bottom-3 left-0 z-50 flex items-center gap-1.5 pl-3">
-          <MoleTrigger onClick={() => setShowMoleGame(true)} />
+        <div className="absolute bottom-3 left-3 z-50 flex max-w-[calc(100%-1.5rem)] flex-col items-start gap-2">
           {!hasActionBar && (
-            <span className="text-xs text-muted-foreground whitespace-nowrap">
-              等累了？来玩打地鼠吧 ~
-            </span>
+            <div
+              role="status"
+              className="flex max-w-md items-start gap-2 rounded-lg border border-border/60 bg-background/90 px-3 py-2 text-xs leading-relaxed text-muted-foreground shadow-lg backdrop-blur"
+            >
+              <Clock3 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+              <span>
+                单个节点可能耗时数分钟，剧本越复杂等待越久；审稿修订会连续完成审稿与终稿生成。你可以耐心等待，也可以返回大厅稍后继续。
+              </span>
+            </div>
           )}
+          <div className="flex items-center gap-1.5">
+            <MoleTrigger onClick={() => setShowMoleGame(true)} />
+            {!hasActionBar && (
+              <span className="text-xs text-muted-foreground whitespace-nowrap">
+                等累了？来玩打地鼠吧 ~
+              </span>
+            )}
+          </div>
         </div>
       )}
       {isWorking && showMoleGame && (

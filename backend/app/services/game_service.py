@@ -15,7 +15,11 @@ from app.agents import get_agent_manager, remove_agent_manager
 from app.db.models import GameRecord, GameSession, GameStage, GameStatus, PlayerState
 from app.game import GameFlowController
 from app.services.game_presenter import GameStatePresenter
-from app.services.game_runtime import FlowControllerRegistry, GameRuntimeRepository
+from app.services.game_runtime import (
+    FlowControllerRegistry,
+    GameRuntimeRepository,
+    build_runtime_snapshot,
+)
 from app.services.game_speech import GameSpeechService
 from app.services.voting import VotingService
 
@@ -33,6 +37,13 @@ def get_flow_controller(session_id: str) -> GameFlowController | None:
 def remove_flow_controller(session_id: str):
     """移除流程控制器（游戏结束时调用）"""
     _flow_controllers.remove(session_id)
+    from app.services.game_speech import release_speech_lock
+
+    release_speech_lock(session_id)
+
+
+def prune_flow_controllers(max_idle) -> list[str]:
+    return _flow_controllers.prune_inactive(max_idle)
 
 
 async def ensure_flow_controller(
@@ -57,7 +68,7 @@ async def ensure_flow_controller(
         if not game_session:
             return None
 
-        script_data = await GameRuntimeRepository(db_session).load_script(game_session.script_id)
+        script_data = await GameRuntimeRepository(db_session).load_session_script(game_session)
         if not script_data:
             return None
 
@@ -66,6 +77,7 @@ async def ensure_flow_controller(
             await agent_manager.initialize_agents(
                 script_data.get("characters", []),
                 game_session.human_character_id,
+                script_data.get("llm_configs", {}),
             )
 
         return GameFlowController(
@@ -140,6 +152,9 @@ class GameService:
             },
             speech_queue=[],
             votes={},
+            runtime_snapshot=build_runtime_snapshot(script_data, llm_configs),
+            revealed_clues=[],
+            last_active_at=datetime.now(),
         )
         self.db.add(game_session)
         try:
@@ -228,7 +243,7 @@ class GameService:
         player_states = await self._get_player_states(session_id)
 
         # 获取剧本数据以获取角色信息
-        script_data = await self._get_script_data(game_session.script_id)
+        script_data = await self.runtime_repository.load_session_script(game_session)
         characters = script_data.get("characters", []) if script_data else []
 
         script_info = GameStatePresenter.script(script_data)
@@ -237,7 +252,7 @@ class GameService:
         )
 
         # 获取流程控制器
-        flow_controller = _flow_controllers.get(session_id)
+        flow_controller = await ensure_flow_controller(session_id, self.db)
 
         if flow_controller:
             state = flow_controller.get_game_state()
@@ -251,6 +266,8 @@ class GameService:
             # 返回投票状态（刷新恢复用）
             state["votes"] = dict(game_session.votes or {})
             state["vote_results"] = game_session.vote_result or None
+            game_session.last_active_at = datetime.now()
+            await self.db.commit()
             return state
 
         return {
@@ -267,6 +284,7 @@ class GameService:
             "speech_queue": game_session.speech_queue or [],
             "votes": dict(game_session.votes or {}),
             "vote_results": game_session.vote_result or None,
+            "public_clues": list(game_session.revealed_clues or []),
         }
 
     async def _get_player_states(self, session_id: str) -> list[dict[str, Any]]:
@@ -340,7 +358,7 @@ class GameService:
         Returns:
             Dict: 推进结果
         """
-        flow_controller = _flow_controllers.get(session_id)
+        flow_controller = await ensure_flow_controller(session_id, self.db)
         if not flow_controller:
             return {"success": False, "error": "游戏会话不存在"}
 
@@ -356,7 +374,8 @@ class GameService:
                 text(
                     "UPDATE game_sessions SET current_stage = :stage, "
                     "current_round = :round, status = :status, "
-                    "speech_queue = :queue, current_speaker = :speaker "
+                    "speech_queue = :queue, current_speaker = :speaker, "
+                    "revealed_clues = :revealed_clues, last_active_at = :last_active_at "
                     "WHERE session_id = :session_id"
                 ),
                 {
@@ -369,6 +388,10 @@ class GameService:
                         if flow_controller.session.speech_queue
                         else flow_controller.session.current_speaker
                     ),
+                    "revealed_clues": json.dumps(
+                        flow_controller.session.revealed_clues or [], ensure_ascii=False
+                    ),
+                    "last_active_at": datetime.now(),
                     "session_id": session_id,
                 },
             )
@@ -385,6 +408,9 @@ class GameService:
                     stage=transition.to_stage,
                     round_num=transition.round_num,
                     raw_content=transition.system_notice,
+                    clue_refs=[
+                        clue.get("id") for clue in transition.newly_revealed_clues if clue.get("id")
+                    ],
                     audio_url=audio_url,
                     timestamp=datetime.now(),
                 )
@@ -399,6 +425,7 @@ class GameService:
                     "round_num": transition.round_num,
                     "message": transition.message,
                     "system_notice": transition.system_notice,
+                    "newly_revealed_clues": transition.newly_revealed_clues,
                 },
                 # 额外返回更新后的游戏状态
                 "current_speaker_id": flow_controller.session.current_speaker,
@@ -451,6 +478,16 @@ class GameService:
 
     async def abandon_session(self, session_id: str) -> dict[str, Any]:
         """放弃游戏会话（用户中途退出时调用，清理资源）"""
+        from app.services.checkpoint_runtime import delete_game_checkpoints
+
+        game_session = await self.db.get(GameSession, session_id)
+        characters = (
+            (game_session.runtime_snapshot or {}).get("characters", []) if game_session else []
+        )
+        await delete_game_checkpoints(
+            session_id,
+            [str(item.get("character_id", "")) for item in characters if item.get("character_id")],
+        )
         remove_agent_manager(session_id)
         remove_flow_controller(session_id)
         return {"success": True, "message": "游戏会话已放弃"}
@@ -482,6 +519,13 @@ class GameService:
         await self.db.commit()
 
         # 清理资源
+        from app.services.checkpoint_runtime import delete_game_checkpoints
+
+        characters = (game_session.runtime_snapshot or {}).get("characters", [])
+        await delete_game_checkpoints(
+            session_id,
+            [str(item.get("character_id", "")) for item in characters if item.get("character_id")],
+        )
         remove_agent_manager(session_id)
         remove_flow_controller(session_id)
 

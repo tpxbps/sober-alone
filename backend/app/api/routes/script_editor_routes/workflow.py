@@ -12,6 +12,7 @@ from app.api.schemas.script_editor import (
     UpdateTitleRequest,
 )
 from app.script_editor.ownership import require_author_key_hash
+from app.script_editor.services.operation_service import editor_operation_runner
 from app.script_editor.services.workflow_service import (
     ScriptEditorWorkflowService,
     WorkflowAuthorizationError,
@@ -24,14 +25,14 @@ entry_router = APIRouter()
 history_router = APIRouter()
 
 
-@entry_router.post("/start")
+@entry_router.post("/start", status_code=202)
 async def start_workflow(
     request: StartWorkflowRequest,
     owner_key_hash: str = Depends(require_author_key_hash),
 ):
     """Start a new script-creation workflow."""
     try:
-        return await ScriptEditorWorkflowService().start(request, owner_key_hash)
+        return await editor_operation_runner.queue_start(request, owner_key_hash)
     except Exception as error:
         logger.error("Failed to start workflow: %s", error, exc_info=True)
         raise HTTPException(status_code=500, detail=f"工作流启动失败: {error}") from error
@@ -43,9 +44,9 @@ async def get_workflow_state(
 ):
     """Return the current workflow state."""
     try:
+        await editor_operation_runner.authorize(thread_id, owner_key_hash)
         service = ScriptEditorWorkflowService()
-        service.authorize(thread_id, owner_key_hash)
-        return service.get_state(thread_id)
+        return await service.get_state(thread_id)
     except WorkflowNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except WorkflowAuthorizationError as error:
@@ -55,7 +56,7 @@ async def get_workflow_state(
         raise HTTPException(status_code=500, detail=str(error)) from error
 
 
-@entry_router.post("/{thread_id}/resume")
+@entry_router.post("/{thread_id}/resume", status_code=202)
 async def resume_workflow(
     thread_id: str,
     request: ResumeWorkflowRequest,
@@ -63,9 +64,7 @@ async def resume_workflow(
 ):
     """Resume a workflow from its current interrupt."""
     try:
-        service = ScriptEditorWorkflowService()
-        service.authorize(thread_id, owner_key_hash)
-        return await service.resume(thread_id, request)
+        return await editor_operation_runner.queue_resume(thread_id, request, owner_key_hash)
     except WorkflowNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except WorkflowAuthorizationError as error:
@@ -75,6 +74,20 @@ async def resume_workflow(
     except Exception as error:
         logger.error("Failed to resume workflow: %s", error, exc_info=True)
         raise HTTPException(status_code=500, detail=f"工作流恢复失败: {error}") from error
+
+
+@entry_router.get("/{thread_id}/operations/{operation_id}")
+async def get_operation(
+    thread_id: str,
+    operation_id: str,
+    owner_key_hash: str = Depends(require_author_key_hash),
+):
+    try:
+        return await editor_operation_runner.get(thread_id, operation_id, owner_key_hash)
+    except WorkflowNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except WorkflowAuthorizationError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
 
 
 @entry_router.put("/{thread_id}/prompt/{step}")
@@ -87,8 +100,8 @@ async def update_prompt(
     """Update the prompt for a workflow step."""
     try:
         service = ScriptEditorWorkflowService()
-        service.authorize(thread_id, owner_key_hash)
-        return service.update_prompt(thread_id, step, request.prompt)
+        await editor_operation_runner.authorize(thread_id, owner_key_hash)
+        return await service.update_prompt(thread_id, step, request.prompt)
     except WorkflowAuthorizationError as error:
         raise HTTPException(status_code=403, detail=str(error)) from error
     except Exception as error:
@@ -104,8 +117,8 @@ async def update_title(
     """Update the generated script title."""
     try:
         service = ScriptEditorWorkflowService()
-        service.authorize(thread_id, owner_key_hash)
-        return service.update_title(thread_id, request.script_title)
+        await editor_operation_runner.authorize(thread_id, owner_key_hash)
+        return await service.update_title(thread_id, request.script_title)
     except WorkflowAuthorizationError as error:
         raise HTTPException(status_code=403, detail=str(error)) from error
     except ValueError as error:
@@ -133,8 +146,8 @@ async def get_workflow_history(
     """Return checkpoints in reverse chronological order."""
     try:
         service = ScriptEditorWorkflowService()
-        service.authorize(thread_id, owner_key_hash)
-        return service.get_history(thread_id)
+        await editor_operation_runner.authorize(thread_id, owner_key_hash)
+        return await service.get_history(thread_id)
     except WorkflowAuthorizationError as error:
         raise HTTPException(status_code=403, detail=str(error)) from error
     except Exception as error:
@@ -151,8 +164,8 @@ async def get_checkpoint_state(
     """Return a read-only checkpoint state."""
     try:
         service = ScriptEditorWorkflowService()
-        service.authorize(thread_id, owner_key_hash)
-        return service.get_checkpoint(thread_id, checkpoint_id)
+        await editor_operation_runner.authorize(thread_id, owner_key_hash)
+        return await service.get_checkpoint(thread_id, checkpoint_id)
     except WorkflowNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except WorkflowAuthorizationError as error:
@@ -171,7 +184,7 @@ async def fork_from_checkpoint(
     """Fork a workflow from a historical checkpoint."""
     try:
         service = ScriptEditorWorkflowService()
-        service.authorize(thread_id, owner_key_hash)
+        await editor_operation_runner.authorize(thread_id, owner_key_hash)
         return await service.fork(thread_id, request.checkpoint_id, request.state_updates)
     except WorkflowNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error

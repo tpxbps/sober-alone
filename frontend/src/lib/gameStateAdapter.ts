@@ -16,6 +16,7 @@ export type GameStatePatch = Pick<
   | 'agentLlmInfo'
   | 'votes'
   | 'voteResults'
+  | 'publicClues'
 >
 
 export function adaptGameState(state: GameStateResponse): GameStatePatch {
@@ -69,5 +70,6 @@ export function adaptGameState(state: GameStateResponse): GameStatePatch {
         : {}),
     votes: state.votes || {},
     voteResults: state.vote_results || null,
+    publicClues: state.public_clues || [],
   }
 }
