@@ -13,6 +13,7 @@ import { AnimatePresence } from "framer-motion";
 import { useEditorStore } from "@/stores/editorStore";
 import { HorizontalTimeline } from "@/components/script-editor/HorizontalTimeline";
 import { ContentPanel } from "@/components/script-editor/ContentPanel";
+import { WorkflowFooterMessage } from "@/components/script-editor/WorkflowFooterMessage";
 import { ChatPanel } from "@/components/script-editor/ChatPanel";
 import { SettingsModal } from "@/components/SettingsModal";
 import { editorApi } from "@/lib/editorApi";
@@ -353,10 +354,11 @@ export function ScriptEditorPage({ onBack, editScriptId }: ScriptEditorPageProps
               viewingCheckpoint={viewingCheckpoint}
             />
           </div>
-          <div className="shrink-0 px-4 pb-2 text-sm text-muted-foreground/50 leading-relaxed">
-            「不诱于誉，不恐于诽，率道而行，端然正己。」 剧本创作工作流全程由{" "}
-            <code className="text-muted-foreground/70">deepseek-v4-flash</code>{" "}
-            稳定执行。
+          <div className="min-h-7 shrink-0 px-4 pb-2 text-sm text-muted-foreground/50 leading-relaxed">
+            <WorkflowFooterMessage
+              key={isLoading || isStarting ? `working:${currentStep}` : "idle"}
+              isWorking={isLoading || isStarting}
+            />
           </div>
         </div>
 

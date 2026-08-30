@@ -74,13 +74,15 @@ async def test_lifespan_fails_fast_when_schema_is_outdated(monkeypatch):
     await engine.dispose()
 
 
-def test_public_openapi_has_system_routes_and_no_ownership_endpoint():
+def test_public_openapi_has_system_routes_and_only_guarded_legacy_recovery_endpoint():
     paths = app.openapi()["paths"]
 
     assert "/healthz" in paths
     assert "/api/v1/system/capabilities" in paths
     assert "/api/v1/system/model-health" in paths
-    assert not any("ownership" in path for path in paths)
+    assert "/api/v1/system/model-health/refresh" in paths
+    ownership_paths = {path for path in paths if "ownership" in path}
+    assert ownership_paths == {"/api/v1/script-editor/legacy-ownership/claim"}
 
 
 def test_script_editor_route_split_preserves_public_paths_and_methods():
@@ -96,6 +98,7 @@ def test_script_editor_route_split_preserves_public_paths_and_methods():
         "/api/v1/script-editor/steps/info": {"get"},
         "/api/v1/script-editor/scripts/{script_id}": {"delete"},
         "/api/v1/script-editor/scripts/{script_id}/edit": {"post"},
+        "/api/v1/script-editor/legacy-ownership/claim": {"post"},
         "/api/v1/script-editor/{thread_id}/asset-progress": {"get"},
         "/api/v1/script-editor/{thread_id}/convert-progress": {"get"},
         "/api/v1/script-editor/{thread_id}/retry-asset/{task_id}": {"post"},

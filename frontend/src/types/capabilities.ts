@@ -24,7 +24,7 @@ export interface SystemCapabilities {
   };
 }
 
-export type ModelHealthStatus = 'normal' | 'slow' | 'unavailable';
+export type ModelHealthStatus = 'normal' | 'slow' | 'unknown' | 'unavailable';
 
 export interface ModelHealthItem {
   model: string;
@@ -34,6 +34,7 @@ export interface ModelHealthItem {
   first_token_latency_ms: number | null;
   reaction_latency_ms: number | null;
   slow_dimensions: Array<'speech' | 'reaction'>;
+  failed_dimensions: Array<'speech' | 'reaction'>;
   message: string;
   checked_at: string;
 }
@@ -41,4 +42,5 @@ export interface ModelHealthItem {
 export interface ModelHealthResponse {
   models: ModelHealthItem[];
   cached: boolean;
+  max_age_seconds: number;
 }

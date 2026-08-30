@@ -1,6 +1,15 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { motion } from "framer-motion";
-import { X, Users, BookOpen, Cpu, Play, ChevronDown } from "lucide-react";
+import {
+  X,
+  Users,
+  BookOpen,
+  Cpu,
+  Play,
+  ChevronDown,
+  Zap,
+  LoaderCircle,
+} from "lucide-react";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as Select from "@radix-ui/react-select";
 import * as Tooltip from "@radix-ui/react-tooltip";
@@ -100,6 +109,8 @@ export function ScriptDetailModal({
     Record<string, ModelHealthItem>
   >({});
   const [modelHealthResolved, setModelHealthResolved] = useState(false);
+  const [isRefreshingModelHealth, setIsRefreshingModelHealth] = useState(false);
+  const [modelHealthMessage, setModelHealthMessage] = useState("");
   const manuallySelectedModelIdsRef = useRef(new Set<string>());
 
   const difficultyInfo =
@@ -119,6 +130,8 @@ export function ScriptDetailModal({
     setAvailableModels([]);
     setModelHealthById({});
     setModelHealthResolved(false);
+    setIsRefreshingModelHealth(false);
+    setModelHealthMessage("");
     manuallySelectedModelIdsRef.current.clear();
     setModelCapabilityReason("正在检查模型能力…");
 
@@ -204,6 +217,24 @@ export function ScriptDetailModal({
   const handleAIModelChange = (characterId: string, modelId: string) => {
     manuallySelectedModelIdsRef.current.add(characterId);
     setAiModels((prev) => ({ ...prev, [characterId]: modelId }));
+  };
+
+  const handleRefreshModelHealth = async () => {
+    if (isRefreshingModelHealth) return;
+    setIsRefreshingModelHealth(true);
+    setModelHealthMessage("");
+    try {
+      const result = await systemApi.getModelHealth(true);
+      setModelHealthById(
+        Object.fromEntries(result.models.map((item) => [item.model, item]))
+      );
+      setModelHealthResolved(true);
+      setModelHealthMessage("测速已更新");
+    } catch {
+      setModelHealthMessage("测速失败，请检查网络后重试");
+    } finally {
+      setIsRefreshingModelHealth(false);
+    }
   };
 
   useEffect(() => {
@@ -329,6 +360,8 @@ export function ScriptDetailModal({
                       <img
                         src={script.cover_image_url}
                         alt={script.title}
+                        loading="lazy"
+                        decoding="async"
                         className="w-full h-auto max-h-64 object-contain"
                       />
                     </div>
@@ -392,10 +425,42 @@ export function ScriptDetailModal({
 
                 {/* Right: Character Selection */}
                 <div className="space-y-4 flex flex-col">
-                  <h4 className="text-lg font-semibold flex items-center gap-2">
-                    <Users className="w-5 h-5 text-primary" />
-                    选择你的角色
-                  </h4>
+                  <div className="flex items-center justify-between gap-3">
+                    <h4 className="text-lg font-semibold flex items-center gap-2">
+                      <Users className="w-5 h-5 text-primary" />
+                      选择你的角色
+                    </h4>
+                    <div className="flex items-center gap-2">
+                      {modelHealthMessage && (
+                        <span
+                          role="status"
+                          className={`hidden text-xs sm:inline ${
+                            modelHealthMessage.includes("失败")
+                              ? "text-amber-300"
+                              : "text-muted-foreground"
+                          }`}
+                        >
+                          {modelHealthMessage}
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleRefreshModelHealth}
+                        disabled={isRefreshingModelHealth || isLoading}
+                        aria-label={
+                          isRefreshingModelHealth ? "模型测速中" : "重新进行模型测速"
+                        }
+                        className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-primary/25 bg-primary/10 px-2.5 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {isRefreshingModelHealth ? (
+                          <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Zap className="h-3.5 w-3.5" />
+                        )}
+                        {isRefreshingModelHealth ? "测速中" : "模型测速"}
+                      </button>
+                    </div>
+                  </div>
 
                   {isLoading ? (
                     <div className="flex items-center justify-center py-12">
@@ -445,6 +510,8 @@ export function ScriptDetailModal({
                                     <img
                                       src={char.avatar_url}
                                       alt={char.name}
+                                      loading="lazy"
+                                      decoding="async"
                                       className="w-full h-full object-cover"
                                     />
                                   ) : (
@@ -547,14 +614,20 @@ export function ScriptDetailModal({
                                                 const hasWarning =
                                                   health?.status === "slow" ||
                                                   health?.status === "unavailable";
+                                                const isIncomplete =
+                                                  health?.status === "unknown";
                                                 return (
                                                   <Select.Item
                                                     key={model.id}
                                                     value={model.id}
                                                     aria-label={
-                                                      hasWarning
-                                                        ? `${model.name}，当前响应稍慢`
-                                                        : model.name
+                                                      health?.status === "unavailable"
+                                                        ? `${model.name}，当前不可用`
+                                                        : health?.status === "slow"
+                                                          ? `${model.name}，当前响应稍慢`
+                                                          : isIncomplete
+                                                            ? `${model.name}，本次测速未完成`
+                                                            : model.name
                                                     }
                                                     className="w-full px-3 py-2 text-sm rounded-md cursor-pointer
                                                          outline-none hover:bg-secondary/50 focus:bg-secondary/50
@@ -565,10 +638,24 @@ export function ScriptDetailModal({
                                                     </Select.ItemText>
                                                     {hasWarning && (
                                                       <span
-                                                        className="shrink-0 text-[11px] text-amber-300"
+                                                        className={`shrink-0 text-[11px] ${
+                                                          health.status === "unavailable"
+                                                            ? "text-red-300"
+                                                            : "text-amber-300"
+                                                        }`}
                                                         title={health.message}
                                                       >
-                                                        当前响应稍慢
+                                                        {health.status === "unavailable"
+                                                          ? "当前不可用"
+                                                          : "当前响应稍慢"}
+                                                      </span>
+                                                    )}
+                                                    {isIncomplete && (
+                                                      <span
+                                                        className="shrink-0 text-[11px] text-muted-foreground"
+                                                        title={health.message}
+                                                      >
+                                                        测速未完成
                                                       </span>
                                                     )}
                                                   </Select.Item>
@@ -587,7 +674,8 @@ export function ScriptDetailModal({
                                             : undefined;
                                           if (
                                             health?.status !== "slow" &&
-                                            health?.status !== "unavailable"
+                                            health?.status !== "unavailable" &&
+                                            health?.status !== "unknown"
                                           ) {
                                             return null;
                                           }
@@ -597,7 +685,7 @@ export function ScriptDetailModal({
                                               className="mt-2 text-xs text-amber-300"
                                             >
                                               {health.status === "unavailable"
-                                                ? "该模型当前探测异常，仍可尝试使用"
+                                                ? "该模型当前不可用，请重新测速或选择其他模型"
                                                 : health.message}
                                             </p>
                                           );

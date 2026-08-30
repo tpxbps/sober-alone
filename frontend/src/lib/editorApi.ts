@@ -25,6 +25,17 @@ api.interceptors.request.use((config) => {
 });
 
 export const editorApi = {
+  claimLegacyOwnership: async (legacyOwnerUuids: string[]): Promise<{
+    success: boolean;
+    claimed_count: number;
+    matched_count: number;
+  }> => {
+    const response = await api.post('/script-editor/legacy-ownership/claim', {
+      legacy_owner_uuids: legacyOwnerUuids,
+    });
+    return response.data;
+  },
+
   // Start a new workflow
   startWorkflow: async (params: {
     user_idea: string;

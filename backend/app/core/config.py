@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     # API
     API_V1_PREFIX: str = "/api/v1"
     PROJECT_NAME: str = "Sober Alone"
+    ALLOW_LEGACY_OWNER_CLAIM: bool = False
 
     # Database
     DATABASE_URL: str = _sqlite_url(LOCAL_DATA_DIR / "game_data.db")

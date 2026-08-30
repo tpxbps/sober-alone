@@ -90,7 +90,7 @@ pnpm dev --host 127.0.0.1
 | 腾讯混元角色模型   | `HUNYUAN_API_KEY`  | 不显示 Hy3 模型选项            |
 | 智谱角色模型       | `ZHIPUAI_API_KEY`  | 不显示 GLM 5.3 Flash 模型选项  |
 
-角色模型由后端能力接口统一发布；当前注册了 DeepSeek V4 Flash、Step 3.5 Flash、Qwen 3.8 Flash、Doubao Seed 2.0 Mini、MiMo V2.5、Hy3 和 GLM 5.3 Flash。进入剧本大厅后会在后台并行执行一次带缓存的双通道轻量探测：发言链路记录首字时延，反应链路使用与游戏相同的 JSON Schema 和标准发言案例记录结构化结果的完整耗时。任一维度偏慢时，只在选角模型旁提示“当前响应稍慢”，并说明是否会影响每轮反应；不会禁用模型或替用户改选。运行时可访问 `GET /api/v1/system/capabilities` 和 `GET /api/v1/system/model-health` 查看两个维度的实际状态，也可用 `uv run python -m app.cli probe-models` 手动诊断本机已配置端点。
+角色模型由后端能力接口统一发布；当前注册了 DeepSeek V4 Flash、Step 3.5 Flash、Qwen 3.8 Flash、Doubao Seed 2.0 Mini、MiMo V2.5、Hy3 和 GLM 5.3 Flash。打开选角窗口后，系统会在不阻塞角色数据的前提下执行一次带缓存的双通道轻量探测：发言链路记录首字时延，反应链路使用与游戏相同的 JSON Schema 和标准发言案例记录结构化结果的完整耗时。只有成功响应但超过阈值的模型才提示“当前响应稍慢”；网络波动或单次探测失败会提示“测速未完成”，不会被误判为慢模型。用户可在选角标题旁点击“模型测速”立即重测。运行时可访问 `GET /api/v1/system/model-health` 查看状态，或调用 `POST /api/v1/system/model-health/refresh` 强制刷新；也可用 `uv run python -m app.cli probe-models` 手动诊断本机已配置端点。
 
 ### 存量线索迁移
 
@@ -104,6 +104,8 @@ uv run python -m app.cli regenerate-clue-tts
 ```
 
 `--apply` 会先创建 SQLite 备份，只有审查通过的剧本会被事务性写入。语音命令只备份并替换线索阶段音频，不会改动角色语音、其他系统语音、图片或 Chroma 向量；也可重复传入 `--script-id <ID>` 做小批量验证。不要直接在唯一一份线上数据库上运行这些命令。
+
+若升级的是带旧版作者标识的存量数据库，可在明确的迁移窗口内临时设置 `ALLOW_LEGACY_OWNER_CLAIM=true`。旧浏览器会在“设置”中自动识别本地记录并提供一键恢复；迁移结束后应重新关闭该开关。
 
 代码结构、核心流程、数据边界和阅读顺序统一记录在 [PROJECT.md](PROJECT.md)。
 

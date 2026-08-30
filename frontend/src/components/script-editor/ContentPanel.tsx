@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, Check, Clock3 } from "lucide-react";
+import { AlertTriangle, Check } from "lucide-react";
 import { WhackAMole, MoleTrigger } from "./WhackAMole";
 import {
   AssetGenerationProgress,
@@ -473,17 +473,6 @@ function ContentPanelBody({
       {content}
       {isWorking && !showMoleGame && (
         <div className="absolute bottom-3 left-3 z-50 flex max-w-[calc(100%-1.5rem)] flex-col items-start gap-2">
-          {!hasActionBar && (
-            <div
-              role="status"
-              className="flex max-w-md items-start gap-2 rounded-lg border border-border/60 bg-background/90 px-3 py-2 text-xs leading-relaxed text-muted-foreground shadow-lg backdrop-blur"
-            >
-              <Clock3 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
-              <span>
-                单个节点可能耗时数分钟，剧本越复杂等待越久；审稿修订会连续完成审稿与终稿生成。你可以耐心等待，也可以返回大厅稍后继续。
-              </span>
-            </div>
-          )}
           <div className="flex items-center gap-1.5">
             <MoleTrigger onClick={() => setShowMoleGame(true)} />
             {!hasActionBar && (

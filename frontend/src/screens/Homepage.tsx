@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Settings, RefreshCw, PenTool } from "lucide-react";
-import { scriptApi, systemApi } from "@/lib/api";
+import { Github, Settings, RefreshCw, PenTool } from "lucide-react";
+import { scriptApi } from "@/lib/api";
 import { ScriptCard } from "@/components/game/ScriptCard";
 import { ScriptDetailModal } from "@/components/game/ScriptDetailModal";
 import { SettingsModal } from "@/components/SettingsModal";
@@ -37,8 +37,6 @@ export function Homepage({ onStartGame, onOpenEditor }: HomepageProps) {
 
   useEffect(() => {
     loadScripts();
-    // Warm the cached provider probe without delaying the script lobby.
-    void systemApi.getModelHealth().catch(() => undefined);
   }, []);
 
   // Group scripts by difficulty
@@ -75,7 +73,7 @@ export function Homepage({ onStartGame, onOpenEditor }: HomepageProps) {
             </div>
 
             {/* Nav */}
-            <nav className="flex items-center gap-4">
+            <nav className="flex items-center gap-2 sm:gap-3">
               <button
                 onClick={() => onOpenEditor()}
                 className="relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors text-sm font-medium"
@@ -86,6 +84,16 @@ export function Homepage({ onStartGame, onOpenEditor }: HomepageProps) {
                   Beta
                 </span>
               </button>
+              <a
+                href="https://github.com/tpxbps/sober-alone"
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="在 GitHub 查看独醒开源项目"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border/70 bg-secondary/35 px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-primary/40 hover:bg-primary/10 hover:text-primary sm:px-3 sm:text-sm"
+              >
+                <Github className="h-4 w-4" />
+                <span>开源仓库</span>
+              </a>
               <button
                 onClick={loadScripts}
                 disabled={isLoading}
@@ -237,7 +245,10 @@ export function Homepage({ onStartGame, onOpenEditor }: HomepageProps) {
       {/* Settings Modal */}
       <AnimatePresence>
         {showSettings && (
-          <SettingsModal onClose={() => setShowSettings(false)} />
+          <SettingsModal
+            onClose={() => setShowSettings(false)}
+            onOwnershipClaimed={loadScripts}
+          />
         )}
       </AnimatePresence>
     </div>

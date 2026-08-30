@@ -22,6 +22,7 @@ function health(model: string, status: ModelHealthItem['status']): ModelHealthIt
     first_token_latency_ms: null,
     reaction_latency_ms: null,
     slow_dimensions: [],
+    failed_dimensions: [],
     message: '',
     checked_at: '',
   }

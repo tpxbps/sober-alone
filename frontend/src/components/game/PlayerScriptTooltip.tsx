@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { memo, useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { BookOpen, X, Lightbulb, Zap } from "lucide-react";
 import { SpeakerIcon, type SpeakerState } from "@/components/ui/SpeakerIcon";
@@ -26,7 +26,48 @@ function formatTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export function PlayerScriptTooltip({
+const StableQuickOverviewContent = memo(function StableQuickOverviewContent({
+  scriptSummary,
+  keyInfo,
+}: {
+  scriptSummary?: string;
+  keyInfo?: string;
+}) {
+  return (
+    <div className="px-4 py-3 space-y-3 select-text">
+      {scriptSummary && (
+        <div>
+          <h4 className="text-sm font-bold text-primary mb-1">剧本摘要</h4>
+          <p className="text-sm text-muted-foreground leading-relaxed">
+            {scriptSummary}
+          </p>
+        </div>
+      )}
+      {keyInfo && (
+        <div>
+          <h4 className="text-sm font-bold text-primary mb-1">关键信息</h4>
+          <Markdown className="text-sm text-muted-foreground leading-relaxed">
+            {keyInfo}
+          </Markdown>
+        </div>
+      )}
+    </div>
+  );
+});
+
+const StableScriptContent = memo(function StableScriptContent({
+  content,
+}: {
+  content: string;
+}) {
+  return (
+    <div data-player-script-content className="select-text">
+      <Markdown className="prose-sm">{content}</Markdown>
+    </div>
+  );
+});
+
+export const PlayerScriptTooltip = memo(function PlayerScriptTooltip({
   scriptContent,
   scriptSummary,
   keyInfo,
@@ -272,28 +313,10 @@ export function PlayerScriptTooltip({
                     className="overflow-hidden border-b border-border/30 bg-secondary/20"
                   >
                     <div className="h-full overflow-y-auto scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
-                      <div className="px-4 py-3 space-y-3">
-                        {scriptSummary && (
-                          <div>
-                            <h4 className="text-sm font-bold text-primary mb-1">
-                              剧本摘要
-                            </h4>
-                            <p className="text-sm text-muted-foreground leading-relaxed">
-                              {scriptSummary}
-                            </p>
-                          </div>
-                        )}
-                        {keyInfo && (
-                          <div>
-                            <h4 className="text-sm font-bold text-primary mb-1">
-                              关键信息
-                            </h4>
-                            <Markdown className="text-sm text-muted-foreground leading-relaxed">
-                              {keyInfo}
-                            </Markdown>
-                          </div>
-                        )}
-                      </div>
+                      <StableQuickOverviewContent
+                        scriptSummary={scriptSummary}
+                        keyInfo={keyInfo}
+                      />
                     </div>
                   </motion.div>
                 )}
@@ -336,7 +359,7 @@ export function PlayerScriptTooltip({
 
               {/* Content */}
               <div className="p-4 overflow-y-auto flex-1 min-h-0 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
-                <Markdown className="prose-sm">{scriptContent}</Markdown>
+                <StableScriptContent content={scriptContent} />
               </div>
             </motion.div>
           </motion.div>
@@ -344,4 +367,4 @@ export function PlayerScriptTooltip({
       </AnimatePresence>
     </>
   );
-}
+});

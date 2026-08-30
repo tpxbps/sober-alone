@@ -23,9 +23,9 @@ const api = axios.create({
   },
 });
 
-const MODEL_HEALTH_FRONTEND_TTL_MS = 15 * 60 * 1000;
 let modelHealthCache: { value: ModelHealthResponse; expiresAt: number } | null = null;
 let modelHealthRequest: Promise<ModelHealthResponse> | null = null;
+let modelHealthRefreshRequest: Promise<ModelHealthResponse> | null = null;
 const CAPABILITIES_FRONTEND_TTL_MS = 60 * 1000;
 let capabilitiesCache: { value: SystemCapabilities; expiresAt: number } | null = null;
 let capabilitiesRequest: Promise<SystemCapabilities> | null = null;
@@ -57,24 +57,47 @@ export const systemApi = {
     }
     return capabilitiesRequest;
   },
-  getModelHealth: async (): Promise<ModelHealthResponse> => {
-    if (modelHealthCache && modelHealthCache.expiresAt > Date.now()) {
+  getModelHealth: async (forceRefresh = false): Promise<ModelHealthResponse> => {
+    const normalizeAndCacheModelHealth = (response: { data: ModelHealthResponse }) => {
+      const maxAgeSeconds = Number(response.data?.max_age_seconds);
+      const value: ModelHealthResponse = {
+        models: Array.isArray(response.data?.models) ? response.data.models : [],
+        cached: Boolean(response.data?.cached),
+        max_age_seconds:
+          Number.isFinite(maxAgeSeconds) && maxAgeSeconds > 0
+            ? maxAgeSeconds
+            : 90,
+      };
+      modelHealthCache = {
+        value,
+        expiresAt: Date.now() + value.max_age_seconds * 1000,
+      };
+      return value;
+    };
+
+    if (forceRefresh) {
+      if (!modelHealthRefreshRequest) {
+        const waitForAutomaticProbe = modelHealthRequest
+          ? modelHealthRequest.catch(() => undefined)
+          : Promise.resolve(undefined);
+        modelHealthRefreshRequest = waitForAutomaticProbe
+          .then(() => api.post<ModelHealthResponse>('/system/model-health/refresh'))
+          .then(normalizeAndCacheModelHealth)
+          .finally(() => {
+            modelHealthRefreshRequest = null;
+          });
+      }
+      return modelHealthRefreshRequest;
+    }
+
+    if (modelHealthRefreshRequest) return modelHealthRefreshRequest;
+    if (!forceRefresh && modelHealthCache && modelHealthCache.expiresAt > Date.now()) {
       return modelHealthCache.value;
     }
     if (!modelHealthRequest) {
       modelHealthRequest = api
         .get<ModelHealthResponse>('/system/model-health')
-        .then((response) => {
-          const value: ModelHealthResponse = {
-            models: Array.isArray(response.data?.models) ? response.data.models : [],
-            cached: Boolean(response.data?.cached),
-          };
-          modelHealthCache = {
-            value,
-            expiresAt: Date.now() + MODEL_HEALTH_FRONTEND_TTL_MS,
-          };
-          return value;
-        })
+        .then(normalizeAndCacheModelHealth)
         .finally(() => {
           modelHealthRequest = null;
         });

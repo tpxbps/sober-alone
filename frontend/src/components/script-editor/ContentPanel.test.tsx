@@ -32,8 +32,7 @@ describe('ContentPanel pending workflow state', () => {
     )
 
     expect(markup).toContain('正在构思剧本大纲...')
-    expect(markup).toContain('单个节点可能耗时数分钟')
-    expect(markup).toContain('返回大厅稍后继续')
+    expect(markup).not.toContain('审稿修订会连续完成')
     expect(markup).not.toContain('流程中断')
   })
 

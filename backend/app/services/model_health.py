@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -22,13 +23,16 @@ from app.core.model_registry import MODEL_SPECS, ModelSpec
 
 logger = logging.getLogger(__name__)
 
-FIRST_TOKEN_PROBE_TIMEOUT_SECONDS = 10.0
+FIRST_TOKEN_PROBE_TIMEOUT_SECONDS = 15.0
 FIRST_TOKEN_SLOW_THRESHOLD_SECONDS = 5.0
 # This only bounds the lightweight health probe. Gameplay reactions retain
 # their separate, much more generous production timeout.
-REACTION_PROBE_TIMEOUT_SECONDS = 20.0
+REACTION_PROBE_TIMEOUT_SECONDS = 30.0
 REACTION_SLOW_THRESHOLD_SECONDS = 12.0
 CACHE_TTL_SECONDS = 15 * 60.0
+INCOMPLETE_CACHE_TTL_SECONDS = 90.0
+MODEL_PROBE_CONCURRENCY = 4
+TRANSIENT_PROBE_ATTEMPTS = 2
 
 _REACTION_PROBE_ROLE = """你是旧广播站的档案管理员林岚。你谨慎、重视时间线，
 只根据已公开发言和自己的经历更新判断。"""
@@ -43,6 +47,7 @@ HealthDimension = Literal["speech", "reaction"]
 
 _cached_models: list[dict[str, Any]] | None = None
 _cached_at_monotonic = 0.0
+_cached_ttl_seconds = CACHE_TTL_SECONDS
 _probe_task: asyncio.Task[list[dict[str, Any]]] | None = None
 
 
@@ -117,23 +122,46 @@ async def _measure_reaction(spec: ModelSpec) -> int:
     return round((time.perf_counter() - started_at) * 1000)
 
 
+async def _measure_with_transient_retry(
+    measure: Callable[[ModelSpec], Awaitable[int]], spec: ModelSpec
+) -> int:
+    """Retry one transient probe failure without hiding auth failures."""
+
+    last_error: Exception | None = None
+    for attempt in range(TRANSIENT_PROBE_ATTEMPTS):
+        try:
+            return await measure(spec)
+        except Exception as exc:  # noqa: BLE001 - provider exceptions are intentionally normalized
+            if getattr(exc, "status_code", None) in {401, 403}:
+                raise
+            # A full probe timeout already consumed the entire dimension budget.
+            # Let the UI report an incomplete sample and offer an explicit retry.
+            if isinstance(exc, TimeoutError):
+                raise
+            last_error = exc
+            if attempt + 1 < TRANSIENT_PROBE_ATTEMPTS:
+                await asyncio.sleep(0.25)
+    assert last_error is not None
+    raise last_error
+
+
 def _dimension_is_slow(value: int | Exception, threshold_seconds: float) -> bool:
-    return isinstance(value, Exception) or value > threshold_seconds * 1000
+    return isinstance(value, int) and value > threshold_seconds * 1000
 
 
 def _health_message(
     status: str,
     slow_dimensions: list[HealthDimension],
-    errors: list[Exception],
+    failed_dimensions: list[HealthDimension],
 ) -> str:
     if status == "unavailable":
         return "该模型当前鉴权异常，请检查对应 API Key"
-    if errors:
-        if slow_dimensions == ["reaction"]:
-            return "该模型当前反应分析异常，可能影响每轮讨论节奏"
-        if slow_dimensions == ["speech"]:
-            return "该模型当前发言响应异常，可能较慢"
-        return "该模型当前发言与反应探测异常，可能影响讨论节奏"
+    if status == "unknown":
+        if failed_dimensions == ["reaction"]:
+            return "本次反应测速未完成，可稍后重新测速"
+        if failed_dimensions == ["speech"]:
+            return "本次发言测速未完成，可稍后重新测速"
+        return "本次模型测速未完成，可能受网络波动影响"
     if slow_dimensions == ["reaction"]:
         return "该模型当前反应分析稍慢，可能影响每轮讨论节奏"
     if slow_dimensions == ["speech"]:
@@ -147,18 +175,31 @@ async def _probe_model(spec: ModelSpec) -> dict[str, Any]:
     """Probe speaking and reaction paths concurrently for one configured model."""
     checked_at = datetime.now(UTC).isoformat()
     first_token, reaction = await asyncio.gather(
-        _measure_first_token(spec),
-        _measure_reaction(spec),
+        _measure_with_transient_retry(_measure_first_token, spec),
+        _measure_with_transient_retry(_measure_reaction, spec),
         return_exceptions=True,
     )
     errors = [value for value in (first_token, reaction) if isinstance(value, Exception)]
     unavailable = any(getattr(error, "status_code", None) in {401, 403} for error in errors)
+    failed_dimensions: list[HealthDimension] = []
+    if isinstance(first_token, Exception):
+        failed_dimensions.append("speech")
+    if isinstance(reaction, Exception):
+        failed_dimensions.append("reaction")
     slow_dimensions: list[HealthDimension] = []
     if _dimension_is_slow(first_token, FIRST_TOKEN_SLOW_THRESHOLD_SECONDS):
         slow_dimensions.append("speech")
     if _dimension_is_slow(reaction, REACTION_SLOW_THRESHOLD_SECONDS):
         slow_dimensions.append("reaction")
-    status = "unavailable" if unavailable else "slow" if slow_dimensions else "normal"
+    status = (
+        "unavailable"
+        if unavailable
+        else "unknown"
+        if failed_dimensions
+        else "slow"
+        if slow_dimensions
+        else "normal"
+    )
 
     for error in errors:
         logger.info(
@@ -178,30 +219,47 @@ async def _probe_model(spec: ModelSpec) -> dict[str, Any]:
         "first_token_latency_ms": first_token_ms,
         "reaction_latency_ms": reaction_ms,
         "slow_dimensions": slow_dimensions,
-        "message": _health_message(status, slow_dimensions, errors),
+        "failed_dimensions": failed_dimensions,
+        "message": _health_message(status, slow_dimensions, failed_dimensions),
         "checked_at": checked_at,
     }
 
 
 async def _probe_configured_models() -> list[dict[str, Any]]:
-    global _cached_at_monotonic, _cached_models
+    global _cached_at_monotonic, _cached_models, _cached_ttl_seconds
 
     specs = [spec for spec in MODEL_SPECS if settings.get_api_key(spec.provider)]
-    models = list(await asyncio.gather(*(_probe_model(spec) for spec in specs)))
+    semaphore = asyncio.Semaphore(MODEL_PROBE_CONCURRENCY)
+
+    async def probe(spec: ModelSpec) -> dict[str, Any]:
+        async with semaphore:
+            return await _probe_model(spec)
+
+    models = list(await asyncio.gather(*(probe(spec) for spec in specs)))
     _cached_models = models
     _cached_at_monotonic = time.monotonic()
+    _cached_ttl_seconds = (
+        INCOMPLETE_CACHE_TTL_SECONDS
+        if any(item["status"] == "unknown" for item in models)
+        else CACHE_TTL_SECONDS
+    )
     return models
 
 
-async def get_model_health() -> dict[str, Any]:
+async def get_model_health(*, force_refresh: bool = False) -> dict[str, Any]:
     """Return cached health hints, sharing one probe run across concurrent callers."""
     global _probe_task
 
     cache_is_fresh = (
-        _cached_models is not None and time.monotonic() - _cached_at_monotonic < CACHE_TTL_SECONDS
+        _cached_models is not None
+        and time.monotonic() - _cached_at_monotonic < _cached_ttl_seconds
     )
-    if cache_is_fresh:
-        return {"models": deepcopy(_cached_models), "cached": True}
+    if cache_is_fresh and not force_refresh:
+        return {
+            "models": deepcopy(_cached_models),
+            "cached": True,
+            "max_age_seconds": round(_cached_ttl_seconds),
+        }
 
     if _probe_task is None or _probe_task.done():
         _probe_task = asyncio.create_task(_probe_configured_models())
@@ -211,14 +269,19 @@ async def get_model_health() -> dict[str, Any]:
     finally:
         if task.done() and _probe_task is task:
             _probe_task = None
-    return {"models": deepcopy(models), "cached": False}
+    return {
+        "models": deepcopy(models),
+        "cached": False,
+        "max_age_seconds": round(_cached_ttl_seconds),
+    }
 
 
 def clear_model_health_cache() -> None:
     """Reset process-local probe state. Intended for tests and explicit refreshes."""
-    global _cached_at_monotonic, _cached_models, _probe_task
+    global _cached_at_monotonic, _cached_models, _cached_ttl_seconds, _probe_task
     if _probe_task is not None and not _probe_task.done():
         _probe_task.cancel()
     _probe_task = None
     _cached_models = None
     _cached_at_monotonic = 0.0
+    _cached_ttl_seconds = CACHE_TTL_SECONDS

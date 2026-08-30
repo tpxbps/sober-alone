@@ -4,10 +4,11 @@ import logging
 import shutil
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import delete, select
+from sqlalchemy import bindparam, delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents import remove_agent_manager
+from app.api.schemas.script_editor import LegacyOwnershipClaimRequest
 from app.core.config import settings
 from app.db.models import Character, GameSession, Script
 from app.db.session import get_db
@@ -28,6 +29,61 @@ from app.services.game_service import remove_flow_controller
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+@router.post("/legacy-ownership/claim")
+async def claim_legacy_ownership(
+    request: LegacyOwnershipClaimRequest,
+    db: AsyncSession = Depends(get_db),
+    owner_key_hash: str = Depends(require_author_key_hash),
+):
+    """One-time bridge from legacy browser IDs to the private author key."""
+
+    if not settings.ALLOW_LEGACY_OWNER_CLAIM:
+        raise HTTPException(status_code=403, detail="旧版剧本恢复入口未开启")
+
+    columns = {
+        str(row[1])
+        for row in (await db.execute(text("PRAGMA table_info(scripts)"))).all()
+    }
+    if "owner_uuid" not in columns:
+        return {"success": True, "claimed_count": 0, "matched_count": 0}
+
+    legacy_ids = sorted({str(owner_uuid) for owner_uuid in request.legacy_owner_uuids})
+    update_statement = text(
+        """
+        UPDATE scripts
+        SET owner_key_hash = :owner_key_hash
+        WHERE owner_key_hash IS NULL AND owner_uuid IN :legacy_ids
+        """
+    ).bindparams(bindparam("legacy_ids", expanding=True))
+    result = await db.execute(
+        update_statement,
+        {"owner_key_hash": owner_key_hash, "legacy_ids": legacy_ids},
+    )
+    matched_statement = text(
+        """
+        SELECT COUNT(*) FROM scripts
+        WHERE owner_key_hash = :owner_key_hash AND owner_uuid IN :legacy_ids
+        """
+    ).bindparams(bindparam("legacy_ids", expanding=True))
+    matched_count = int(
+        (
+            await db.execute(
+                matched_statement,
+                {"owner_key_hash": owner_key_hash, "legacy_ids": legacy_ids},
+            )
+        ).scalar_one()
+    )
+    await db.commit()
+    claimed_count = max(0, int(result.rowcount or 0))
+    if claimed_count:
+        logger.info("Recovered ownership for %s legacy script(s)", claimed_count)
+    return {
+        "success": True,
+        "claimed_count": claimed_count,
+        "matched_count": matched_count,
+    }
 
 
 @router.delete("/scripts/{script_id}")
@@ -81,7 +137,14 @@ async def delete_script(
         checkpointer = getattr(get_script_gen_graph(), "checkpointer", None)
         if checkpointer:
             for thread_id in thread_ids:
-                await checkpointer.adelete_thread(thread_id)
+                try:
+                    await checkpointer.adelete_thread(thread_id)
+                except Exception as cleanup_error:  # noqa: BLE001 - deletion is already committed
+                    logger.warning(
+                        "Unable to clean workflow checkpoint thread=%s: %s",
+                        thread_id,
+                        cleanup_error,
+                    )
         asset_progress_registry.reset(script_id)
         convert_progress_registry.reset(script_id)
 

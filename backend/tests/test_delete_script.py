@@ -2,10 +2,13 @@ from pathlib import Path
 
 import chromadb
 import pytest
-from sqlalchemy import event, func, select
+from fastapi import HTTPException
+from sqlalchemy import event, func, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.api.routes.script_editor import delete_script
+from app.api.routes.script_editor_routes.scripts import claim_legacy_ownership
+from app.api.schemas.script_editor import LegacyOwnershipClaimRequest
 from app.core.config import settings
 from app.db.base import Base
 from app.db.models import Character, GameRecord, GameSession, PlayerState, Script
@@ -76,5 +79,62 @@ async def test_script_delete_cascades_runtime_and_files(tmp_path: Path, monkeypa
         assert not audio_dir.exists()
         assert not image_dir.exists()
         assert asset_progress_registry.snapshot("delete-me") is None
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_legacy_script_recovery_is_explicit_guarded_and_one_time(
+    tmp_path: Path, monkeypatch
+):
+    engine = create_async_engine(f"sqlite+aiosqlite:///{(tmp_path / 'claim.db').as_posix()}")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+        await connection.exec_driver_sql("ALTER TABLE scripts ADD COLUMN owner_uuid VARCHAR(36)")
+
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    legacy_id = "11111111-1111-4111-8111-111111111111"
+    new_owner_hash = hash_author_key("new-author-key-00000000000000000000")
+    async with session_factory() as session:
+        script = Script(
+            script_id="legacy-owned",
+            title="legacy",
+            game_full_process=[],
+            free_speech_limits=[],
+        )
+        session.add(script)
+        await session.flush()
+        await session.execute(
+            text("UPDATE scripts SET owner_uuid = :owner_uuid WHERE script_id = :script_id"),
+            {"owner_uuid": legacy_id, "script_id": script.script_id},
+        )
+        await session.commit()
+
+        monkeypatch.setattr(settings, "ALLOW_LEGACY_OWNER_CLAIM", False)
+        with pytest.raises(HTTPException) as exc_info:
+            await claim_legacy_ownership(
+                LegacyOwnershipClaimRequest(legacy_owner_uuids=[legacy_id]),
+                session,
+                new_owner_hash,
+            )
+        assert exc_info.value.status_code == 403
+
+        monkeypatch.setattr(settings, "ALLOW_LEGACY_OWNER_CLAIM", True)
+        first = await claim_legacy_ownership(
+            LegacyOwnershipClaimRequest(legacy_owner_uuids=[legacy_id]),
+            session,
+            new_owner_hash,
+        )
+        await session.refresh(script)
+        assert first == {"success": True, "claimed_count": 1, "matched_count": 1}
+        assert script.owner_key_hash == new_owner_hash
+        assert legacy_id not in str(first)
+
+        repeated = await claim_legacy_ownership(
+            LegacyOwnershipClaimRequest(legacy_owner_uuids=[legacy_id]),
+            session,
+            new_owner_hash,
+        )
+        assert repeated == {"success": True, "claimed_count": 0, "matched_count": 1}
 
     await engine.dispose()

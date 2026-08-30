@@ -1,4 +1,6 @@
-from pydantic import BaseModel
+from uuid import UUID
+
+from pydantic import BaseModel, Field
 
 
 class StartWorkflowRequest(BaseModel):
@@ -7,6 +9,10 @@ class StartWorkflowRequest(BaseModel):
     difficulty: int = 1
     num_clue_rounds: int = 2
     prompts: dict | None = None
+
+
+class LegacyOwnershipClaimRequest(BaseModel):
+    legacy_owner_uuids: list[UUID] = Field(min_length=1, max_length=100)
 
 
 class ResumeWorkflowRequest(BaseModel):

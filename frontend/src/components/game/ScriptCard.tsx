@@ -73,6 +73,8 @@ export function ScriptCard({ script, onClick, onDeleted, onEdit }: ScriptCardPro
           <img
             src={script.cover_image_url}
             alt={script.title}
+            loading="lazy"
+            decoding="async"
             className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
           />
         ) : (
