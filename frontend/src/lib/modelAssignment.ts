@@ -30,17 +30,22 @@ export function assignModelsToAICharacters({
     .map((character) => character.character_id)
   if (aiCharacterIds.length === 0 || models.length === 0) return {}
 
-  const responsiveModels = models.filter((model) => {
+  const responsiveModels = models.filter(
+    (model) => healthById[model.id]?.status === 'normal',
+  )
+  const unverifiedModels = models.filter((model) => {
     const status = healthById[model.id]?.status
-    return status !== 'slow' && status !== 'unavailable'
+    return status === undefined || status === 'unknown'
   })
   const slowModels = models.filter((model) => healthById[model.id]?.status === 'slow')
   const candidateModels =
     responsiveModels.length > 0
       ? responsiveModels
-      : slowModels.length > 0
-        ? slowModels
-        : models
+      : unverifiedModels.length > 0
+        ? unverifiedModels
+        : slowModels.length > 0
+          ? slowModels
+          : models
   const randomizedModels = shuffled(candidateModels, random)
 
   return Object.fromEntries(

@@ -43,6 +43,25 @@ describe('assignModelsToAICharacters', () => {
     expect(Object.values(result)).not.toContain('mimo')
   })
 
+  it('excludes models whose probe did not finish when normal models are available', () => {
+    const result = assignModelsToAICharacters({
+      characters,
+      humanCharacterId: 'human',
+      models,
+      healthById: {
+        deepseek: health('deepseek', 'normal'),
+        qwen: health('qwen', 'normal'),
+        mimo: health('mimo', 'unknown'),
+        glm: health('glm', 'normal'),
+      },
+      random: () => 0.5,
+    })
+
+    expect(Object.values(result)).toHaveLength(3)
+    expect(new Set(Object.values(result)).size).toBe(3)
+    expect(Object.values(result)).not.toContain('mimo')
+  })
+
   it('reuses responsive models evenly before considering a slow model', () => {
     const result = assignModelsToAICharacters({
       characters,
