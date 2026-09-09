@@ -13,7 +13,7 @@ import {
 import * as Dialog from "@radix-ui/react-dialog";
 import * as Select from "@radix-ui/react-select";
 import * as Tooltip from "@radix-ui/react-tooltip";
-import { scriptApi, gameApi, systemApi } from "@/lib/api";
+import { scriptApi, gameApi, systemApi, subscribeModelHealth } from "@/lib/api";
 import { configuredModels } from "@/lib/capabilityAdapter";
 import { assignModelsToAICharacters } from "@/lib/modelAssignment";
 import type { Script, Character } from "@/types/game";
@@ -135,6 +135,12 @@ export function ScriptDetailModal({
     manuallySelectedModelIdsRef.current.clear();
     setModelCapabilityReason("正在检查模型能力…");
 
+    const unsubscribeHealth = subscribeModelHealth((result) => {
+      if (cancelled) return;
+      setModelHealthById(Object.fromEntries(result.models.map((item) => [item.model, item])));
+      setIsRefreshingModelHealth(Boolean(result.probing));
+    });
+    setIsRefreshingModelHealth(true);
     void systemApi
       .getModelHealth()
       .then((result) => {
@@ -147,7 +153,8 @@ export function ScriptDetailModal({
       .catch(() => {
         // Health hints are best-effort and never block model selection.
         if (!cancelled) setModelHealthResolved(true);
-      });
+      })
+      .finally(() => { if (!cancelled) setIsRefreshingModelHealth(false); });
 
     Promise.allSettled([
       scriptApi.getScriptCharacters(script.script_id),
@@ -196,6 +203,7 @@ export function ScriptDetailModal({
 
     return () => {
       cancelled = true;
+      unsubscribeHealth();
     };
   }, [open, reloadToken, script.script_id]);
 
@@ -231,7 +239,7 @@ export function ScriptDetailModal({
       setModelHealthResolved(true);
       setModelHealthMessage("测速已更新");
     } catch {
-      setModelHealthMessage("测速失败，请检查网络后重试");
+      setModelHealthMessage("测速请求失败，请稍后重试");
     } finally {
       setIsRefreshingModelHealth(false);
     }
@@ -445,6 +453,7 @@ export function ScriptDetailModal({
                       )}
                       <button
                         type="button"
+                        title="测速结果保留30分钟，可手动重新测速"
                         onClick={handleRefreshModelHealth}
                         disabled={isRefreshingModelHealth || isLoading}
                         aria-label={
@@ -613,6 +622,7 @@ export function ScriptDetailModal({
                                                 const health = modelHealthById[model.id];
                                                 const hasWarning =
                                                   health?.status === "slow" ||
+                                                  health?.status === "timeout" ||
                                                   health?.status === "unavailable";
                                                 const isIncomplete =
                                                   health?.status === "unknown";
@@ -624,9 +634,11 @@ export function ScriptDetailModal({
                                                       health?.status === "unavailable"
                                                         ? `${model.name}，当前不可用`
                                                         : health?.status === "slow"
-                                                          ? `${model.name}，当前响应稍慢`
+                                                          ? `${model.name}，响应较慢`
+                                                          : health?.status === "timeout"
+                                                            ? `${model.name}，测速超时`
                                                           : isIncomplete
-                                                            ? `${model.name}，本次测速未完成`
+                                                            ? `${model.name}，本次测速失败`
                                                             : model.name
                                                     }
                                                     className="w-full px-3 py-2 text-sm rounded-md cursor-pointer
@@ -647,7 +659,9 @@ export function ScriptDetailModal({
                                                       >
                                                         {health.status === "unavailable"
                                                           ? "当前不可用"
-                                                          : "当前响应稍慢"}
+                                                          : health.status === "timeout"
+                                                            ? "测速超时"
+                                                            : "响应较慢"}
                                                       </span>
                                                     )}
                                                     {isIncomplete && (
@@ -655,7 +669,7 @@ export function ScriptDetailModal({
                                                         className="shrink-0 text-[11px] text-muted-foreground"
                                                         title={health.message}
                                                       >
-                                                        测速未完成
+                                                        测速失败
                                                       </span>
                                                     )}
                                                   </Select.Item>
@@ -674,6 +688,7 @@ export function ScriptDetailModal({
                                             : undefined;
                                           if (
                                             health?.status !== "slow" &&
+                                            health?.status !== "timeout" &&
                                             health?.status !== "unavailable" &&
                                             health?.status !== "unknown"
                                           ) {
@@ -685,7 +700,7 @@ export function ScriptDetailModal({
                                               className="mt-2 text-xs text-amber-300"
                                             >
                                               {health.status === "unavailable"
-                                                ? "该模型当前不可用，请重新测速或选择其他模型"
+                                                ? "模型暂不可用，请选择其他模型"
                                                 : health.message}
                                             </p>
                                           );

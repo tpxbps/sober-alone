@@ -95,3 +95,17 @@ describe('assignModelsToAICharacters', () => {
     expect(new Set(Object.values(result))).toEqual(new Set(['deepseek', 'qwen']))
   })
 })
+
+
+it('prefers completed slow samples over timed-out models', () => {
+  const result = assignModelsToAICharacters({
+    characters, humanCharacterId: 'human', models,
+    healthById: {
+      deepseek: health('deepseek', 'slow'),
+      qwen: health('qwen', 'timeout'),
+      mimo: health('mimo', 'unavailable'),
+      glm: health('glm', 'timeout'),
+    },
+  })
+  expect(new Set(Object.values(result))).toEqual(new Set(['deepseek']))
+})

@@ -241,6 +241,6 @@ test('作者从大厅编辑结构化数据并选择性更新资源', async ({ pa
   await page.getByRole('button', { name: '确认保存并执行所选资源' }).click()
 
   await expect(page.getByText('剧本修改完成！')).toBeVisible()
-  await page.getByRole('button', { name: '返回剧本大厅' }).click()
+  await page.getByRole('button', { name: '返回剧本大厅', exact: true }).last().click()
   await expect(page.getByText('修改后的剧本').first()).toBeVisible()
 })

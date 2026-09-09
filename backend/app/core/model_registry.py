@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass
 from datetime import datetime
+from typing import Literal
 
 from app.core.config import LOCAL_DATA_DIR
 
@@ -16,6 +17,7 @@ class ModelSpec:
     provider: str
     provider_name: str
     disable_thinking_extra: str = ""
+    reaction_output_method: Literal["json_schema", "json_mode"] = "json_schema"
 
 
 MODEL_SPECS = (
@@ -36,7 +38,14 @@ MODEL_SPECS = (
     ),
     ModelSpec("mimo-v2.5", "mimo-v2.5", "mimo", "Xiaomi MiMo"),
     ModelSpec("hy3", "hy3", "hunyuan", "Tencent Hunyuan"),
-    ModelSpec("glm-5.3-flash", "glm-5.3-flash", "zhipuai", "Zhipu GLM"),
+    ModelSpec(
+        "glm-5.3-flash",
+        "glm-5.3-flash",
+        "zhipuai",
+        "Zhipu GLM",
+        disable_thinking_extra="glm_low",
+        reaction_output_method="json_mode",
+    ),
 )
 MODEL_BY_ID = {spec.id: spec for spec in MODEL_SPECS}
 DEFAULT_MODELS = {

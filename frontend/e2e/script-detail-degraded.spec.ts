@@ -140,7 +140,7 @@ test('模型服务偏慢时只提示体验风险且仍可选择并开始游戏',
             first_token_latency_ms: 920,
             reaction_latency_ms: 15420,
             slow_dimensions: ['reaction'],
-            message: '该模型当前反应分析稍慢，可能影响每轮讨论节奏',
+            message: '响应较慢',
             checked_at: '2026-08-28T00:00:00Z',
           },
         ],
@@ -155,9 +155,9 @@ test('模型服务偏慢时只提示体验风险且仍可选择并开始游戏',
   await page.getByRole('combobox').click()
   const slowOption = page.getByRole('option', { name: 'hy3' })
   await expect(slowOption).toBeVisible()
-  await expect(page.getByText('当前响应稍慢', { exact: true })).toBeVisible()
+  await expect(page.getByText('响应较慢', { exact: true })).toBeVisible()
   await slowOption.click()
 
-  await expect(page.getByText('该模型当前反应分析稍慢，可能影响每轮讨论节奏')).toBeVisible()
+  await expect(page.getByText('响应较慢')).toBeVisible()
   await expect(page.getByRole('button', { name: '开始游戏' })).toBeEnabled()
 })

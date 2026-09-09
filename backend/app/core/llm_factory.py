@@ -53,7 +53,7 @@ def create_llm(
     - 其他提供商: 使用 ChatOpenAI（兼容 OpenAI 协议）
 
     Args:
-        disable_thinking: 是否禁用 DeepSeek 思考模式。必须为 True 的场景：
+        disable_thinking: 是否使用低延迟推理配置（GLM-5.3-Flash 仅支持 low，不能关闭思考）。需要的场景：
             1. agent 工具调用（create_agent）— 思考模式导致多轮 reasoning_content 回传失败
             2. 结构化输出（with_structured_output）— 思考模式与 function_calling 不兼容
     """
@@ -90,6 +90,10 @@ def create_llm(
         extra_body=(
             {"enable_thinking": False}
             if disable_thinking and spec.disable_thinking_extra == "qwen"
+            # GLM-5.3-Flash rejects thinking.type=disabled. Its supported low
+            # effort avoids the default long reasoning pass in latency-sensitive paths.
+            else {"reasoning_effort": "low"}
+            if disable_thinking and spec.disable_thinking_extra == "glm_low"
             else None
         ),
     )

@@ -25,7 +25,15 @@ const api = axios.create({
 
 let modelHealthCache: { value: ModelHealthResponse; expiresAt: number } | null = null;
 let modelHealthRequest: Promise<ModelHealthResponse> | null = null;
-let modelHealthRefreshRequest: Promise<ModelHealthResponse> | null = null;
+let modelHealthSnapshot: ModelHealthResponse | null = null;
+const modelHealthListeners = new Set<(value: ModelHealthResponse) => void>();
+export function subscribeModelHealth(listener: (value: ModelHealthResponse) => void) {
+  modelHealthListeners.add(listener);
+  if (modelHealthSnapshot && (modelHealthRequest || (modelHealthCache && modelHealthCache.expiresAt > Date.now()))) {
+    listener(modelHealthSnapshot);
+  }
+  return () => { modelHealthListeners.delete(listener); };
+}
 const CAPABILITIES_FRONTEND_TTL_MS = 60 * 1000;
 let capabilitiesCache: { value: SystemCapabilities; expiresAt: number } | null = null;
 let capabilitiesRequest: Promise<SystemCapabilities> | null = null;
@@ -58,50 +66,37 @@ export const systemApi = {
     return capabilitiesRequest;
   },
   getModelHealth: async (forceRefresh = false): Promise<ModelHealthResponse> => {
-    const normalizeAndCacheModelHealth = (response: { data: ModelHealthResponse }) => {
-      const maxAgeSeconds = Number(response.data?.max_age_seconds);
-      const value: ModelHealthResponse = {
-        models: Array.isArray(response.data?.models) ? response.data.models : [],
-        cached: Boolean(response.data?.cached),
-        max_age_seconds:
-          Number.isFinite(maxAgeSeconds) && maxAgeSeconds > 0
-            ? maxAgeSeconds
-            : 90,
-      };
-      modelHealthCache = {
-        value,
-        expiresAt: Date.now() + value.max_age_seconds * 1000,
-      };
-      return value;
-    };
-
-    if (forceRefresh) {
-      if (!modelHealthRefreshRequest) {
-        const waitForAutomaticProbe = modelHealthRequest
-          ? modelHealthRequest.catch(() => undefined)
-          : Promise.resolve(undefined);
-        modelHealthRefreshRequest = waitForAutomaticProbe
-          .then(() => api.post<ModelHealthResponse>('/system/model-health/refresh'))
-          .then(normalizeAndCacheModelHealth)
-          .finally(() => {
-            modelHealthRefreshRequest = null;
-          });
-      }
-      return modelHealthRefreshRequest;
-    }
-
-    if (modelHealthRefreshRequest) return modelHealthRefreshRequest;
+    // Lobby, detail dialog and manual clicks share the same active run.
+    if (modelHealthRequest) return modelHealthRequest;
     if (!forceRefresh && modelHealthCache && modelHealthCache.expiresAt > Date.now()) {
       return modelHealthCache.value;
     }
-    if (!modelHealthRequest) {
-      modelHealthRequest = api
-        .get<ModelHealthResponse>('/system/model-health')
-        .then(normalizeAndCacheModelHealth)
-        .finally(() => {
-          modelHealthRequest = null;
-        });
-    }
+    const poll = async () => {
+      const deadline = Date.now() + 120_000;
+      let first = true;
+      while (true) {
+        const response = first && forceRefresh
+          ? await api.post<ModelHealthResponse>('/system/model-health/refresh', undefined, { timeout: 10_000 })
+          : await api.get<ModelHealthResponse>('/system/model-health', { timeout: 10_000 });
+        first = false;
+        const maxAge = Number(response.data?.max_age_seconds);
+        const value: ModelHealthResponse = {
+          models: Array.isArray(response.data?.models) ? response.data.models : [],
+          cached: Boolean(response.data?.cached),
+          probing: Boolean(response.data?.probing),
+          max_age_seconds: Number.isFinite(maxAge) && maxAge >= 0 ? maxAge : 90,
+        };
+        modelHealthSnapshot = value;
+        modelHealthCache = value.probing ? null : {
+          value, expiresAt: Date.now() + value.max_age_seconds * 1000,
+        };
+        modelHealthListeners.forEach((listener) => listener(value));
+        if (!value.probing) return value;
+        if (Date.now() >= deadline) throw new Error('Model health polling timed out');
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+    };
+    modelHealthRequest = poll().finally(() => { modelHealthRequest = null; });
     return modelHealthRequest;
   },
 };

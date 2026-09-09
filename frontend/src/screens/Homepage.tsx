@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Github, Settings, RefreshCw, PenTool } from "lucide-react";
-import { scriptApi } from "@/lib/api";
+import { scriptApi, systemApi } from "@/lib/api";
 import { ScriptCard } from "@/components/game/ScriptCard";
 import { ScriptDetailModal } from "@/components/game/ScriptDetailModal";
 import { SettingsModal } from "@/components/SettingsModal";
@@ -37,6 +37,7 @@ export function Homepage({ onStartGame, onOpenEditor }: HomepageProps) {
 
   useEffect(() => {
     loadScripts();
+    void systemApi.getModelHealth().catch(() => {});
   }, []);
 
   // Group scripts by difficulty

@@ -38,6 +38,7 @@ export function assignModelsToAICharacters({
     return status === undefined || status === 'unknown'
   })
   const slowModels = models.filter((model) => healthById[model.id]?.status === 'slow')
+  const timedOutModels = models.filter((model) => healthById[model.id]?.status === 'timeout')
   const candidateModels =
     responsiveModels.length > 0
       ? responsiveModels
@@ -45,7 +46,9 @@ export function assignModelsToAICharacters({
         ? unverifiedModels
         : slowModels.length > 0
           ? slowModels
-          : models
+          : timedOutModels.length > 0
+            ? timedOutModels
+            : models
   const randomizedModels = shuffled(candidateModels, random)
 
   return Object.fromEntries(

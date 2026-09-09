@@ -100,7 +100,16 @@ async def test_missing_chroma_collection_is_a_quiet_capability_check():
     assert await retriever.collection_exists("sample") is False
 
 
-def test_reaction_model_is_fail_fast_and_uses_unified_native_json_schema(monkeypatch):
+@pytest.mark.parametrize(
+    "model, provider, method",
+    [
+        ("deepseek-v4-flash", "deepseek", "json_schema"),
+        ("glm-5.3-flash", "zhipuai", "json_mode"),
+    ],
+)
+def test_reaction_model_uses_the_same_provider_format_as_health_probe(
+    monkeypatch, model, provider, method
+):
     captured = {}
 
     class Model:
@@ -113,21 +122,21 @@ def test_reaction_model_is_fail_fast_and_uses_unified_native_json_schema(monkeyp
         captured["model_kwargs"] = kwargs
         return Model()
 
-    monkeypatch.setattr("app.agents.agent_player.create_llm", fake_create_llm)
+    monkeypatch.setattr("app.agents.game_model_paths.create_llm", fake_create_llm)
 
     player = object.__new__(AgentPlayer)
-    player.llm_model = "mimo-v2.5"
-    player.llm_provider = "mimo"
+    player.llm_model = model
+    player.llm_provider = provider
     player.system_prompt = "角色设定"
     player.personal_script = "个人剧本"
     player._init_model = lambda: Model()
     player._create_reaction_agent()
 
     assert captured["schema"] is SpeechReactionPayload
-    assert captured["model_kwargs"]["model"] == "mimo-v2.5"
+    assert captured["model_kwargs"]["model"] == model
     assert captured["model_kwargs"]["timeout"] == REACTION_MODEL_TIMEOUT_SECONDS
     assert captured["model_kwargs"]["max_retries"] == 1
-    assert captured["structured_kwargs"] == {"method": "json_schema"}
+    assert captured["structured_kwargs"] == {"method": method}
 
 
 @pytest.mark.asyncio
@@ -292,3 +301,15 @@ async def test_visible_speech_remains_incremental_even_when_tool_order_is_imperf
         "先说半句",
         "**完整结论**",
     ]
+
+
+def test_reaction_preserves_provider_string_array_facts():
+    payload = SpeechReactionPayload.model_validate(
+        {"main_perspective": ["1. 广播是自动播放。", "2. 请核对门禁。"]}
+    )
+    assert payload.to_reaction().main_perspective == "1. 广播是自动播放。\n2. 请核对门禁。"
+
+
+def test_reaction_rejects_nontext_fact_arrays():
+    with pytest.raises(ValueError):
+        SpeechReactionPayload.model_validate({"main_perspective": [{"fact": "门禁"}]})

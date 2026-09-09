@@ -16,15 +16,9 @@ import logging
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any, Union, cast
+from typing import Any, Union
 
-from langchain.agents import create_agent
-from langchain.agents.middleware import (
-    ModelRetryMiddleware,
-    SummarizationMiddleware,
-    ToolRetryMiddleware,
-)
-from langchain.messages import AIMessageChunk, HumanMessage
+from langchain.messages import HumanMessage
 from langchain_core.exceptions import OutputParserException
 from langchain_core.messages import SystemMessage
 from langgraph.checkpoint.memory import InMemorySaver
@@ -32,20 +26,22 @@ from pydantic import ValidationError
 
 from app.agents.agent_prompts import build_role_system_prompt
 from app.agents.context import clear_db_session, set_db_session
+from app.agents.game_model_paths import (
+    bind_reaction_output,
+    build_role_agent,
+    create_game_model,
+    visible_speech_text,
+)
 from app.agents.reaction import (
-    REACTION_MODEL_TIMEOUT_SECONDS,
     REACTION_SLOW_LOG_SECONDS,
     SpeechReaction,
     SpeechReactionPayload,
     build_reaction_analysis_prompt,
     build_reaction_system_prompt,
 )
-from app.agents.state import GameAgentState
 from app.core.config import settings
-from app.core.llm_factory import SupportedModel, create_llm, create_summary_llm
+from app.core.llm_factory import create_summary_llm
 
-# 瓶颈 step-3.5-flash: 256K
-SUMMARY_TRIGGER_TOKENS = 200000
 logger = logging.getLogger(__name__)
 
 
@@ -172,17 +168,12 @@ class AgentPlayer:
     def _init_model(self):
         """初始化LLM模型"""
         try:
-            return create_llm(
-                model=cast(SupportedModel, self.llm_model.lower()),
-                temperature=0.8,
-                api_key=settings.get_api_key(self.llm_provider.lower()),
-                timeout=90,
-                max_retries=2,
-                disable_thinking=True,
+            return create_game_model(
+                self.llm_model, "speech", api_key=settings.get_api_key(self.llm_provider.lower())
             )
         except Exception:
             # 如果初始化失败，使用默认模型
-            return create_llm(temperature=0.8, timeout=90, max_retries=2, disable_thinking=True)
+            return create_game_model(settings.get_llm_model_name(), "speech")
 
     def _init_summary_model(self):
         """初始化用于摘要的轻量级LLM模型"""
@@ -196,45 +187,13 @@ class AgentPlayer:
         """
         创建主LangChain Agent
         """
-        from app.agents.tools import get_tools
-
-        model = self._init_model()
-        summary_model = self._init_summary_model()
-
-        middleware = [
-            # 清理历史中间件（暂时弃用）
-            # clear_irrelevant_history_messages,
-            # 内置中间件
-            SummarizationMiddleware(
-                model=summary_model,
-                trigger=("tokens", SUMMARY_TRIGGER_TOKENS),
-                keep=("messages", 20),
-            ),
-            ModelRetryMiddleware(
-                max_retries=3,
-                backoff_factor=2.0,
-                initial_delay=1.0,
-            ),
-            ToolRetryMiddleware(
-                max_retries=3,
-                backoff_factor=2.0,
-                initial_delay=1.0,
-            ),
-            # 其他自定义的中间件
-            *self._middleware,
-        ]
-
-        # 构建完整系统提示词
-        full_system_prompt = self._build_system_prompt()
-
-        # 创建Agent，使用 state_schema
-        self._agent = create_agent(
-            model=model,
-            tools=get_tools(rag_enabled=self.rag_enabled),
-            middleware=middleware,
+        self._agent = build_role_agent(
+            self._init_model(),
+            self._init_summary_model(),
+            system_prompt=self._build_system_prompt(),
+            rag_enabled=self.rag_enabled,
             checkpointer=self._checkpointer,
-            system_prompt=full_system_prompt,
-            state_schema=GameAgentState,
+            middleware=self._middleware,
         )
 
     def _create_reaction_agent(self):
@@ -245,24 +204,18 @@ class AgentPlayer:
         """
         self.reaction_llm_model = self.llm_model
         try:
-            reaction_model = create_llm(
-                model=cast(SupportedModel, self.reaction_llm_model.lower()),
-                temperature=0.5,
+            reaction_model = create_game_model(
+                self.reaction_llm_model,
+                "reaction",
                 api_key=settings.get_api_key(self.llm_provider.lower()),
-                timeout=REACTION_MODEL_TIMEOUT_SECONDS,
-                max_retries=1,
-                disable_thinking=True,
             )
         except Exception:
             reaction_model = self._init_model()
 
         # Reactions are typed inference results, not optional business-tool calls.
-        # Every selectable provider uses the same provider-native JSON Schema;
-        # Pydantic performs a second validation after the provider response.
-        self._reaction_structured = reaction_model.with_structured_output(
-            SpeechReactionPayload,
-            method="json_schema",
-        )
+        # Use the provider-supported format; health probes share this registry
+        # choice and the same Pydantic validation contract.
+        self._reaction_structured = bind_reaction_output(reaction_model, self.reaction_llm_model)
         self._reaction_system_prompt = build_reaction_system_prompt(
             self.system_prompt, self.personal_script
         )
@@ -519,29 +472,8 @@ submit_final_vote(suspect_name="角色全名", reasoning="1-2句投票理由")
                     token, metadata = data
                     node = metadata.get("langgraph_node", "unknown") or "unknown"
 
-                    if isinstance(token, AIMessageChunk):
-                        # 跳过工具调用相关的chunk
-                        if token.tool_calls or token.tool_call_chunks:
-                            continue
-
-                        # 处理 content_blocks - 只提取 text 类型的内容
-                        text_parts: list[str] = []
-                        if hasattr(token, "content_blocks") and token.content_blocks:
-                            text_blocks = [
-                                b for b in token.content_blocks if b.get("type") == "text"
-                            ]
-                            for block in text_blocks:
-                                text_content = block.get("text", "")
-                                if text_content:
-                                    text_parts.append(text_content)
-                        # 回退：如果没有 content_blocks，使用 token.text
-                        elif token.text:
-                            text_parts.append(token.text)
-
-                        # Forward every text delta immediately. Tool ordering is a
-                        # prompt-level behaviour rule; it must never disable real SSE.
-                        for text_content in text_parts:
-                            yield StreamToken(text=text_content, node=node)
+                    for text_content in visible_speech_text(token):
+                        yield StreamToken(text=text_content, node=node)
 
                 elif stream_mode == "custom":
                     # 处理工具自定义消息 - 友好提示文案
@@ -606,7 +538,8 @@ submit_final_vote(suspect_name="角色全名", reasoning="1-2句投票理由")
                     prompt += """
 
 【格式纠正】上次返回格式不符合要求。suspicion_changes 和
-suspected_by_changes 必须是数组；没有变化时返回空数组。请重新返回完整结构。"""
+suspected_by_changes 必须是数组；没有变化时返回空数组。main_perspective 必须是字符串，
+不要返回数组或对象；score 必须是 0 到 1 的绝对怀疑程度。请重新返回完整结构。"""
                 try:
                     result = await self._reaction_structured.ainvoke(
                         [

@@ -125,7 +125,7 @@ test('创作长任务在刷新和返回大厅后仍恢复到同一工作流', as
 
   await expect(page.getByText('灯塔管理员失踪，四名访客各自隐瞒了到访时间。')).toBeVisible()
   expect(startRequests).toBe(1)
-  expect(stateRequests).toBeGreaterThan(0)
+  await expect.poll(() => stateRequests).toBeGreaterThan(0)
 })
 
 test('刷新后仍展示未完成的资源任务而不是误报创作完成', async ({ page }) => {
@@ -191,7 +191,7 @@ test('刷新后仍展示未完成的资源任务而不是误报创作完成', as
 
   await page.goto('/?editor=resume')
 
-  await expect(page.getByText('资源生成')).toBeVisible()
+  await expect(page.getByRole('heading', { name: '资源生成', exact: true })).toBeVisible()
   await expect(page.getByText('甲 个人剧本向量化')).toBeVisible()
   await expect(page.getByText('剧本创建完成！')).toHaveCount(0)
 })

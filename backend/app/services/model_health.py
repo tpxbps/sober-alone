@@ -4,21 +4,33 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
 from collections.abc import Awaitable, Callable
+from contextlib import aclosing
 from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any, Literal
 
+from httpx import TimeoutException
 from langchain_core.messages import HumanMessage, SystemMessage
+from langgraph.checkpoint.memory import InMemorySaver
+from openai import APIConnectionError, APITimeoutError
 
+from app.agents.agent_prompts import build_role_system_prompt
+from app.agents.game_model_paths import (
+    bind_reaction_output,
+    build_role_agent,
+    create_game_model,
+    visible_speech_text,
+)
 from app.agents.reaction import (
     SpeechReactionPayload,
     build_reaction_analysis_prompt,
     build_reaction_system_prompt,
 )
 from app.core.config import settings
-from app.core.llm_factory import create_llm
+from app.core.llm_factory import create_summary_llm
 from app.core.model_registry import MODEL_SPECS, ModelSpec
 
 logger = logging.getLogger(__name__)
@@ -29,8 +41,7 @@ FIRST_TOKEN_SLOW_THRESHOLD_SECONDS = 5.0
 # their separate, much more generous production timeout.
 REACTION_PROBE_TIMEOUT_SECONDS = 30.0
 REACTION_SLOW_THRESHOLD_SECONDS = 12.0
-CACHE_TTL_SECONDS = 15 * 60.0
-INCOMPLETE_CACHE_TTL_SECONDS = 90.0
+CACHE_TTL_SECONDS = 30 * 60.0
 MODEL_PROBE_CONCURRENCY = 4
 TRANSIENT_PROBE_ATTEMPTS = 2
 
@@ -47,59 +58,75 @@ HealthDimension = Literal["speech", "reaction"]
 
 _cached_models: list[dict[str, Any]] | None = None
 _cached_at_monotonic = 0.0
-_cached_ttl_seconds = CACHE_TTL_SECONDS
 _probe_task: asyncio.Task[list[dict[str, Any]]] | None = None
+_probing_models: dict[str, dict[str, Any]] = {}
 
 
-def _chunk_text(chunk: Any) -> str:
-    text = getattr(chunk, "text", "")
-    if isinstance(text, str) and text.strip():
-        return text.strip()
-    content = getattr(chunk, "content", "")
-    return content.strip() if isinstance(content, str) else ""
-
-
-def _safe_error_hint(exc: Exception) -> tuple[str, str]:
-    status_code = getattr(exc, "status_code", None)
-    if status_code in {401, 403}:
-        return "unavailable", "该模型当前鉴权异常，请检查对应 API Key"
-    return "slow", "该模型当前探测异常，响应可能较慢"
+def _is_timeout(exc: BaseException) -> bool:
+    return isinstance(exc, (TimeoutError, APITimeoutError, TimeoutException)) or getattr(
+        exc, "status_code", None
+    ) in {408, 504}
 
 
 async def _measure_first_token(spec: ModelSpec) -> int:
     """Measure speaking-agent time to first visible token in milliseconds."""
-    model = create_llm(
-        model=spec.id,
-        temperature=0,
+    model = create_game_model(
+        spec.id,
+        "speech",
         timeout=int(FIRST_TOKEN_PROBE_TIMEOUT_SECONDS),
         max_retries=0,
-        disable_thinking=True,
     )
-    messages = [
-        SystemMessage(content="这是一次服务连通性检查。请严格遵循用户要求。"),
-        HumanMessage(content="只回复一个字：好"),
-    ]
+    try:
+        summary_model = create_summary_llm()
+    except Exception:
+        summary_model = model
+    agent = build_role_agent(
+        model,
+        summary_model,
+        system_prompt=build_role_system_prompt(_REACTION_PROBE_ROLE, _REACTION_PROBE_SCRIPT, False),
+        rag_enabled=False,
+        checkpointer=InMemorySaver(),
+        middleware=[],
+    )
+    state = {
+        "messages": [
+            HumanMessage(
+                content="【当前阶段：自我介绍】用两三句话介绍你的身份和21:35看到的情况，不要透露未公开的秘密。"
+            )
+        ],
+        "session_id": "model-health",
+        "script_id": "model-health",
+        "character_id": "linlan",
+        "character_name": "林岚",
+        "current_stage": "intro",
+        "current_round": 0,
+        "character_name_map": {"linlan": "林岚", "luming": "陆鸣"},
+        "character_names": ["林岚", "陆鸣"],
+        "public_clues": [],
+    }
     started_at = time.perf_counter()
     async with asyncio.timeout(FIRST_TOKEN_PROBE_TIMEOUT_SECONDS):
-        async for chunk in model.astream(messages):
-            if _chunk_text(chunk):
-                return round((time.perf_counter() - started_at) * 1000)
+        stream = agent.astream(
+            state, {"configurable": {"thread_id": "probe"}}, stream_mode=["messages", "custom"]
+        )
+        async with aclosing(stream):
+            async for mode, data in stream:
+                if mode == "messages" and any(
+                    text.strip() for text in visible_speech_text(data[0])
+                ):
+                    return round((time.perf_counter() - started_at) * 1000)
     raise RuntimeError("empty model response")
 
 
 async def _measure_reaction(spec: ModelSpec) -> int:
     """Measure a production-shaped structured reaction through validation."""
-    model = create_llm(
-        model=spec.id,
-        temperature=0,
+    model = create_game_model(
+        spec.id,
+        "reaction",
         timeout=int(REACTION_PROBE_TIMEOUT_SECONDS),
         max_retries=0,
-        disable_thinking=True,
     )
-    structured = model.with_structured_output(
-        SpeechReactionPayload,
-        method="json_schema",
-    )
+    structured = bind_reaction_output(model, spec.id)
     messages = [
         SystemMessage(
             content=build_reaction_system_prompt(
@@ -118,74 +145,67 @@ async def _measure_reaction(spec: ModelSpec) -> int:
     started_at = time.perf_counter()
     async with asyncio.timeout(REACTION_PROBE_TIMEOUT_SECONDS):
         result = await structured.ainvoke(messages)
-    SpeechReactionPayload.model_validate(result).to_reaction()
+    reaction = SpeechReactionPayload.model_validate(result).to_reaction()
+    if not reaction.main_perspective.strip():
+        raise ValueError("empty reaction analysis")
     return round((time.perf_counter() - started_at) * 1000)
 
 
 async def _measure_with_transient_retry(
     measure: Callable[[ModelSpec], Awaitable[int]], spec: ModelSpec
 ) -> int:
-    """Retry one transient probe failure without hiding auth failures."""
-
-    last_error: Exception | None = None
+    """Retry a connection/server failure once; timeouts and invalid output are final."""
     for attempt in range(TRANSIENT_PROBE_ATTEMPTS):
         try:
             return await measure(spec)
-        except Exception as exc:  # noqa: BLE001 - provider exceptions are intentionally normalized
-            if getattr(exc, "status_code", None) in {401, 403}:
+        except Exception as exc:  # noqa: BLE001 - normalize provider failures
+            status = getattr(exc, "status_code", None)
+            transient = isinstance(exc, (APIConnectionError, ConnectionError)) or (
+                isinstance(status, int) and 500 <= status < 600
+            )
+            if _is_timeout(exc) or not transient or attempt + 1 == TRANSIENT_PROBE_ATTEMPTS:
                 raise
-            # A full probe timeout already consumed the entire dimension budget.
-            # Let the UI report an incomplete sample and offer an explicit retry.
-            if isinstance(exc, TimeoutError):
-                raise
-            last_error = exc
-            if attempt + 1 < TRANSIENT_PROBE_ATTEMPTS:
-                await asyncio.sleep(0.25)
-    assert last_error is not None
-    raise last_error
+            await asyncio.sleep(0.25)
+    raise AssertionError("Probe attempts exhausted")
+
+
+async def _measure_dimension(
+    measure: Callable[[ModelSpec], Awaitable[int]], spec: ModelSpec, budget_seconds: float
+) -> int:
+    # Retries share the dimension deadline instead of doubling its total budget.
+    async with asyncio.timeout(budget_seconds):
+        return await _measure_with_transient_retry(measure, spec)
 
 
 def _dimension_is_slow(value: int | Exception, threshold_seconds: float) -> bool:
     return isinstance(value, int) and value > threshold_seconds * 1000
 
 
-def _health_message(
-    status: str,
-    slow_dimensions: list[HealthDimension],
-    failed_dimensions: list[HealthDimension],
-) -> str:
-    if status == "unavailable":
-        return "该模型当前鉴权异常，请检查对应 API Key"
-    if status == "unknown":
-        if failed_dimensions == ["reaction"]:
-            return "本次反应测速未完成，可稍后重新测速"
-        if failed_dimensions == ["speech"]:
-            return "本次发言测速未完成，可稍后重新测速"
-        return "本次模型测速未完成，可能受网络波动影响"
-    if slow_dimensions == ["reaction"]:
-        return "该模型当前反应分析稍慢，可能影响每轮讨论节奏"
-    if slow_dimensions == ["speech"]:
-        return "该模型当前发言响应稍慢"
-    if slow_dimensions:
-        return "该模型当前发言与反应分析均稍慢，可能影响讨论节奏"
-    return "响应正常"
+def _health_message(status: str) -> str:
+    return {
+        "unavailable": "模型暂不可用，请选择其他模型",
+        "timeout": "测速超时，请稍后重试",
+        "unknown": "测速失败，请重试",
+        "slow": "响应较慢",
+    }.get(status, "响应正常")
 
 
 async def _probe_model(spec: ModelSpec) -> dict[str, Any]:
     """Probe speaking and reaction paths concurrently for one configured model."""
-    checked_at = datetime.now(UTC).isoformat()
     first_token, reaction = await asyncio.gather(
-        _measure_with_transient_retry(_measure_first_token, spec),
-        _measure_with_transient_retry(_measure_reaction, spec),
+        _measure_dimension(_measure_first_token, spec, FIRST_TOKEN_PROBE_TIMEOUT_SECONDS),
+        _measure_dimension(_measure_reaction, spec, REACTION_PROBE_TIMEOUT_SECONDS),
         return_exceptions=True,
     )
-    errors = [value for value in (first_token, reaction) if isinstance(value, Exception)]
+    measurements = {"speech": first_token, "reaction": reaction}
+    errors = [value for value in measurements.values() if isinstance(value, Exception)]
     unavailable = any(getattr(error, "status_code", None) in {401, 403} for error in errors)
-    failed_dimensions: list[HealthDimension] = []
-    if isinstance(first_token, Exception):
-        failed_dimensions.append("speech")
-    if isinstance(reaction, Exception):
-        failed_dimensions.append("reaction")
+    failed_dimensions = [dim for dim, value in measurements.items() if isinstance(value, Exception)]
+    timeout_dimensions = [
+        dim
+        for dim, value in measurements.items()
+        if isinstance(value, Exception) and _is_timeout(value)
+    ]
     slow_dimensions: list[HealthDimension] = []
     if _dimension_is_slow(first_token, FIRST_TOKEN_SLOW_THRESHOLD_SECONDS):
         slow_dimensions.append("speech")
@@ -194,13 +214,14 @@ async def _probe_model(spec: ModelSpec) -> dict[str, Any]:
     status = (
         "unavailable"
         if unavailable
+        else "timeout"
+        if timeout_dimensions
         else "unknown"
         if failed_dimensions
         else "slow"
         if slow_dimensions
         else "normal"
     )
-
     for error in errors:
         logger.info(
             "Model health probe failed model=%s error=%s status=%s",
@@ -208,80 +229,75 @@ async def _probe_model(spec: ModelSpec) -> dict[str, Any]:
             type(error).__name__,
             getattr(error, "status_code", None),
         )
-
     first_token_ms = first_token if isinstance(first_token, int) else None
-    reaction_ms = reaction if isinstance(reaction, int) else None
     return {
         "model": spec.id,
         "status": status,
-        # Backward-compatible alias retained for existing clients.
         "latency_ms": first_token_ms,
         "first_token_latency_ms": first_token_ms,
-        "reaction_latency_ms": reaction_ms,
+        "reaction_latency_ms": reaction if isinstance(reaction, int) else None,
         "slow_dimensions": slow_dimensions,
         "failed_dimensions": failed_dimensions,
-        "message": _health_message(status, slow_dimensions, failed_dimensions),
-        "checked_at": checked_at,
+        "timeout_dimensions": timeout_dimensions,
+        "message": _health_message(status),
+        "checked_at": datetime.now(UTC).isoformat(),
     }
 
 
 async def _probe_configured_models() -> list[dict[str, Any]]:
-    global _cached_at_monotonic, _cached_models, _cached_ttl_seconds
-
+    global _cached_at_monotonic, _cached_models
     specs = [spec for spec in MODEL_SPECS if settings.get_api_key(spec.provider)]
     semaphore = asyncio.Semaphore(MODEL_PROBE_CONCURRENCY)
 
     async def probe(spec: ModelSpec) -> dict[str, Any]:
         async with semaphore:
-            return await _probe_model(spec)
+            result = await _probe_model(spec)
+            _probing_models[spec.id] = result
+            return result
 
     models = list(await asyncio.gather(*(probe(spec) for spec in specs)))
     _cached_models = models
     _cached_at_monotonic = time.monotonic()
-    _cached_ttl_seconds = (
-        INCOMPLETE_CACHE_TTL_SECONDS
-        if any(item["status"] == "unknown" for item in models)
-        else CACHE_TTL_SECONDS
-    )
     return models
 
 
-async def get_model_health(*, force_refresh: bool = False) -> dict[str, Any]:
-    """Return cached health hints, sharing one probe run across concurrent callers."""
-    global _probe_task
-
-    cache_is_fresh = (
-        _cached_models is not None
-        and time.monotonic() - _cached_at_monotonic < _cached_ttl_seconds
-    )
-    if cache_is_fresh and not force_refresh:
-        return {
-            "models": deepcopy(_cached_models),
-            "cached": True,
-            "max_age_seconds": round(_cached_ttl_seconds),
-        }
-
-    if _probe_task is None or _probe_task.done():
-        _probe_task = asyncio.create_task(_probe_configured_models())
-    task = _probe_task
-    try:
-        models = await asyncio.shield(task)
-    finally:
-        if task.done() and _probe_task is task:
-            _probe_task = None
+def _snapshot(*, probing: bool, cached: bool) -> dict[str, Any]:
+    # Return remaining age so a browser cannot extend a nearly-expired server cache.
+    remaining = max(0, math.ceil(CACHE_TTL_SECONDS - (time.monotonic() - _cached_at_monotonic)))
     return {
-        "models": deepcopy(models),
-        "cached": False,
-        "max_age_seconds": round(_cached_ttl_seconds),
+        "models": deepcopy(list(_probing_models.values()) if probing else (_cached_models or [])),
+        "cached": cached,
+        "probing": probing,
+        "max_age_seconds": 0 if probing else remaining,
     }
 
 
+async def get_model_health(
+    *, force_refresh: bool = False, wait_for_completion: bool = True
+) -> dict[str, Any]:
+    """Share one process-wide run; HTTP callers receive progressive snapshots."""
+    global _probe_task
+    running = _probe_task is not None and not _probe_task.done()
+    cache_is_fresh = (
+        _cached_models is not None and time.monotonic() - _cached_at_monotonic < CACHE_TTL_SECONDS
+    )
+    if not running and cache_is_fresh and not force_refresh:
+        return _snapshot(probing=False, cached=True)
+    if not running:
+        _probing_models.clear()
+        _probe_task = asyncio.create_task(_probe_configured_models())
+    if not wait_for_completion:
+        return _snapshot(probing=True, cached=False)
+    await asyncio.shield(_probe_task)
+    return _snapshot(probing=False, cached=False)
+
+
 def clear_model_health_cache() -> None:
-    """Reset process-local probe state. Intended for tests and explicit refreshes."""
-    global _cached_at_monotonic, _cached_models, _cached_ttl_seconds, _probe_task
+    """Reset process-local state for tests."""
+    global _cached_at_monotonic, _cached_models, _probe_task
     if _probe_task is not None and not _probe_task.done():
         _probe_task.cancel()
     _probe_task = None
     _cached_models = None
     _cached_at_monotonic = 0.0
-    _cached_ttl_seconds = CACHE_TTL_SECONDS
+    _probing_models.clear()

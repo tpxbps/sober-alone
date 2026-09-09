@@ -63,6 +63,15 @@ class SpeechReactionPayload(BaseModel):
     suspected_by_changes: list[SuspectedByChange] = Field(default_factory=list)
     main_perspective: str = ""
 
+    @field_validator("main_perspective", mode="before")
+    @classmethod
+    def normalize_perspective_points(cls, value: Any) -> Any:
+        # JSON-mode providers may express numbered facts as an array of strings.
+        # Preserve all text; leave other shapes to Pydantic validation and repair.
+        if isinstance(value, list) and all(isinstance(item, str) for item in value):
+            return "\n".join(value)
+        return value
+
     @model_validator(mode="before")
     @classmethod
     def accept_map_shaped_fallbacks(cls, value: Any) -> Any:
@@ -130,7 +139,9 @@ def build_reaction_system_prompt(role_prompt: str, personal_script: str) -> str:
 只返回一个合法 JSON 对象，严格按以下结构返回：
 - suspicion_changes: 数组；每项包含 target、score、reason。没有变化时返回 []。
 - suspected_by_changes: 数组；每项包含 suspecter、score、reason、need_response。没有变化时返回 []。
-- main_perspective: 精简提炼发言中的关键事实、时间线、指控或问题。
+- main_perspective: 字符串，精简提炼发言中的关键事实、时间线、指控或问题；分点也写在同一个字符串内。
+- target、suspecter、reason 均为字符串；need_response 为 JSON 布尔值 true 或 false。
+- score 为 0 到 1 之间的数值，表示更新后的绝对怀疑程度（0=不怀疑，1=非常怀疑），不是增减量，也不是百分数。
 
 不要把角色名作为 JSON 属性名，也不要把单条变化直接写成对象。"""
 

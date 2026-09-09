@@ -25,9 +25,9 @@ async def capabilities() -> dict:
 
 @router.get("/api/v1/system/model-health")
 async def model_health() -> dict:
-    return await get_model_health()
+    return await get_model_health(wait_for_completion=False)
 
 
 @router.post("/api/v1/system/model-health/refresh")
 async def refresh_model_health() -> dict:
-    return await get_model_health(force_refresh=True)
+    return await get_model_health(force_refresh=True, wait_for_completion=False)

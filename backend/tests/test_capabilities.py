@@ -67,7 +67,7 @@ def test_summary_model_falls_back_to_primary_without_stepfun(monkeypatch):
     assert kwargs["disable_thinking"] is True
 
 
-def test_openai_compatible_providers_do_not_receive_deepseek_specific_parameters(monkeypatch):
+def test_openai_compatible_providers_receive_supported_low_latency_parameters(monkeypatch):
     captured = []
 
     def fake_openai(model, _key, _base_url, _temperature, _timeout, _retries, extra_body=None):
@@ -87,5 +87,11 @@ def test_openai_compatible_providers_do_not_receive_deepseek_specific_parameters
         ("qwen3.8-flash", {"enable_thinking": False}),
         ("mimo-v2.5", None),
         ("hy3", None),
-        ("glm-5.3-flash", None),
+        ("glm-5.3-flash", {"reasoning_effort": "low"}),
     ]
+
+
+def test_glm_default_thinking_is_preserved_unless_low_latency_is_requested(monkeypatch):
+    monkeypatch.setattr(llm_factory.settings, "ZHIPUAI_API_KEY", "z")
+    monkeypatch.setattr(llm_factory, "_create_openai_compatible", lambda *args, **kwargs: kwargs)
+    assert llm_factory.create_llm(model="glm-5.3-flash")["extra_body"] is None
