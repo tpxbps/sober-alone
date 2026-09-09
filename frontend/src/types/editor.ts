@@ -6,7 +6,18 @@ export interface StepInfo {
   needs_review: boolean;
 }
 
+export interface QualityReport {
+  report_id: string;
+  content_fingerprint: string;
+  status: "passed" | "warning" | "blocked" | "incomplete";
+  error?: string;
+  findings: Array<{ severity: "critical" | "major" | "minor"; field: string; evidence: string; impact: string; suggestion: string }>;
+}
+
 export interface EditorInterruptInfo {
+  human_review?: string;
+  first_draft?: string;
+  quality_report?: QualityReport;
   step: string;
   step_label: string;
   generated_content: string;
@@ -49,6 +60,8 @@ export interface EditorWorkflowState {
   }>;
   first_draft: string;
   review_opinion: string;
+  human_review?: string;
+  quality_report?: QualityReport;
   final_draft: string;
   character_scripts: Record<string, string>;
   game_data_sections: GameDataSections;
@@ -116,8 +129,9 @@ export const WORKFLOW_PHASES: WorkflowPhase[] = [
   { phase: "idea", label: "构思大纲", desc: "输入故事创意，设定基本参数", isAuto: false },
   { phase: "outline", label: "大纲审阅", desc: "审阅并修改AI生成的剧本大纲", isAuto: false },
   { phase: "first_draft", label: "初稿创作", desc: "基于大纲撰写完整剧本初稿并审阅", isAuto: false },
-  { phase: "review_final", label: "审稿修订", desc: "AI审稿意见与终稿修订", isAuto: false },
-  { phase: "game_data", label: "终稿定稿", desc: "结构化数据生成、审阅与保存", isAuto: false },
+  { phase: "review_report", label: "审稿意见", desc: "确认AI意见与真人补充", isAuto: false },
+  { phase: "review_final", label: "终稿确认", desc: "编辑并确认完整终稿", isAuto: false },
+  { phase: "game_data", label: "游戏数据", desc: "结构化数据确认与质量检查", isAuto: false },
   { phase: "assets", label: "资源生成", desc: "生成图片、语音、向量数据", isAuto: true },
 ];
 
@@ -129,8 +143,8 @@ export function getPhaseFromStep(step: string): WorkflowPhaseKey {
   if (step === "generate_outline" || step === "review_outline") return "outline";
   if (step === "generate_first_draft" || step === "review_first_draft")
     return "first_draft";
+  if (step === "review_by_llm" || step === "review_report") return "review_report";
   if (
-    step === "review_by_llm" ||
     step === "generate_final_draft" ||
     step === "review_final"
   )
@@ -139,6 +153,8 @@ export function getPhaseFromStep(step: string): WorkflowPhaseKey {
     step === "convert_to_game_data" ||
     step === "review_game_data" ||
     step === "normalize_game_data" ||
+    step === "check_game_quality" ||
+    step === "review_quality" ||
     step === "safety_check"
   )
     return "game_data";

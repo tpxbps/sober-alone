@@ -37,6 +37,8 @@ test('大厅 → 选角 → 发言 → 推进 → 投票 → 复盘', async ({ p
   let stage: 'intro' | 'vote' | 'review' = 'intro'
   let currentSpeaker: string | null = 'human'
   let records: unknown[] = []
+  let feedback: { recommended: boolean; comment: string } | null = null
+  let feedbackWrites = 0
 
   await page.addInitScript(() => {
     HTMLMediaElement.prototype.play = async () => undefined
@@ -78,6 +80,14 @@ test('大厅 → 选角 → 发言 → 推进 → 投票 → 复盘', async ({ p
     }
     if (path === '/api/v1/game/create' && method === 'POST') {
       return json(route, { success: true, session_id: 'e2e-session' })
+    }
+    if (path.endsWith('/feedback')) {
+      if (method === 'PUT') {
+        feedbackWrites += 1
+        const body = route.request().postDataJSON()
+        feedback = { recommended: body.recommended, comment: body.comment ?? feedback?.comment ?? '' }
+      }
+      return json(route, { success: true, feedback })
     }
     if (path.endsWith('/state')) {
       return json(route, {
@@ -245,6 +255,17 @@ test('大厅 → 选角 → 发言 → 推进 → 投票 → 复盘', async ({ p
   await page.getByRole('button', { name: '确认投票' }).click()
 
   await expect(page.getByRole('heading', { name: '复盘揭晓' })).toBeVisible()
+  await page.getByRole('button', { name: '推荐', exact: true }).click()
+  await expect(page.getByRole('button', { name: '推荐', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await page.getByRole('button', { name: '留下体验意见（可选）' }).click()
+  await page.getByRole('textbox', { name: '剧本体验意见' }).fill('线索清晰，希望增加辩解机会。')
+  await page.getByRole('button', { name: '提交体验意见' }).click()
+  await expect(page.getByRole('status')).toContainText('体验意见已保存')
+  await page.getByRole('button', { name: '不推荐', exact: true }).click()
+  await expect(page.getByRole('button', { name: '不推荐', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  expect(feedbackWrites).toBe(3)
+  expect(feedback!.comment).toContain('辩解机会')
+  await page.getByRole('button', { name: '收起体验意见' }).click()
   await expect(page.getByText(/真相揭晓/)).toBeVisible()
   await page.getByRole('button', { name: '播放语音' }).click()
   await expect(page.getByRole('button', { name: '停止播放语音' })).toBeVisible()

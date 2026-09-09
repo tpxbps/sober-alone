@@ -12,12 +12,24 @@ REQUIRED_TABLES = frozenset(
         "game_records",
         "editor_workflows",
         "editor_operations",
+        "script_feedback",
     }
 )
 REQUIRED_COLUMNS = {
-    "scripts": frozenset({"owner_key_hash", "clue_stages", "clue_schema_version"}),
+    "scripts": frozenset(
+        {
+            "owner_key_hash",
+            "clue_stages",
+            "clue_schema_version",
+            "content_fingerprint",
+            "ai_review",
+            "quality_report",
+        }
+    ),
     "player_states": frozenset({"last_seen_human_record_id"}),
-    "game_sessions": frozenset({"runtime_snapshot", "revealed_clues", "last_active_at"}),
+    "game_sessions": frozenset(
+        {"runtime_snapshot", "revealed_clues", "last_active_at", "reviewer_hash"}
+    ),
     "game_records": frozenset({"clue_refs"}),
 }
 INIT_COMMAND = "uv run python -m app.cli init"

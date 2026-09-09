@@ -3,12 +3,12 @@ import { motion } from "framer-motion";
 import {
   Users,
   Clock,
-  Star,
   MoreVertical,
   Trash2,
   Sparkles,
   Pencil,
 } from "lucide-react";
+import { ScriptRating } from "./ScriptRating";
 import type { Script } from "@/types/game";
 import { DIFFICULTY_COLORS } from "@/types/game";
 import { editorApi } from "@/lib/editorApi";
@@ -188,11 +188,10 @@ export function ScriptCard({ script, onClick, onDeleted, onEdit }: ScriptCardPro
             <Clock className="w-4 h-4" />
             <span>{script.estimated_duration}分钟</span>
           </div>
-          <div className="flex items-center gap-1.5 ml-auto">
-            <Star className="w-4 h-4 text-warning" />
-            <span>5.0</span>
-          </div>
+
         </div>
+
+        <ScriptRating script={script} />
 
         {/* Overview */}
         <p className="text-sm text-muted-foreground line-clamp-2">

@@ -171,9 +171,33 @@ def main() -> None:
         "regenerate-clue-tts", help="Back up and regenerate only clue-stage audio"
     )
     clue_tts.add_argument("--script-id", action="append", default=[])
+    feedback = subparsers.add_parser(
+        "export-feedback", help="Export private player feedback as JSON to stdout"
+    )
+    feedback.add_argument("--script-id", default=None)
     args = parser.parse_args()
 
-    if args.command == "init":
+    if args.command == "export-feedback":
+        import json
+
+        with sqlite3.connect(_database_path().as_uri() + "?mode=ro", uri=True) as connection:
+            connection.row_factory = sqlite3.Row
+            query = "SELECT s.title, f.recommended, f.comment, f.source_session_id, f.content_fingerprint, f.created_at, f.updated_at FROM script_feedback f JOIN scripts s ON s.script_id = f.script_id"
+            params = ()
+            if args.script_id:
+                query += " WHERE f.script_id = ?"
+                params = (args.script_id,)
+            print(
+                json.dumps(
+                    [
+                        dict(row)
+                        for row in connection.execute(query + " ORDER BY f.updated_at DESC", params)
+                    ],
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+    elif args.command == "init":
         init()
     elif args.command == "adopt-legacy-db":
         adopt_legacy_db(args.path)

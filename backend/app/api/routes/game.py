@@ -5,16 +5,20 @@ Game API routes
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.routes.feedback import router as feedback_router
 from app.db.session import get_db
+from app.game.content_quality import public_ai_review
 from app.script_editor.ownership import optional_author_key_hash, owner_hash_matches
 from app.services.game_service import GameService
+from app.services.script_feedback import feedback_summaries, feedback_summary, reviewer_identity
 
 router = APIRouter(prefix="/game", tags=["game"])
+router.include_router(feedback_router)
 
 
 # ============== Request/Response Models ==============
@@ -84,7 +88,12 @@ class TTSGenerateRequest(BaseModel):
 
 
 @router.post("/create", response_model=GameCreateResponse)
-async def create_game(request: GameCreateRequest, db: AsyncSession = Depends(get_db)):
+async def create_game(
+    request: GameCreateRequest,
+    http_request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
     """
     创建新游戏对局
 
@@ -106,6 +115,7 @@ async def create_game(request: GameCreateRequest, db: AsyncSession = Depends(get
         script_id=request.script_id,
         human_character_id=request.human_character_id,
         llm_configs=llm_configs_dict,
+        reviewer_hash=reviewer_identity(http_request, response),
     )
     return GameCreateResponse(**result)
 
@@ -422,10 +432,13 @@ async def list_scripts(
     result = await db.execute(
         text(
             "SELECT script_id, title, overview, tags, difficulty, player_count, "
-            "cover_image_url, is_ai_generated, estimated_duration, owner_key_hash FROM scripts"
+            "cover_image_url, is_ai_generated, estimated_duration, owner_key_hash, "
+            "content_fingerprint, ai_review FROM scripts"
         )
     )
     scripts = result.fetchall()
+    summaries = await feedback_summaries(db)
+    import json
 
     return {
         "success": True,
@@ -441,6 +454,10 @@ async def list_scripts(
                 "is_ai_generated": bool(row[7]) if row[7] is not None else False,
                 "estimated_duration": row[8] if row[8] else 0,
                 "can_manage": owner_hash_matches(row[9], owner_key_hash),
+                "feedback_summary": summaries.get(row[0], feedback_summary()),
+                "ai_review": public_ai_review(
+                    json.loads(row[11]) if isinstance(row[11], str) else row[11], row[10]
+                ),
             }
             for row in scripts
         ],

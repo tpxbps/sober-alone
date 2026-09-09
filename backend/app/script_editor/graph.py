@@ -14,6 +14,11 @@ from app.script_editor.nodes.final_draft import generate_final_draft
 from app.script_editor.nodes.first_draft import generate_first_draft
 from app.script_editor.nodes.init_node import init_workflow
 from app.script_editor.nodes.outline import generate_outline
+from app.script_editor.nodes.quality_check import (
+    check_game_quality,
+    quality_approved,
+    review_quality,
+)
 from app.script_editor.nodes.review import review_by_llm
 from app.script_editor.nodes.review_nodes import (
     review_asset_plan,
@@ -21,6 +26,7 @@ from app.script_editor.nodes.review_nodes import (
     review_first_draft,
     review_game_data,
     review_outline,
+    review_report,
 )
 from app.script_editor.nodes.safety_check import safety_check
 from app.script_editor.nodes.save import generate_assets, save_to_database
@@ -80,17 +86,19 @@ def _route_from_start(state: ScriptGenState) -> Literal["init_workflow", "review
 
 def _route_after_normalize(
     state: ScriptGenState,
-) -> Literal["review_game_data", "safety_check"]:
+) -> Literal["review_game_data", "check_game_quality"]:
     if state.get("data_validation_errors"):
         return "review_game_data"
-    return "safety_check"
+    return "check_game_quality"
 
 
 def _route_after_safety_check(
     state: ScriptGenState,
-) -> Literal["prepare_asset_plan", "save_to_database", "review_game_data"]:
+) -> Literal["prepare_asset_plan", "save_to_database", "review_game_data", "normalize_game_data"]:
     """安全审查后路由：通过→保存，未通过→返回修改"""
     if state.get("safety_passed", False):
+        if not quality_approved(state):
+            return "normalize_game_data"
         if state.get("workflow_mode") == "edit":
             return "prepare_asset_plan"
         return "save_to_database"
@@ -114,8 +122,9 @@ def build_script_gen_graph(checkpointer=None):
     拓扑：
     START → init → generate_outline → review_outline ←─→ generate_outline
       → generate_first_draft → review_first_draft ←─→ generate_first_draft
-      → review_by_llm → generate_final_draft → review_final ←─→ generate_final_draft
+      → review_by_llm → review_report → generate_final_draft → review_final
       → convert_to_game_data → review_game_data ←─→ convert_to_game_data
+      → normalize_game_data → check_game_quality → review_quality (必要时确认)
       → safety_check → (pass) → save_to_database → (success) → generate_assets → END
                                               └── (error) → END
                    └── (fail) → review_game_data
@@ -131,6 +140,9 @@ def build_script_gen_graph(checkpointer=None):
     builder.add_node("review_by_llm", review_by_llm)
     builder.add_node("generate_final_draft", generate_final_draft)
     builder.add_node("review_final", review_final)
+    builder.add_node("review_report", review_report)
+    builder.add_node("check_game_quality", check_game_quality)
+    builder.add_node("review_quality", review_quality)
     builder.add_node("convert_to_game_data", convert_to_game_data)
     builder.add_node("review_game_data", review_game_data)
     builder.add_node("normalize_game_data", normalize_edited_game_data)
@@ -166,7 +178,14 @@ def build_script_gen_graph(checkpointer=None):
     )
 
     # 审稿 → 生成终稿 → 终稿审阅
-    builder.add_edge("review_by_llm", "generate_final_draft")
+    builder.add_edge("review_by_llm", "review_report")
+    builder.add_conditional_edges(
+        "review_report",
+        lambda s: (
+            "review_by_llm" if s.get("_review_action") == "regenerate" else "generate_final_draft"
+        ),
+        ["review_by_llm", "generate_final_draft"],
+    )
     builder.add_edge("generate_final_draft", "review_final")
 
     # 终稿审阅后条件路由
@@ -189,18 +208,39 @@ def build_script_gen_graph(checkpointer=None):
     builder.add_conditional_edges(
         "normalize_game_data",
         _route_after_normalize,
-        ["review_game_data", "safety_check"],
+        ["review_game_data", "check_game_quality"],
+    )
+
+    builder.add_conditional_edges(
+        "check_game_quality",
+        lambda s: "safety_check" if quality_approved(s) else "review_quality",
+        ["safety_check", "review_quality"],
+    )
+    builder.add_conditional_edges(
+        "review_quality",
+        lambda s: (
+            "safety_check"
+            if quality_approved(s)
+            else "check_game_quality"
+            if s.get("_review_action") == "retry_quality"
+            else "review_game_data"
+        ),
+        ["safety_check", "check_game_quality", "review_game_data"],
     )
 
     # 安全审查后条件路由（通过→保存，未通过→返回修改）
     builder.add_conditional_edges(
         "safety_check",
         _route_after_safety_check,
-        ["prepare_asset_plan", "save_to_database", "review_game_data"],
+        ["prepare_asset_plan", "save_to_database", "review_game_data", "normalize_game_data"],
     )
 
     builder.add_edge("prepare_asset_plan", "review_asset_plan")
-    builder.add_edge("review_asset_plan", "save_to_database")
+    builder.add_conditional_edges(
+        "review_asset_plan",
+        lambda s: "save_to_database" if quality_approved(s) else "normalize_game_data",
+        ["save_to_database", "normalize_game_data"],
+    )
 
     # 保存成功后才生成资源；保存失败则保留 error_message 并停止
     builder.add_conditional_edges(

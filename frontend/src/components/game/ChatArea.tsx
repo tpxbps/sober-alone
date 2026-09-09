@@ -11,6 +11,7 @@ import type {
 import { Markdown } from "@/components/ui/Markdown";
 import { GameMessageMarkdown } from "@/components/ui/GameMessageMarkdown";
 import { StreamingBubble } from "@/components/game/StreamingBubble";
+import { GameFeedback } from "./GameFeedback";
 import { ChatInputArea } from "@/components/game/ChatInputArea";
 import { SpeakerIcon, type SpeakerState } from "@/components/ui/SpeakerIcon";
 import { AudioSpeedButton } from "@/components/ui/AudioSpeedButton";
@@ -628,6 +629,9 @@ export function ChatArea({
       </div>
 
       {/* Input Area */}
+      {stage === "review" && records.some((record) => record.stage === "review" && !record.speaker_id) && (
+        <div className="px-4 pt-3 max-h-[45vh] overflow-y-auto"><GameFeedback /></div>
+      )}
       <ChatInputArea
         stage={stage}
         isStreaming={isStreaming}

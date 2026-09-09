@@ -28,6 +28,9 @@ export interface Script {
   full_truth?: string;
   is_ai_generated?: boolean;
   can_manage: boolean;
+  feedback_summary?: { total: number; positive: number; positive_rate: number | null; label: string; threshold: number };
+  ai_review?: { score: number; model: string; reviewed_at: string; rubric_version: string;
+    dimensions: Array<{ key: string; label: string; weight: number; score: number }> } | null;
 }
 
 // Character from backend

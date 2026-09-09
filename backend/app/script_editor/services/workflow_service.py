@@ -116,6 +116,7 @@ class ScriptEditorWorkflowService:
             "characters",
             "character_scripts",
             "human_review",
+            "quality_report_id",
             "game_data_sections",
             "selected_asset_ids",
         ):
@@ -168,6 +169,9 @@ class ScriptEditorWorkflowService:
             "generate_first_draft",
             "review_first_draft",
             "review_by_llm",
+            "review_report",
+            "check_game_quality",
+            "review_quality",
             "generate_final_draft",
             "review_final",
             "convert_to_game_data",
@@ -226,6 +230,10 @@ class ScriptEditorWorkflowService:
         checkpoint_config = self.config(thread_id, checkpoint_id)
         if state_updates:
             private_fields = {
+                "quality_report",
+                "quality_acceptance",
+                "ai_review",
+                "content_fingerprint",
                 "owner_key_hash",
                 "original_snapshot",
                 "workflow_mode",
@@ -311,6 +319,9 @@ class ScriptEditorWorkflowService:
                     "characters": value.get("characters", []),
                     "character_scripts": value.get("character_scripts", {}),
                     "review_opinion": value.get("review_opinion", ""),
+                    "human_review": value.get("human_review", ""),
+                    "first_draft": value.get("first_draft", ""),
+                    "quality_report": value.get("quality_report", {}),
                     "game_data_sections": value.get("game_data_sections", {}),
                     "prompt_used": value.get("prompt_used", ""),
                     "rejected": value.get("rejected", False),
@@ -338,6 +349,9 @@ class ScriptEditorWorkflowService:
             "characters": state.get("characters", []),
             "character_scripts": state.get("character_scripts", {}),
             "review_opinion": state.get("review_opinion", ""),
+            "human_review": state.get("human_review", ""),
+            "first_draft": state.get("first_draft", ""),
+            "quality_report": state.get("quality_report", {}),
             "game_data_sections": state.get("game_data_sections", {}),
             "prompt_used": "",
             "rejected": False,
@@ -352,6 +366,9 @@ class ScriptEditorWorkflowService:
         elif step == "review_first_draft":
             info["generated_content"] = state.get("first_draft", "")
             info["prompt_used"] = prompts.get("generate_first_draft", "")
+        elif step == "review_report":
+            info["generated_content"] = state.get("review_opinion", "")
+            info["prompt_used"] = prompts.get("review", "")
         elif step == "review_final":
             info["generated_content"] = state.get("final_draft", "")
             info["prompt_used"] = prompts.get("generate_final_draft", "")
@@ -376,6 +393,9 @@ class ScriptEditorWorkflowService:
             "characters": [],
             "first_draft": "",
             "review_opinion": "",
+            "human_review": "",
+            "quality_report": {},
+            "quality_acceptance": {},
             "final_draft": "",
             "character_scripts": {},
             "game_data_sections": {},
@@ -395,12 +415,14 @@ class ScriptEditorWorkflowService:
         regenerate = {
             "review_outline": "generate_outline",
             "review_first_draft": "generate_first_draft",
+            "review_report": "review",
             "review_final": "generate_final_draft",
             "review_game_data": "convert_to_game_data",
         }
         confirm = {
             "review_outline": "generate_first_draft",
             "review_first_draft": None,
+            "review_report": "generate_final_draft",
             "review_final": "convert_to_game_data",
             "review_game_data": None,
         }
@@ -414,7 +436,10 @@ class ScriptEditorWorkflowService:
             "review_outline": "review_outline",
             "generate_first_draft": "review_first_draft",
             "review_first_draft": "review_first_draft",
-            "review_by_llm": "review_final",
+            "review_by_llm": "review_report",
+            "review_report": "review_report",
+            "check_game_quality": "review_quality",
+            "review_quality": "review_quality",
             "generate_final_draft": "review_final",
             "review_final": "review_final",
             "convert_to_game_data": "review_game_data",

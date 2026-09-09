@@ -40,6 +40,13 @@ def completed_script():
                     {"stage_title": "讨论", "system_notice": "开始讨论"},
                 ],
             },
+            {
+                "type": "vote",
+                "children": [
+                    {"stage_title": "总结", "system_notice": "请总结"},
+                    {"stage_title": "投票", "system_notice": "请投票"},
+                ],
+            },
             {"type": "review", "stage_title": "真相", "system_notice": "揭晓"},
         ],
         full_truth="完整真相",
@@ -125,6 +132,22 @@ def test_normalization_rejects_structural_edits_with_locatable_errors():
 
     assert any("不能增删角色" in message for message in result["data_validation_errors"])
     assert any("不能增删轮次" in message for message in result["data_validation_errors"])
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("difficulty", "invalid"),
+        ("game_flow", ["invalid"]),
+        ("character_data", [None]),
+        ("clue_stages", [{"items": "invalid"}]),
+    ],
+)
+def test_malformed_structure_returns_validation_errors(field, value):
+    script, characters = completed_script()
+    state = hydrate_completed_script(script, characters, script.owner_key_hash or "")
+    state["game_data_sections"][field] = value
+    assert normalize_game_data(state)["data_validation_errors"]
 
 
 def test_asset_plan_selects_only_changed_dependencies(monkeypatch):
@@ -217,6 +240,13 @@ async def test_edit_save_updates_in_place_and_preserves_sessions_and_resources(
     state.update(normalize_game_data(state))
     result = await ScriptRepository.save_generated_script(state)
     assert result["error_message"] == ""
+
+    from app.script_editor.nodes.quality_check import quality_fingerprint
+
+    state["quality_report"] = {"content_fingerprint": quality_fingerprint(state)}
+    state["script_title"] = "与已审查结构化内容不一致的缓存标题"
+    rejected = await ScriptRepository.save_generated_script(state)
+    assert "实际保存内容与质量报告不一致" in rejected["error_message"]
 
     async with factory() as session:
         persisted = await session.scalar(select(Script).where(Script.script_id == "script-1"))

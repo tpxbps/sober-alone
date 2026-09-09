@@ -13,6 +13,8 @@ import type {
   GameDataSections,
 } from "@/types/editor";
 import { getButtonLoadingMessage } from "./editorMessages";
+import { ReviewReportStage } from "./ReviewReportStage";
+import { QualityReviewStage } from "./QualityReviewStage";
 import { ReviewFinalStage } from "./ReviewFinalStage";
 import { ReviewGameDataStage } from "./ReviewGameDataStage";
 import { CheckpointView } from "./CheckpointView";
@@ -185,10 +187,6 @@ function ContentPanelBody({
   const [editing, setEditing] = useState(false);
   const [editedContent, setEditedContent] = useState("");
 
-  // Review final state
-  const [humanReview, setHumanReview] = useState("");
-  const [finalDraftEdit, setFinalDraftEdit] = useState("");
-  const [editingFinalDraft, setEditingFinalDraft] = useState(false);
 
   // Game data review state
   const [editedGameData, setEditedGameData] = useState<GameDataSections | null>(
@@ -222,12 +220,6 @@ function ContentPanelBody({
     }
   }, [isReviewGameData, interruptInfo, workflowState, editedGameData]);
 
-  // Initialize final draft from interrupt
-  useEffect(() => {
-    if (isReviewFinal && interruptInfo?.generated_content && !finalDraftEdit) {
-      setFinalDraftEdit(interruptInfo.generated_content);
-    }
-  }, [isReviewFinal, interruptInfo, finalDraftEdit]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   // SSE progress stream is now managed by the store (opened before POST, closed on done/error)
@@ -372,24 +364,24 @@ function ContentPanelBody({
       );
     }
 
+    if (currentStep === "review_report" && interruptInfo) {
+      return <ReviewReportStage interruptInfo={interruptInfo} workflowState={workflowState}
+        isLoading={isLoading} onConfirm={onConfirmReviewFinal} onRegenerate={onRegenerateReviewFinal} error={error} />;
+    }
+    if (currentStep === "review_quality" && interruptInfo?.quality_report) {
+      return <QualityReviewStage key={interruptInfo.quality_report.report_id} report={interruptInfo.quality_report} isLoading={isLoading} error={error} />;
+    }
+
     // === Review Final Draft ===
     if (isReviewFinal) {
       return (
         <ReviewFinalStage
           interruptInfo={interruptInfo}
           workflowState={workflowState}
-          humanReview={humanReview}
-          setHumanReview={setHumanReview}
-          finalDraftEdit={finalDraftEdit}
-          setFinalDraftEdit={setFinalDraftEdit}
-          editingFinalDraft={editingFinalDraft}
-          setEditingFinalDraft={setEditingFinalDraft}
           isLoading={isLoading}
-          currentStep={currentStep}
           onConfirm={onConfirmReviewFinal}
           onRegenerate={onRegenerateReviewFinal}
           error={error}
-          moleActive={moleActive}
         />
       );
     }

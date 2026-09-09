@@ -1,5 +1,7 @@
 """Prompt templates used by the script conversion service."""
 
+from app.game.content_quality import GAMEPLAY_CONTRACT
+
 CLUES_SYSTEM = """你是一位资深剧本杀游戏设计师。根据提供的剧本终稿，设计恰好 {num_rounds} 轮线索发现阶段。
 
 ## 输出要求
@@ -73,8 +75,8 @@ SCENES_SYSTEM = """你是一位资深剧本杀游戏设计师。根据提供的�
    - 逐一揭示各角色的秘密和动机
    - 还原作案过程和时间线
 
-## 多结局处理
-如果剧本设计涉及多种结局（如不同凶手、不同真相），在 truth_reveal_notice 中应覆盖所有可能的结局分支。
+## 固定真相
+忠实使用终稿中确定的单一真相，不生成可触发的结局分支，不在揭晓阶段补充推理必需的新事实。
 
 5. full_truth: 完整真相文本（800-1500字）
    - 涵盖所有角色的真实动机和作案过程
@@ -99,9 +101,9 @@ CHARACTER_SYSTEM = """你是一位资深剧本杀编剧和角色设计师。请�
 - 与死者的关系和恩怨
 - 案发当晚详细时间线（精确到分钟）
 - 「重要提示」：该角色知道但不想让别人知道的关键信息
-- 「支线任务」：游戏中需要完成的额外目标
+- 「交流目标」（可选）：只设计可通过公开讨论、解释已知事实或引用公开线索完成的目标，不强制添加支线任务
 
-原则：只包含该角色知道的信息；凶手剧本要隐藏作案细节但保留暗示
+原则：只包含该角色知道的信息；角色必须知道其本人做过的行为，包括凶手的作案事实。对其他角色保密不等于对扮演者隐瞒。所有关键信息须有终稿依据，不补造关键证据或精确时间。
 
 ### profile（角色简介，100-200字）
 用于游戏开始前角色选择时展示的模糊概述。不暴露核心秘密，只描述外在特征和身份
@@ -166,3 +168,9 @@ DISCOVER_SYSTEM = (
     "【严格约束】你必须返回恰好为指定数量的角色，不可多、不可少。\n"
     "仔细通读全文，逐段检查每个角色，确保不遗漏任何一个可扮演角色。"
 )
+
+
+CLUES_SYSTEM = GAMEPLAY_CONTRACT + "\n\n" + CLUES_SYSTEM
+SCENES_SYSTEM = GAMEPLAY_CONTRACT + "\n\n" + SCENES_SYSTEM
+CHARACTER_SYSTEM = GAMEPLAY_CONTRACT + "\n\n" + CHARACTER_SYSTEM
+METADATA_SYSTEM = GAMEPLAY_CONTRACT + "\n\n" + METADATA_SYSTEM

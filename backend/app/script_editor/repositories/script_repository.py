@@ -180,6 +180,32 @@ async def _save_generated_script(state: ScriptGenState) -> dict:
                         (script_id, char_id, *values[:9], avatar, avatar, values[9]),
                     )
 
+            from app.game.content_quality import content_fingerprint
+
+            db.row_factory = aiosqlite.Row
+            saved_script = dict(
+                (
+                    await db.execute_fetchall(
+                        "SELECT * FROM scripts WHERE script_id = ?", (script_id,)
+                    )
+                )[0]
+            )
+            saved_characters = [
+                dict(row)
+                for row in await db.execute_fetchall(
+                    "SELECT * FROM characters WHERE script_id = ? ORDER BY character_id",
+                    (script_id,),
+                )
+            ]
+            fingerprint = content_fingerprint(saved_script, saved_characters)
+            quality = dict(state.get("quality_report") or {})
+            if quality and quality.get("content_fingerprint") != fingerprint:
+                raise ValueError("实际保存内容与质量报告不一致，请返回数据确认重新检查")
+            quality["acceptance"] = state.get("quality_acceptance") or {}
+            await db.execute(
+                "UPDATE scripts SET content_fingerprint = ?, quality_report = ? WHERE script_id = ?",
+                (fingerprint, json.dumps(quality, ensure_ascii=False), script_id),
+            )
             await db.commit()
 
         logger.info(f"Script saved to database: {script_id}")

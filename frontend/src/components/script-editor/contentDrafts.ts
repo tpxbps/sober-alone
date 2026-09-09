@@ -17,6 +17,7 @@ export function workflowDraftKey(
     currentStep || "idea",
     interruptInfo?.step || "no-interrupt",
     interruptInfo?.generated_content || "",
+    interruptInfo?.quality_report?.report_id || "",
   ].join(":");
 }
 

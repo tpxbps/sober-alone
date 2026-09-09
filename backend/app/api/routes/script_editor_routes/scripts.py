@@ -42,10 +42,7 @@ async def claim_legacy_ownership(
     if not settings.ALLOW_LEGACY_OWNER_CLAIM:
         raise HTTPException(status_code=403, detail="旧版剧本恢复入口未开启")
 
-    columns = {
-        str(row[1])
-        for row in (await db.execute(text("PRAGMA table_info(scripts)"))).all()
-    }
+    columns = {str(row[1]) for row in (await db.execute(text("PRAGMA table_info(scripts)"))).all()}
     if "owner_uuid" not in columns:
         return {"success": True, "claimed_count": 0, "matched_count": 0}
 

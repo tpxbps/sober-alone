@@ -33,6 +33,9 @@ class Script(Base):
     free_speech_limits: Mapped[list] = mapped_column(JSON, default=list)
     is_ai_generated: Mapped[bool] = mapped_column(Boolean, default=False)
     owner_key_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    content_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    ai_review: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    quality_report: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
     characters: Mapped[list[Character]] = relationship(

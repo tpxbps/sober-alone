@@ -13,6 +13,13 @@ _asset_service = AssetGenerationService()
 
 
 async def save_to_database(state: ScriptGenState) -> dict:
+    from app.script_editor.nodes.quality_check import quality_approved
+
+    if not quality_approved(state):
+        return {
+            "current_step": "save_to_database",
+            "error_message": "质量报告缺失或已失效，请返回游戏数据重新检查",
+        }
     return await ScriptRepository.save_generated_script(state)
 
 

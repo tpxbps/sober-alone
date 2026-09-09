@@ -98,14 +98,45 @@ def test_init_is_idempotent(tmp_path: Path):
         "game_records",
         "editor_workflows",
         "editor_operations",
+        "script_feedback",
     } <= tables
     assert script_count == 1
     assert character_count == 4
     assert "owner_key_hash" in script_columns
-    assert {"clue_stages", "clue_schema_version"} <= script_columns
+    assert {
+        "clue_stages",
+        "clue_schema_version",
+        "content_fingerprint",
+        "ai_review",
+        "quality_report",
+    } <= script_columns
     assert "last_seen_human_record_id" in player_state_columns
-    assert {"runtime_snapshot", "revealed_clues", "last_active_at"} <= game_session_columns
+    assert {
+        "runtime_snapshot",
+        "revealed_clues",
+        "last_active_at",
+        "reviewer_hash",
+    } <= game_session_columns
     assert "clue_refs" in game_record_columns
     assert legacy_owner is None
     assert "Sample imported" in first.stdout
     assert "sample import skipped" in second.stdout
+
+    # Exercise the public pre-feature schema with real rows, then upgrade again.
+    for revision in ("0004", "head"):
+        command = "downgrade" if revision == "0004" else "upgrade"
+        subprocess.run(
+            [sys.executable, "-m", "alembic", command, revision],
+            check=True,
+            capture_output=True,
+            env=env,
+            cwd=BACKEND_ROOT,
+        )
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert connection.execute("SELECT count(*) FROM characters").fetchone()[0] == 4
+        assert connection.execute(
+            "SELECT content_fingerprint, ai_review FROM scripts WHERE script_id=?",
+            (SAMPLE_SCRIPT_ID,),
+        ).fetchone() == (None, None)
+        assert connection.execute("SELECT count(*) FROM script_feedback").fetchone()[0] == 0

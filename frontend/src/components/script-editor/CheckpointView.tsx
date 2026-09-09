@@ -88,19 +88,15 @@ export function CheckpointView({
             <h4 className="text-xs font-medium text-primary mb-2">初稿</h4>
             <Markdown className="text-sm">{cpState.first_draft}</Markdown>
           </>
+        ) : cpPhase === "review_report" ? (
+          <div className="space-y-4">
+            <h4 className="text-sm font-medium">AI 审稿意见</h4>
+            <Markdown>{cpState?.review_opinion || cpInterrupt?.generated_content || "暂无意见"}</Markdown>
+            {cpState?.human_review && <><h4 className="text-sm font-medium">补充审稿意见</h4><Markdown>{cpState.human_review}</Markdown></>}
+          </div>
         ) : cpPhase === "review_final" &&
           !cpInterrupt?.generated_content ? (
           <div className="space-y-3">
-            {cpState?.review_opinion ? (
-              <div>
-                <h4 className="text-xs font-medium text-primary mb-1">
-                  AI 审稿意见
-                </h4>
-                <Markdown className="text-sm">
-                  {cpState.review_opinion}
-                </Markdown>
-              </div>
-            ) : null}
             {cpState?.final_draft ? (
               <div>
                 <h4 className="text-xs font-medium text-primary mb-1">
@@ -111,7 +107,7 @@ export function CheckpointView({
                 </Markdown>
               </div>
             ) : null}
-            {!cpState?.review_opinion && !cpState?.final_draft ? (
+            {!cpState?.final_draft ? (
               <p className="text-sm text-muted-foreground">无可展示内容</p>
             ) : null}
           </div>

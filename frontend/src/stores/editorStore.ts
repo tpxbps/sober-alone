@@ -9,6 +9,8 @@ const REVIEW_STEPS = new Set([
   'review_outline',
   'review_first_draft',
   'review_final',
+  'review_report',
+  'review_quality',
   'review_game_data',
   'safety_check',
   'review_asset_plan',
@@ -18,7 +20,8 @@ const REVIEW_STEPS = new Set([
 const GEN_TO_REVIEW_STEP: Record<string, string> = {
   generate_outline: 'review_outline',
   generate_first_draft: 'review_first_draft',
-  review_by_llm: 'review_final',     // after LLM review, generate_final_draft runs, then review_final
+  review_by_llm: 'review_report',
+  check_game_quality: 'review_quality',
   generate_final_draft: 'review_final',
   convert_to_game_data: 'review_game_data',
 };
@@ -43,7 +46,9 @@ function reconstructInterruptInfo(
   const STEP_LABELS: Record<string, string> = {
     review_outline: '大纲审阅',
     review_first_draft: '初稿审阅',
-    review_final: '审稿修订',
+    review_final: '终稿确认',
+    review_report: '审稿意见确认',
+    review_quality: '质量检查结果',
     review_game_data: '游戏数据确认',
     safety_check: '安全审查',
     review_asset_plan: '资源更新确认',
@@ -57,6 +62,9 @@ function reconstructInterruptInfo(
     characters: (state.characters || []) as EditorInterruptInfo['characters'],
     character_scripts: state.character_scripts || {},
     review_opinion: state.review_opinion || '',
+    human_review: state.human_review || '',
+    first_draft: state.first_draft || '',
+    quality_report: state.quality_report,
     game_data_sections: state.game_data_sections || {},
     prompt_used: '',
     rejected: step === 'safety_check' && !state.safety_passed,
@@ -69,6 +77,9 @@ function reconstructInterruptInfo(
   } else if (step === 'review_first_draft') {
     info.generated_content = state.first_draft || '';
     info.prompt_used = prompts.generate_first_draft || '';
+  } else if (step === 'review_report') {
+    info.generated_content = state.review_opinion || '';
+    info.prompt_used = prompts.review || '';
   } else if (step === 'review_final') {
     info.generated_content = state.final_draft || '';
     info.prompt_used = prompts.generate_final_draft || '';
@@ -239,7 +250,7 @@ interface EditorState {
     num_clue_rounds?: number;
   }) => Promise<void>;
   startEditWorkflow: (scriptId: string) => Promise<void>;
-  resumeWorkflow: (action: string, content?: string, prompt?: string, gameDataSections?: unknown, humanReview?: string, selectedAssetIds?: string[]) => Promise<void>;
+  resumeWorkflow: (action: string, content?: string, prompt?: string, gameDataSections?: unknown, humanReview?: string, selectedAssetIds?: string[], qualityReportId?: string) => Promise<void>;
   fetchState: () => Promise<void>;
   restoreSession: () => Promise<boolean>;
   openProgressStream: () => void;
@@ -342,7 +353,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }
   },
 
-  resumeWorkflow: async (action, content, prompt, gameDataSections, humanReview, selectedAssetIds) => {
+  resumeWorkflow: async (action, content, prompt, gameDataSections, humanReview, selectedAssetIds, qualityReportId) => {
     const { threadId, currentStep, workflowMode } = get();
     if (!threadId) return;
     const pollEpoch = ++_operationPollEpoch;
@@ -356,6 +367,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
     // Pre-open SSE stream for progress-heavy steps (BEFORE POST, so events aren't missed)
     const needsSSE = optimisticStep === "convert_to_game_data"
+      || optimisticStep === "check_game_quality"
       || optimisticStep === "safety_check"
       || optimisticStep === "save_to_database"
       || optimisticStep === "generate_assets";
@@ -378,6 +390,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         game_data_sections: gameDataSections,
         human_review: humanReview,
         selected_asset_ids: selectedAssetIds,
+        quality_report_id: qualityReportId,
       });
       saveSession({
         threadId,
@@ -753,8 +766,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 const OPTIMISTIC_STEP_MAP: Record<string, string> = {
   review_outline: "generate_first_draft",
   review_first_draft: "review_by_llm",
+  review_report: "generate_final_draft",
   review_final: "convert_to_game_data",
-  review_game_data: "generate_assets",
+  review_game_data: "check_game_quality",
   safety_check: "generate_assets",
   review_asset_plan: "generate_assets",
 };

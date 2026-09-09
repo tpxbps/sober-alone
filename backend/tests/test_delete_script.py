@@ -84,9 +84,7 @@ async def test_script_delete_cascades_runtime_and_files(tmp_path: Path, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_legacy_script_recovery_is_explicit_guarded_and_one_time(
-    tmp_path: Path, monkeypatch
-):
+async def test_legacy_script_recovery_is_explicit_guarded_and_one_time(tmp_path: Path, monkeypatch):
     engine = create_async_engine(f"sqlite+aiosqlite:///{(tmp_path / 'claim.db').as_posix()}")
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)

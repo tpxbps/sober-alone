@@ -166,6 +166,23 @@ def normalize_game_data(state: ScriptGenState) -> dict[str, Any]:
     character_data = sections.get("character_data") or []
     errors: list[str] = []
 
+    def object_list(value):
+        return isinstance(value, list) and all(isinstance(item, dict) for item in value)
+
+    if (
+        not object_list(character_data)
+        or not object_list(game_flow)
+        or any(not object_list(stage.get("children", [])) for stage in game_flow)
+        or not object_list(submitted_clue_stages)
+        or any(not object_list(stage.get("items", [])) for stage in submitted_clue_stages)
+        or not isinstance(sections.get("character_scripts", {}), dict)
+    ):
+        return {
+            "current_step": STEP_NORMALIZE_GAME_DATA,
+            "data_validation_errors": ["角色、流程或线索字段结构不正确"],
+            "_review_action": "invalid",
+        }
+
     title = str(sections.get("title") or state.get("script_title") or "").strip()
     if not title:
         errors.append("剧本名称不能为空")
@@ -230,6 +247,54 @@ def normalize_game_data(state: ScriptGenState) -> dict[str, Any]:
     }
     if original_clue_ids and any(clue_id not in original_clue_ids for clue_id in submitted_ids):
         errors.append("既有线索 ID 不可修改；新增线索请留空 ID 由系统生成")
+
+    # Executable shape and content cannot be overridden by a semantic-risk acceptance.
+    expected_count = state.get("player_count")
+    if not character_data or (expected_count and len(character_data) != expected_count):
+        errors.append("角色数量必须与设定人数一致")
+    if any(not cid for cid in current_ids) or len(set(current_ids)) != len(current_ids):
+        errors.append("角色 ID 不可为空或重复")
+    for item in character_data:
+        for key, label in (("character_script", "个人剧本"), ("system_prompt", "角色提示词")):
+            if not str(
+                item.get(key)
+                or (
+                    sections.get("character_scripts", {}).get(item.get("name"))
+                    if key == "character_script"
+                    else ""
+                )
+                or ""
+            ).strip():
+                errors.append(f"{item.get('name', '角色')}的{label}不能为空")
+    if not str(sections.get("full_truth", "") or "").strip():
+        errors.append("完整真相不能为空")
+    types = [stage.get("type") for stage in game_flow]
+    if not round_count or types != ["initial"] + ["advancement"] * round_count + ["vote", "review"]:
+        errors.append("游戏流程必须为开场、线索轮次、投票、真相揭晓")
+    for stage in game_flow:
+        children = stage.get("children", [])
+        if stage.get("type") in ("advancement", "vote") and len(children) != 2:
+            errors.append("线索轮次与投票阶段必须各包含两个子阶段")
+        for scene in children or [stage]:
+            if not str(scene.get("system_notice", "") or "").strip():
+                errors.append("游戏阶段的系统消息不能为空")
+
+    from app.game.clues import CLUE_ID_RE
+    from app.game.content_quality import script_content
+    from app.script_editor.nodes.quality_check import text_fields
+
+    if errors:
+        return {
+            "current_step": STEP_NORMALIZE_GAME_DATA,
+            "data_validation_errors": errors,
+            "_review_action": "invalid",
+        }
+
+    known_ids = {item["id"] for stage in clue_stages for item in stage["items"]}
+    for value in text_fields(script_content(sections)).values():
+        unknown = {match.group(1).lower() for match in CLUE_ID_RE.finditer(value)} - known_ids
+        if unknown:
+            errors.append("引用了不存在的线索：" + ", ".join(sorted(unknown)))
 
     if errors:
         return {

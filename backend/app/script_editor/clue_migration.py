@@ -204,9 +204,12 @@ async def migrate_legacy_clues(
                 }
                 _save_manifest(manifest_path, manifest)
                 if apply:
+                    next_process = derive_game_process(game_process, clues)
+                    if script.clue_stages != clues or script.game_full_process != next_process:
+                        script.content_fingerprint = None
                     script.clue_stages = clues
                     script.clue_schema_version = CLUE_SCHEMA_VERSION
-                    script.game_full_process = derive_game_process(game_process, clues)
+                    script.game_full_process = next_process
                     await db.commit()
                     entries[script_id]["status"] = "applied"
                     _save_manifest(manifest_path, manifest)

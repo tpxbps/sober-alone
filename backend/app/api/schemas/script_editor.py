@@ -21,6 +21,7 @@ class ResumeWorkflowRequest(BaseModel):
     characters: list | None = None
     character_scripts: dict | None = None
     human_review: str | None = None
+    quality_report_id: str | None = None
     game_data_sections: dict | None = None
     prompt: str | None = None
     selected_asset_ids: list[str] | None = None

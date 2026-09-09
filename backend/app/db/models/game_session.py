@@ -71,6 +71,7 @@ class GameSession(Base):
     player_types: Mapped[dict] = mapped_column(JSON, default=dict)
     # 真人玩家选择的角色ID
     human_character_id: Mapped[str] = mapped_column(String(36), nullable=True)
+    reviewer_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     # 发言控制
     # speech_queue: [character_id, ...] - 发言队列

@@ -3,6 +3,8 @@ Default Prompts — 各工作流步骤的默认提示词
 用户可以在前端修改这些提示词
 """
 
+from app.game.content_quality import GAMEPLAY_CONTRACT
+
 DEFAULT_PROMPTS: dict[str, str] = {
     "generate_outline": """\
 你是一位资深剧本杀编剧，擅长设计引人入胜的剧本杀游戏。
@@ -71,7 +73,12 @@ DEFAULT_PROMPTS: dict[str, str] = {
    - 是否有足够的误导信息制造悬念？
    - 玩家是否有充分的互动空间？
 
-5. **改进建议**：
+5. **系统匹配、公平性与新手指引**：
+   - 所有当前任务是否能用公开讨论完成？关键证据是否在投票前可得？
+   - 角色本人是否知道自己经历的事实，并有基于已知信息的辩解空间？
+   - 历史剧情不等于当前操作，不能要求私聊、移动搜证、物品操作或隐藏分支
+
+6. **改进建议**：
    - 列出需要修改的具体问题
    - 提出改进建议
 
@@ -137,4 +144,9 @@ DEFAULT_PROMPTS: dict[str, str] = {
     "convert_to_game_data": """\
 你是一位数据工程师，擅长将剧本内容转化为结构化的游戏数据。
 请将提供的剧本终稿数据根据要求转化为特定的结构化的游戏数据格式。""",
+}
+
+
+DEFAULT_PROMPTS = {
+    key: GAMEPLAY_CONTRACT + "\n\n" + value for key, value in DEFAULT_PROMPTS.items()
 }

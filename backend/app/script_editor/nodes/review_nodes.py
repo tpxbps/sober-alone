@@ -10,6 +10,7 @@ from app.script_editor.state import (
     STEP_REVIEW_FIRST_DRAFT,
     STEP_REVIEW_GAME_DATA,
     STEP_REVIEW_OUTLINE,
+    STEP_REVIEW_REPORT,
     ScriptGenState,
 )
 
@@ -59,12 +60,31 @@ def review_first_draft(state: ScriptGenState) -> dict:
     }
 
 
+def review_report(state: ScriptGenState) -> dict:
+    response = interrupt(
+        {
+            "step": STEP_REVIEW_REPORT,
+            "step_label": "审稿意见确认",
+            "generated_content": state.get("review_opinion", ""),
+            "human_review": state.get("human_review", ""),
+            "first_draft": state.get("first_draft", ""),
+            "prompt_used": state.get("prompts", {}).get("review", ""),
+        }
+    )
+    return {
+        "review_opinion": response.get("content", state.get("review_opinion", "")),
+        "human_review": response.get("human_review", state.get("human_review", "")),
+        "current_step": STEP_REVIEW_REPORT,
+        "_review_action": response.get("action", "confirm"),
+    }
+
+
 def review_final(state: ScriptGenState) -> dict:
-    """用户审阅终稿 (interrupt) — 展示AI审稿意见+真人审稿+终稿"""
+    """用户确认终稿；兼容旧客户端传入的真人意见。"""
     user_response = interrupt(
         {
             "step": STEP_REVIEW_FINAL,
-            "step_label": "审稿修订",
+            "step_label": "终稿确认",
             "generated_content": state.get("final_draft", ""),
             "review_opinion": state.get("review_opinion", ""),
             "prompt_used": state.get("prompts", {}).get("generate_final_draft", ""),
@@ -73,7 +93,7 @@ def review_final(state: ScriptGenState) -> dict:
 
     action = user_response.get("action", "confirm")
     content = user_response.get("content", state.get("final_draft", ""))
-    human_review = user_response.get("human_review", "")
+    human_review = user_response.get("human_review", state.get("human_review", ""))
 
     return {
         "final_draft": content,

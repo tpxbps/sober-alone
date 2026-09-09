@@ -301,6 +301,14 @@ export function ScriptEditorPage({ onBack, editScriptId }: ScriptEditorPageProps
             </div>
           )}
           <button
+            aria-label="创作小助手"
+            aria-expanded={showMobileChat}
+            onClick={() => setShowMobileChat(!showMobileChat)}
+            className="lg:hidden p-2 rounded-lg hover:bg-secondary/50 text-primary shrink-0"
+          >
+            <MessageCircle className="w-5 h-5" />
+          </button>
+          <button
             onClick={() => setShowSettings(true)}
             className="p-2 rounded-lg hover:bg-secondary/50 transition-colors shrink-0"
             title="设置"
@@ -368,19 +376,13 @@ export function ScriptEditorPage({ onBack, editScriptId }: ScriptEditorPageProps
         </div>
       </div>
 
-      {/* Floating AI chat button — mobile/tablet only */}
-      <button
-        onClick={() => setShowMobileChat(!showMobileChat)}
-        className="lg:hidden fixed bottom-20 right-6 z-50 w-12 h-12 rounded-full bg-primary text-primary-foreground shadow-lg flex items-center justify-center hover:bg-primary/90 transition-colors"
-      >
-        <MessageCircle className="w-5 h-5" />
-      </button>
-
       {/* Mobile chat tooltip */}
       {showMobileChat && (
         <div
-          className="lg:hidden fixed right-4 z-50 w-80 rounded-xl border border-border/50 bg-background shadow-2xl overflow-hidden"
-          style={{ bottom: "8.5rem", height: "420px" }}
+          role="dialog"
+          aria-label="创作小助手"
+          onKeyDown={(event) => { if (event.key === "Escape") setShowMobileChat(false); }}
+          className="lg:hidden fixed top-24 right-4 z-50 w-80 max-w-[calc(100vw-2rem)] h-[min(420px,calc(100dvh-8rem))] rounded-xl border border-border/50 bg-background shadow-2xl overflow-hidden"
         >
           <ChatPanel
             threadId={threadId}

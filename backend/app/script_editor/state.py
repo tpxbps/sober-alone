@@ -21,6 +21,8 @@ class ScriptGenState(TypedDict, total=False):
     first_draft: str  # 初稿全文
     review_opinion: str  # 独立审稿意见
     human_review: str  # 真人审稿意见
+    quality_report: dict
+    quality_acceptance: dict
     final_draft: str  # 终稿全文
     character_scripts: dict  # {角色名: 个人剧本文本}
     system_prompts_map: dict  # {角色名: system_prompt文本}
@@ -69,6 +71,9 @@ STEP_REVIEW_FIRST_DRAFT = "review_first_draft"
 STEP_REVIEW_BY_LLM = "review_by_llm"
 STEP_GENERATE_FINAL_DRAFT = "generate_final_draft"
 STEP_REVIEW_FINAL = "review_final"
+STEP_REVIEW_REPORT = "review_report"
+STEP_CHECK_QUALITY = "check_game_quality"
+STEP_REVIEW_QUALITY = "review_quality"
 STEP_CONVERT = "convert_to_game_data"
 STEP_REVIEW_GAME_DATA = "review_game_data"
 STEP_SAVE = "save_to_database"
@@ -87,7 +92,10 @@ STEP_LABELS: dict[str, str] = {
     STEP_REVIEW_FIRST_DRAFT: "初稿审阅",
     STEP_REVIEW_BY_LLM: "AI审稿",
     STEP_GENERATE_FINAL_DRAFT: "生成终稿",
-    STEP_REVIEW_FINAL: "审稿修订",
+    STEP_REVIEW_REPORT: "审稿意见确认",
+    STEP_REVIEW_FINAL: "终稿确认",
+    STEP_CHECK_QUALITY: "检查剧本质量",
+    STEP_REVIEW_QUALITY: "质量检查结果",
     STEP_CONVERT: "数据转化",
     STEP_REVIEW_GAME_DATA: "游戏数据确认",
     STEP_SAVE: "保存完成",
@@ -100,6 +108,8 @@ STEP_LABELS: dict[str, str] = {
 
 # 需要用户确认的步骤（有 interrupt）
 INTERRUPT_STEPS = {
+    STEP_REVIEW_REPORT,
+    STEP_REVIEW_QUALITY,
     STEP_REVIEW_OUTLINE,
     STEP_REVIEW_FIRST_DRAFT,
     STEP_REVIEW_FINAL,

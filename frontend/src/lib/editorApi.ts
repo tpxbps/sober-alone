@@ -10,7 +10,7 @@ import type {
 } from '@/types/editor';
 import { AUTHOR_KEY_HEADER, getOrCreateAuthorKey } from '@/lib/authorKey';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+const API_BASE_URL = import.meta.env.VITE_API_URL || '/api/v1';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -68,6 +68,7 @@ export const editorApi = {
       characters?: unknown[];
       character_scripts?: Record<string, string>;
       human_review?: string;
+      quality_report_id?: string;
       game_data_sections?: unknown;
       prompt?: string;
       selected_asset_ids?: string[];

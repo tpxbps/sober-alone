@@ -114,6 +114,7 @@ class GameService:
         script_id: str,
         human_character_id: str,
         llm_configs: dict[str, dict[str, str | None]] | None = None,
+        reviewer_hash: str | None = None,
     ) -> dict[str, Any]:
         """
         创建新游戏
@@ -146,6 +147,7 @@ class GameService:
             current_stage=GameStage.INTRO.value,
             current_round=0,
             human_character_id=human_character_id,
+            reviewer_hash=reviewer_hash,
             player_threads={},
             player_types={
                 cid: ("human" if cid == human_character_id else "ai") for cid in character_ids
