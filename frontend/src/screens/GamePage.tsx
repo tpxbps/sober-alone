@@ -581,7 +581,7 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
           characters.find((c) => c.character_id === humanCharacterId)?.name
         }
         sessionId={sessionId}
-        scriptId={script?.script_id}
+        scriptId={script?.resource_namespace || script?.script_id}
         characterId={humanCharacterId || undefined}
         open={scriptOpen}
         onOpenChange={handleScriptOpenChange}

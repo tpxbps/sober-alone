@@ -23,6 +23,7 @@ from app.game.clues import (
     parse_clue_citations,
     render_clue_markdown,
 )
+from app.game.resource_revision import resource_namespace
 from app.game.speech_scheduler import SpeechScheduler
 
 
@@ -73,6 +74,9 @@ class GameFlowController:
         """
         self.session = game_session
         self.script_data = script_data
+        self.resource_namespace = resource_namespace(
+            {**script_data, "script_id": game_session.script_id}
+        )
         self.agent_manager = agent_manager
 
         # 发言调度器
@@ -169,7 +173,7 @@ class GameFlowController:
             audio_url = ""
             if audio_key:
                 audio_url = (
-                    f"/audio/scripts/{self.session.script_id}/system_messages/{audio_key}.wav"
+                    f"/audio/scripts/{self.resource_namespace}/system_messages/{audio_key}.wav"
                 )
             system_record = GameRecord(
                 session_id=self.session.session_id,

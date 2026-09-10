@@ -33,6 +33,7 @@ export function adaptGameState(state: GameStateResponse): GameStatePatch {
   const script: Script | null = state.script
     ? {
         script_id: state.script.script_id,
+        resource_namespace: state.script.resource_namespace,
         title: state.script.title,
         description: state.script.description || '',
         overview: state.script.overview || '',

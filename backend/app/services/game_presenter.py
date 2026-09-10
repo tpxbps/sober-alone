@@ -1,8 +1,10 @@
-"""Pure response mapping for the GameService compatibility facade."""
+"""Response mapping for the GameService compatibility facade."""
 
 from __future__ import annotations
 
 from typing import Any
+
+from app.game.resource_revision import resource_namespace
 
 
 class GameStatePresenter:
@@ -12,6 +14,7 @@ class GameStatePresenter:
             return None
         return {
             "script_id": script_data.get("script_id"),
+            "resource_namespace": resource_namespace(script_data),
             "title": script_data.get("title"),
             "description": script_data.get("description"),
             "overview": script_data.get("overview"),

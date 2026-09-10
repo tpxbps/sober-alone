@@ -16,6 +16,7 @@ describe('adaptGameState', () => {
       human_character_id: 'human',
       script: {
         script_id: 'script',
+        resource_namespace: 'script__revision',
         title: '零点来电',
         estimated_duration: 25,
         is_ai_generated: true,
@@ -26,6 +27,8 @@ describe('adaptGameState', () => {
     const patch = adaptGameState(response)
 
     expect(patch.script?.estimated_duration).toBe(25)
+    expect(patch.script?.script_id).toBe('script')
+    expect(patch.script?.resource_namespace).toBe('script__revision')
     expect(patch.humanCharacterId).toBe('human')
     expect(patch.characters[0].gender).toBe('未知')
     expect(response.characters[0]).not.toHaveProperty('gender')

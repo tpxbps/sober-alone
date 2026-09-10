@@ -16,6 +16,7 @@ export type GameStatus = 'waiting' | 'playing' | 'paused' | 'completed';
 // Script from backend
 export interface Script {
   script_id: string;
+  resource_namespace?: string;
   title: string;
   description: string;
   overview: string;
@@ -188,6 +189,7 @@ export interface GameStateResponse {
   human_character_id?: string;
   script?: {
     script_id: string;
+    resource_namespace?: string;
     title: string;
     description?: string;
     overview?: string;

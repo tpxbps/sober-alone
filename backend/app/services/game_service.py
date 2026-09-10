@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents import get_agent_manager, remove_agent_manager
 from app.db.models import GameRecord, GameSession, GameStage, GameStatus, PlayerState
 from app.game import GameFlowController
+from app.game.resource_revision import resource_namespace
 from app.services.game_presenter import GameStatePresenter
 from app.services.game_runtime import (
     FlowControllerRegistry,
@@ -72,7 +73,7 @@ async def ensure_flow_controller(
         if not script_data:
             return None
 
-        agent_manager = get_agent_manager(session_id, game_session.script_id)
+        agent_manager = get_agent_manager(session_id, resource_namespace(script_data))
         if not agent_manager.agents:
             await agent_manager.initialize_agents(
                 script_data.get("characters", []),
@@ -163,7 +164,7 @@ class GameService:
             await self.db.commit()
 
             # 初始化Agent管理器（传入LLM配置）
-            agent_manager = get_agent_manager(session_id, script_id)
+            agent_manager = get_agent_manager(session_id, resource_namespace(script_data))
             await agent_manager.initialize_agents(characters, human_character_id, llm_configs)
 
             # 创建流程控制器；成功开始后才注册到运行时缓存。
@@ -403,7 +404,7 @@ class GameService:
             if transition.system_notice:
                 audio_url = None
                 if transition.audio_key:
-                    audio_url = f"/audio/scripts/{flow_controller.session.script_id}/system_messages/{transition.audio_key}.wav"
+                    audio_url = f"/audio/scripts/{flow_controller.resource_namespace}/system_messages/{transition.audio_key}.wav"
                 record = GameRecord(
                     session_id=session_id,
                     record_type="system",
