@@ -179,19 +179,17 @@ export function ScriptCard({ script, onClick, onDeleted, onEdit }: ScriptCardPro
         )}
 
         {/* Stats */}
-        <div className="flex items-center gap-4 text-sm text-muted-foreground">
-          <div className="flex items-center gap-1.5">
-            <Users className="w-4 h-4" />
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground">
+          <div className="flex shrink-0 items-center gap-1">
+            <Users className="w-3.5 h-3.5" />
             <span>{script.player_count}人</span>
           </div>
-          <div className="flex items-center gap-1.5">
-            <Clock className="w-4 h-4" />
+          <div className="flex shrink-0 items-center gap-1">
+            <Clock className="w-3.5 h-3.5" />
             <span>{script.estimated_duration}分钟</span>
           </div>
-
+          <ScriptRating script={script} />
         </div>
-
-        <ScriptRating script={script} />
 
         {/* Overview */}
         <p className="text-sm text-muted-foreground line-clamp-2">

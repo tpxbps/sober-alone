@@ -81,25 +81,65 @@ test('质量检查失败明确标识，重试后风险确认失效', async ({ pa
   await expect.poll(() => acceptedId).toBe('second-report')
 })
 
-test('卡片评分支持窄屏点击与键盘说明且不暴露评分原文', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 })
+async function ratingFixture(page: import('@playwright/test').Page) {
   await page.route('**/api/v1/**', async (route) => {
     const path = new URL(route.request().url()).pathname
     const body = path.endsWith('/game/scripts') ? { success: true, scripts: [{
       script_id: 's', title: '评分展示', difficulty: 1, player_count: 3, estimated_duration: 30,
       feedback_summary: { label: '多半好评', total: 10, positive: 7, positive_rate: .7, threshold: 5 },
-      ai_review: { score: 78, model: 'gpt-6-astra', reviewed_at: '2026-09-10T00:00:00Z', rubric_version: 'v1',
-        dimensions: [{ key: 'fairness', label: '角色公平性与辩解空间', weight: 15, score: 3 }] },
-    }] } : { success: true, models: [] }
+      ai_review: { score: 78, model: 'gpt-6-astra', reviewed_at: '2026-09-10T00:00:00Z', rubric_version: 'script-quality-v2',
+        dimensions: [{ key: 'narrative', label: '叙事与人物塑造', weight: 15, score: 3 }] },
+    }] } : { success: true, models: [], characters: [] }
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) })
   })
   await page.goto('/')
-  const rating = page.getByRole('button', { name: 'AI综合评分 78/100，查看评分说明' })
+}
+
+test('评分同行展示，轻量说明及悬浮文字点击均打开对应剧本', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await ratingFixture(page)
+  const rating = page.getByRole('button', { name: 'AI评分: 78，打开剧本详情' })
+  const feedback = page.getByRole('button', { name: '多半好评（70%），打开剧本详情' })
+  const tip = page.locator('[data-rating-explanation]')
+  await expect.poll(async () => Math.abs((await rating.boundingBox())!.y - (await page.getByText('3人', {exact:true}).boundingBox())!.y)).toBeLessThan(4)
+  await rating.hover()
+  await expect(tip).toBeVisible()
+  await expect(tip).toContainText('AI评分: 78 （GPT 6 ASTRA）')
+  await expect(tip).toContainText('叙事与人物塑造 15%')
+  await expect(tip).not.toContainText('2026')
+  await expect(tip).not.toContainText('基于剧本文本')
+  await page.screenshot({ path: testInfo.outputPath('rating-mobile.png') })
   await rating.click()
-  await expect(page.getByText(/来自 GPT 6 ASTRA/)).toBeVisible()
-  await expect(page.getByText('角色公平性与辩解空间')).toBeVisible()
-  await rating.press('Escape')
-  await page.getByRole('button', { name: '多半好评（70%），查看评分说明' }).focus()
-  await expect(page.getByText('玩家推荐', { exact: true })).toBeVisible()
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog')).not.toBeVisible()
+  await rating.hover()
+  await expect(tip).toBeVisible()
+  await tip.getByText('叙事与人物塑造', {exact:false}).first().click()
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog')).not.toBeVisible()
+  await feedback.focus()
+  await expect(tip).toContainText('玩家推荐')
+  await expect(tip).toContainText('完成投票并揭晓真相后可评价')
+  await expect(tip).not.toContainText('条反馈')
+  await expect(tip).not.toContainText('浏览器')
+  await expect(tip).not.toContainText('5 票')
+  await tip.getByText('玩家推荐', {exact:true}).first().click()
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog')).not.toBeVisible()
+  await feedback.focus()
+  await feedback.press('Enter')
+  await expect(page.getByRole('dialog')).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+})
+
+test('手机轻触评分直接打开剧本详情', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: {width:390, height:844}, hasTouch:true, baseURL:'http://127.0.0.1:4173' })
+  const page = await context.newPage()
+  await ratingFixture(page)
+  await page.getByRole('button', { name: 'AI评分: 78，打开剧本详情' }).tap()
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await context.close()
 })

@@ -55,6 +55,11 @@ def test_ai_public_projection_hides_evidence_and_stale_scores():
     public = public_ai_review(review, "fp")
     assert public["score"] == 60
     assert "evidence" not in public
+    assert sum(item["weight"] for item in public["dimensions"]) == 100
+    assert next(item for item in public["dimensions"] if item["key"] == "narrative")["weight"] == 15
+    review["rubric_version"] = "script-quality-v1"
+    assert public_ai_review(review, "fp") is None
+    review["rubric_version"] = RUBRIC_VERSION
     review["dimensions"]["fairness"] = 7
     assert public_ai_review(review, "fp") is None
 

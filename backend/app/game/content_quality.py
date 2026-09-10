@@ -7,7 +7,7 @@ import json
 from typing import Any
 
 CAPABILITY_VERSION = "public-discussion-v1"
-RUBRIC_VERSION = "script-quality-v1"
+RUBRIC_VERSION = "script-quality-v2"
 GAMEPLAY_CONTRACT = """【实际游戏能力｜public-discussion-v1】
 本剧本用于一名真人与多个 AI 角色进行公开文字讨论。角色可阅读自己的剧本，系统按轮次向所有人
 公开固定线索，最后投票并揭晓固定真相。@角色仍是公开发言。玩家不能实际私聊、移动搜证、
@@ -17,12 +17,12 @@ GAMEPLAY_CONTRACT = """【实际游戏能力｜public-discussion-v1】
 推理必需的证据应在投票前可获得，结局不能才补充决定性事实。"""
 
 DIMENSIONS = {
-    "compatibility": ("系统匹配与任务可执行性", 25),
+    "compatibility": ("系统匹配与任务可执行性", 20),
     "consistency": ("时间线、因果和真相一致性", 20),
-    "deducibility": ("证据完整性与可推理性", 20),
+    "deducibility": ("证据完整性与可推理性", 15),
     "fairness": ("角色公平性与辩解空间", 15),
     "interaction": ("交流空间与分轮节奏", 10),
-    "narrative": ("叙事与人物塑造", 5),
+    "narrative": ("叙事与人物塑造", 15),
     "onboarding": ("新手指引与表达清晰度", 5),
 }
 
