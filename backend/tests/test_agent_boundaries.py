@@ -70,7 +70,7 @@ def test_reaction_tool_schema_uses_explicit_arrays_and_normalizes_to_game_maps()
 
     reaction = SpeechReactionPayload.model_validate(
         {
-            "suspicion_changes": [{"target": "许棠", "score": 1.2, "reason": "时间线矛盾"}],
+            "suspicion_changes": [{"target": "许棠", "score": 1.0, "reason": "时间线矛盾"}],
             "suspected_by_changes": [
                 {
                     "suspecter": "陆鸣",

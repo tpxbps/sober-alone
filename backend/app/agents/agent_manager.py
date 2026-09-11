@@ -70,15 +70,6 @@ class AgentManager:
         self.human_character_id = human_character_id
         llm_configs = llm_configs or {}
 
-        rag_enabled = False
-        if settings.ZHIPUAI_API_KEY:
-            try:
-                from app.rag.retriever import get_retriever
-
-                rag_enabled = await get_retriever().collection_exists(self.script_id)
-            except Exception:
-                rag_enabled = False
-
         for char in characters:
             character_id = char.get("character_id")
             if not character_id:
@@ -107,6 +98,19 @@ class AgentManager:
                 llm_model = settings.get_llm_model_name(llm_provider)
 
             if not is_human:
+                rag_enabled = False
+                if settings.ZHIPUAI_API_KEY:
+                    try:
+                        from app.rag.retriever import get_retriever
+                        from app.rag.revision import script_digest
+
+                        rag_enabled = await get_retriever().character_index_ready(
+                            self.script_id,
+                            character_id,
+                            script_digest(char.get("character_script", "")),
+                        )
+                    except Exception:
+                        pass
                 # 创建AI Agent
                 agent = AgentPlayer(
                     character_id=character_id,
@@ -211,6 +215,9 @@ class AgentManager:
         self,
         speaker_id: str,
         content: str,
+        *,
+        contexts: dict | None = None,
+        target_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         """
         广播发言给所有其他AI Agent
@@ -231,10 +238,20 @@ class AgentManager:
         agent_tasks = []
         agent_ids = []
         for char_id, info in self.agents.items():
-            if char_id != speaker_id and info.agent:
+            if (
+                char_id != speaker_id
+                and info.agent
+                and (target_ids is None or char_id in target_ids)
+            ):
                 agent_ids.append(char_id)
                 agent_tasks.append(
-                    self._get_reaction_with_timeout(char_id, info.agent, speaker_name, content)
+                    self._get_reaction_with_timeout(
+                        char_id,
+                        info.agent,
+                        speaker_name,
+                        content,
+                        reaction_context=(contexts or {}).get(char_id, {}),
+                    )
                 )
 
         if agent_tasks:
@@ -259,6 +276,7 @@ class AgentManager:
         speaker_name: str,
         content: str,
         timeout: float = REACTION_TASK_TIMEOUT_SECONDS,
+        reaction_context: dict | None = None,
     ) -> dict[str, Any]:
         """
         带超时的获取单个Agent的反应
@@ -275,7 +293,7 @@ class AgentManager:
         """
         try:
             result = await asyncio.wait_for(
-                agent.react_to_speech(speaker_name, content),
+                agent.react_to_speech(speaker_name, content, reaction_context=reaction_context),
                 timeout=timeout,
             )
             # 将 SpeechReaction 转换为 dict

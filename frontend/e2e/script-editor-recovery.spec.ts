@@ -8,6 +8,38 @@ function json(route: Route, body: unknown) {
   })
 }
 
+test('转换失败刷新后保留通用错误并仅提交失败任务重试', async ({ page }) => {
+  let retryAction = ''
+  await page.addInitScript(() => {
+    localStorage.setItem('editorSession', JSON.stringify({ threadId: 'failed-thread', currentStep: 'convert_to_game_data' }))
+  })
+  const failure = {
+    success: true, thread_id: 'failed-thread', current_step: 'convert_to_game_data', is_complete: false,
+    interrupt: { step: 'convert_to_game_data', failed: true, retry_step: 'convert_to_game_data' },
+    state: { workflow_mode: 'create', script_title: '转换失败测试', error_message: '抱歉！系统发生未知错误，请稍后重试。', retry_step: 'convert_to_game_data' },
+  }
+  await page.route('**/api/v1/**', async (route) => {
+    const path = new URL(route.request().url()).pathname
+    if (path.endsWith('/failed-thread/state')) return json(route, failure)
+    if (path.endsWith('/failed-thread/resume')) {
+      retryAction = route.request().postDataJSON().action
+      return json(route, failure)
+    }
+    if (path.endsWith('/convert-progress')) return json(route, { success: true, progress: { isComplete: false, phases: [{ id: 'convert', label: '转换', tasks: [{ id: 'scenes', label: '场景', status: 'failed' }] }] } })
+    if (path.endsWith('/asset-progress')) return json(route, { success: true, progress: null })
+    if (path.endsWith('/history')) return json(route, { success: true, checkpoints: [] })
+    if (path.endsWith('/model-health')) return json(route, { models: [], cached: false })
+    return json(route, { success: true, scripts: [] })
+  })
+  await page.goto('/?editor=resume')
+  await expect(page.getByText('抱歉！系统发生未知错误，请稍后重试。')).toBeVisible()
+  await page.reload()
+  await expect(page.getByRole('button', { name: '重试', exact: true })).toBeVisible()
+  await expect(page.getByText('剧本创建完成！')).toHaveCount(0)
+  await page.getByRole('button', { name: '重试', exact: true }).click()
+  await expect.poll(() => retryAction).toBe('retry_failed')
+})
+
 test('创作长任务在刷新和返回大厅后仍恢复到同一工作流', async ({ page }) => {
   let allowComplete = false
   let startRequests = 0

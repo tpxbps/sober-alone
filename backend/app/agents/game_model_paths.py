@@ -39,9 +39,9 @@ def create_game_model(
     )
 
 
-def bind_reaction_output(model, model_id: str):
+def bind_reaction_output(model, model_id: str, schema=SpeechReactionPayload):
     return model.with_structured_output(
-        SpeechReactionPayload, method=get_model_spec(model_id).reaction_output_method
+        schema, method=get_model_spec(model_id).reaction_output_method
     )
 
 

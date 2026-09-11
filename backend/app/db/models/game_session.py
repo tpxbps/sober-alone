@@ -76,6 +76,8 @@ class GameSession(Base):
     # 发言控制
     # speech_queue: [character_id, ...] - 发言队列
     speech_queue: Mapped[list] = mapped_column(JSON, default=list)
+    pending_speech: Mapped[dict] = mapped_column(JSON, default=dict)
+
     # 当前发言角色
     current_speaker: Mapped[str | None] = mapped_column(String(36), nullable=True)
     # 本轮已发言的角色列表 (用于自由发言阶段判断是否所有人都发过言)
@@ -130,6 +132,7 @@ class GameSession(Base):
             "player_types": self.player_types,
             "human_character_id": self.human_character_id,
             "speech_queue": self.speech_queue,
+            "turn_processing": bool(self.pending_speech),
             "current_speaker": self.current_speaker,
             "round_speakers": self.round_speakers,
             "revealed_clues": self.revealed_clues,

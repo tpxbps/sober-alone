@@ -187,6 +187,12 @@ def normalize_game_data(state: ScriptGenState) -> dict[str, Any]:
             "_review_action": "invalid",
         }
 
+    for item in character_data:
+        if "character_script" not in item:
+            item["character_script"] = sections.get("character_scripts", {}).get(
+                item.get("name"), ""
+            )
+
     title = str(sections.get("title") or state.get("script_title") or "").strip()
     if not title:
         errors.append("剧本名称不能为空")
@@ -260,15 +266,7 @@ def normalize_game_data(state: ScriptGenState) -> dict[str, Any]:
         errors.append("角色 ID 不可为空或重复")
     for item in character_data:
         for key, label in (("character_script", "个人剧本"), ("system_prompt", "角色提示词")):
-            if not str(
-                item.get(key)
-                or (
-                    sections.get("character_scripts", {}).get(item.get("name"))
-                    if key == "character_script"
-                    else ""
-                )
-                or ""
-            ).strip():
+            if not str(item.get(key) or "").strip():
                 errors.append(f"{item.get('name', '角色')}的{label}不能为空")
     try:
         sections["ending_config"] = normalize_endings(sections.get("ending_config"), character_data)
