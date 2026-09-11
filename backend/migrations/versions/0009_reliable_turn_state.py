@@ -5,7 +5,7 @@ import json
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0009"
+revision = "0009_role_state"
 down_revision = "0008"
 branch_labels = None
 depends_on = None
