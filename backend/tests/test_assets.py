@@ -52,38 +52,13 @@ async def test_script_repository_saves_script_and_characters_atomically(tmp_path
 
     monkeypatch.setattr(script_repository.settings, "DATABASE_URL", database_url)
 
-    await ScriptRepository.save_generated_script(
-        {
-            "script_id": "generated-script",
-            "script_title": "生成剧本",
-            "player_count": 1,
-            "difficulty": 1,
-            "num_clue_rounds": 1,
-            "characters": [
-                {
-                    "character_id": "generated-character",
-                    "name": "林岚",
-                    "gender": "女",
-                    "age": 28,
-                    "occupation": "气象观察员",
-                }
-            ],
-            "game_data_sections": {
-                "game_flow": [],
-                "full_truth": "真相",
-                "free_speech_limits": [1],
-                "character_scripts": {"林岚": "个人剧本"},
-                "character_data": [
-                    {
-                        "name": "林岚",
-                        "profile": "简介",
-                        "appearance": "外貌",
-                        "system_prompt": "提示",
-                    }
-                ],
-            },
-        }
-    )
+    from reliability_support import approve, valid_state
+
+    state = valid_state()
+    state["game_data_sections"]["title"] = "生成剧本"
+    state["game_data_sections"]["character_data"][0]["character_script"] = "个人剧本"
+    result = await ScriptRepository.save_generated_script(approve(state))
+    assert result["error_message"] == ""
 
     async with session_factory() as session:
         script = await session.scalar(select(Script))

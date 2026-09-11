@@ -1,3 +1,4 @@
+import { gameApi } from "@/lib/api";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { FileEdit, BookOpen } from "lucide-react";
@@ -114,6 +115,23 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
       cancelActiveOperations: s.cancelActiveOperations,
     }))
   );
+  useEffect(() => {
+    if (!isProcessingReactions || isStreaming) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try {
+        const state = await gameApi.getGameState(sessionId);
+        if (!cancelled) useGameStore.getState().updateFromAPI(state);
+        if (state.turn_processing && !cancelled) timer = setTimeout(poll, 1500);
+      } catch {
+        if (!cancelled) timer = setTimeout(poll, 3000);
+      }
+    };
+    timer = setTimeout(poll, 1500);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [sessionId, isProcessingReactions, isStreaming]);
+
   const pauseContextKey = `${sessionId}:${stage}:${currentRound}`;
   const isAutoSpeakPaused =
     pauseAutoSpeak.value && pauseAutoSpeak.context === pauseContextKey;

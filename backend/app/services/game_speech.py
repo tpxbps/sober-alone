@@ -17,6 +17,10 @@ logger = logging.getLogger(__name__)
 _ai_speech_locks: dict[str, asyncio.Lock] = {}
 
 
+def session_lock(session_id: str) -> asyncio.Lock:
+    return _ai_speech_locks.setdefault(session_id, asyncio.Lock())
+
+
 def release_speech_lock(session_id: str) -> None:
     lock = _ai_speech_locks.get(session_id)
     if lock is not None and not lock.locked():
@@ -37,7 +41,7 @@ class GameSpeechService:
 
     async def stream_human(self, session_id: str, content: str):
         """Serialize human and AI writes for one session."""
-        lock = _ai_speech_locks.setdefault(session_id, asyncio.Lock())
+        lock = session_lock(session_id)
         async with lock:
             async for event in self._stream_human_locked(session_id, content):
                 yield event
@@ -53,6 +57,10 @@ class GameSpeechService:
             yield encode_sse({"type": "error", "message": "游戏会话不存在或已结束"})
             return
 
+        if getattr(flow_controller.session, "pending_speech", None):
+            from app.game.turn_state import finish_pending
+
+            await finish_pending(flow_controller, self.db)
         human_character_id = flow_controller.session.human_character_id
         current_speaker = flow_controller.session.current_speaker
         current_stage = flow_controller.session.current_stage
@@ -114,7 +122,7 @@ class GameSpeechService:
 
         from app.db.models import GameSession
 
-        lock = _ai_speech_locks.setdefault(session_id, asyncio.Lock())
+        lock = session_lock(session_id)
         async with lock:
             if not hasattr(self.db, "expire_all"):
                 async for event in self._stream_ai_locked(session_id, character_id):
@@ -128,6 +136,11 @@ class GameSpeechService:
             if not session:
                 yield encode_sse({"type": "error", "message": "游戏会话不存在或已结束"})
                 return
+            if session.pending_speech:
+                from app.game.turn_state import finish_pending
+
+                controller = await self._ensure_controller(session_id, self.db)
+                await finish_pending(controller, self.db)
             if session.current_speaker != character_id:
                 yield encode_sse({"type": "error", "message": "该发言请求已过期，当前发言者已变化"})
                 return

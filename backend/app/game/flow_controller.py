@@ -20,7 +20,6 @@ from app.db.models import (
 from app.game.clues import (
     build_agent_clue_context,
     normalize_clue_stages,
-    parse_clue_citations,
     render_clue_markdown,
 )
 from app.game.resource_revision import resource_namespace
@@ -266,91 +265,17 @@ class GameFlowController:
         Returns:
             Dict: 处理结果，包含下一位发言者等信息
         """
-        speech_content, clue_refs, unknown_refs = parse_clue_citations(
+        from app.game.turn_state import process_turn
+
+        return await process_turn(
+            self,
+            character_id,
             content,
-            self.session.revealed_clues or [],
-            strip_unknown=not is_human,
+            is_human=is_human,
+            db_session=db_session,
+            skip_reactions=skip_reactions,
+            consume_human_context=consume_human_context,
         )
-        if unknown_refs and not is_human:
-            import logging
-
-            logging.getLogger(__name__).warning(
-                "Agent %s emitted unavailable clue references: %s",
-                character_id,
-                unknown_refs,
-            )
-        # 清除该角色已消费的 perspectives（已通过 _build_knowledge_context 注入到 agent 历史中）
-        await self._clear_consumed_perspectives(character_id, db_session)
-
-        # 记录发言
-        recorded_id = await self._record_speech(
-            character_id, speech_content, db_session, clue_refs=clue_refs
-        )
-
-        if consume_human_context and recorded_id is not None:
-            await self._consume_injected_human_context(character_id, db_session)
-
-        # 更新发言者状态
-        await self._update_speaker_state(character_id, speech_content, db_session)
-
-        # 仅在自由发言阶段维护wait_rounds（发言机会成本）
-        if self.session.current_stage == GameStage.FREE_DISCUSSION.value:
-            await self._increment_wait_rounds_for_others(character_id, db_session)
-
-        # ── 先更新队列和下一位发言者（持久化到DB），再做慢的reaction广播 ──
-        # 这样即使reaction期间页面刷新，DB中已有正确的next_speaker，不会卡死
-
-        # 记录发言者
-        self.scheduler.record_speech(character_id)
-
-        # 从发言队列中移除并持久化到数据库
-        import json
-
-        from sqlalchemy import text
-
-        if character_id in (self.session.speech_queue or []):
-            new_queue = list(self.session.speech_queue)
-            new_queue.remove(character_id)
-            self.session.speech_queue = new_queue
-
-            # 持久化到数据库 - 使用直接SQL更新
-            if db_session:
-                await db_session.execute(
-                    text(
-                        "UPDATE game_sessions SET speech_queue = :queue "
-                        "WHERE session_id = :session_id"
-                    ),
-                    {
-                        "queue": json.dumps(new_queue),
-                        "session_id": self.session.session_id,
-                    },
-                )
-
-        # 根据当前阶段决定下一步（会将 current_speaker 持久化到 DB）
-        next_result = await self._determine_next_speaker(db_session)
-
-        # 广播给其他AI玩家（让他们做出反应）— 放在队列更新之后
-        reactions = {}
-        if not skip_reactions:
-            try:
-                reactions = await self.agent_manager.broadcast_speech(
-                    speaker_id=character_id,
-                    content=speech_content,
-                )
-            except Exception:
-                reactions = {}
-
-        # 保存反应结果到数据库（更新PlayerState）
-        if db_session and reactions:
-            await self._save_reactions_to_db(reactions, character_id, db_session)
-
-        return {
-            "success": True,
-            "speaker_id": character_id,
-            "speaker_name": self.agent_manager.get_character_name(character_id),
-            "clue_refs": clue_refs,
-            **next_result,
-        }
 
     async def broadcast_reactions_stream(self, speaker_id: str, content: str) -> dict[str, Any]:
         """
@@ -554,71 +479,23 @@ class GameFlowController:
         """
         from sqlalchemy import select
 
-        for character_id, reaction in reactions.items():
-            if isinstance(reaction, Exception) or "error" in reaction:
-                continue
+        from app.agents.role_state import apply_beliefs
+        from app.game.turn_state import role_names
 
-            # 获取该玩家的PlayerState
-            result = await db_session.execute(
+        for character_id, reaction in reactions.items():
+            if isinstance(reaction, dict) and "error" in reaction:
+                continue
+            player = await db_session.scalar(
                 select(PlayerState).where(
                     PlayerState.session_id == self.session.session_id,
                     PlayerState.character_id == character_id,
                 )
             )
-            player_state = result.scalar_one_or_none()
-            if not player_state:
-                continue
-
-            # 获取反应数据
-            my_suspicion_graph = (
-                reaction.my_suspicion_graph
-                if hasattr(reaction, "my_suspicion_graph")
-                else reaction.get("my_suspicion_graph", {})
-            )
-            my_suspected_by = (
-                reaction.my_suspected_by
-                if hasattr(reaction, "my_suspected_by")
-                else reaction.get("my_suspected_by", {})
-            )
-            main_perspective = (
-                reaction.main_perspective
-                if hasattr(reaction, "main_perspective")
-                else reaction.get("main_perspective", "")
-            )
-
-            from sqlalchemy.orm.attributes import flag_modified
-
-            # 更新怀疑图谱 (合并现有数据)
-            current_suspicion = dict(player_state.suspicion_reasons or {})
-            for target_name, data in my_suspicion_graph.items():
-                current_suspicion[target_name] = data
-            player_state.suspicion_reasons = current_suspicion
-            flag_modified(player_state, "suspicion_reasons")
-
-            # 更新被怀疑记录 (合并现有数据)
-            current_suspected_by = dict(player_state.suspected_by or {})
-            for source_name, data in my_suspected_by.items():
-                current_suspected_by[source_name] = data
-            player_state.suspected_by = current_suspected_by
-            flag_modified(player_state, "suspected_by")
-
-            # 计算被怀疑强度 (所有怀疑分数的平均值)
-            if current_suspected_by:
-                scores = [d.get("score", 0) for d in current_suspected_by.values()]
-                player_state.suspected_intensity = sum(scores) / len(scores)
-
-            # 更新对发言者的要点提炼 (累加存储为LIST)
-            if main_perspective:
-                current_perspectives = dict(player_state.player_perspectives or {})
-                if speaker_id not in current_perspectives:
-                    current_perspectives[speaker_id] = []
-                elif not isinstance(current_perspectives[speaker_id], list):
-                    # 兼容旧格式：单条字符串转为列表
-                    current_perspectives[speaker_id] = [current_perspectives[speaker_id]]
-                current_perspectives[speaker_id].append(main_perspective)
-                player_state.player_perspectives = current_perspectives
-                flag_modified(player_state, "player_perspectives")
-
+            if player:
+                try:
+                    apply_beliefs(player, reaction, role_names(self))
+                except ValueError:
+                    continue
         await db_session.commit()
 
     async def _determine_next_speaker(self, db_session) -> dict[str, Any]:
@@ -1150,12 +1027,14 @@ class GameFlowController:
 
         # 构建发言上下文（动态系统推送内容）
         game_state["context"] = await self._build_speech_context(character_id)
-        human_context, max_human_record_id = await self._build_unseen_human_context(
-            character_id, db_session
-        )
-        game_state["human_speech_context"] = human_context
-        if max_human_record_id:
-            self._pending_human_record_ids[character_id] = max_human_record_id
+        from app.game.turn_state import observation_context
+
+        context, entry_ids = await observation_context(self, character_id, db_session)
+        game_state["observations_context"] = context
+        game_state["observations_managed"] = True
+        if not hasattr(self, "_pending_observation_ids"):
+            self._pending_observation_ids = {}
+        self._pending_observation_ids[character_id] = entry_ids
 
         return game_state
 
@@ -1277,6 +1156,7 @@ class GameFlowController:
             ),
             "speech_queue": self.session.speech_queue or [],
             "human_character_id": self.session.human_character_id,
+            "turn_processing": bool(self.session.pending_speech),
             "has_all_spoken": len(self.session.speech_queue or []) == 0,
             "agent_llm_info": agent_llm_info,
             "public_clues": list(self.session.revealed_clues or []),

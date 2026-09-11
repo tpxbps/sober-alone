@@ -15,6 +15,8 @@ export interface QualityReport {
 }
 
 export interface EditorInterruptInfo {
+  failed?: boolean;
+  retry_step?: string;
   human_review?: string;
   first_draft?: string;
   quality_report?: QualityReport;
@@ -71,6 +73,8 @@ export interface EditorWorkflowState {
   character_avatars: Record<string, string>;
   error_message: string;
   safety_passed?: boolean;
+  safety_report?: { status: string; total: number; passed: number };
+  retry_step?: string;
   safety_rejection_reason?: string;
   data_validation_errors?: string[];
 }

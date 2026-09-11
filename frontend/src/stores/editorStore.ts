@@ -35,6 +35,9 @@ function reconstructInterruptInfo(
   state: EditorWorkflowState | null,
 ): EditorInterruptInfo | null {
   if (!state) return null;
+  if (state.error_message && state.retry_step) {
+    return { step: state.retry_step, step_label: '处理失败', generated_content: '', prompt_used: '', failed: true, retry_step: state.retry_step };
+  }
 
   // Determine the review step from the current generation step
   let step = currentStep;
@@ -188,6 +191,7 @@ function needsDetailedProgress(step: string | undefined): boolean {
 
 async function loadProgressSnapshots(threadId: string): Promise<{
   convertProgress: AssetProgress | null;
+  safetyProgress?: { completed: number; total: number } | null;
   assetProgress: AssetProgress | null;
 }> {
   const [convertResult, assetResult] = await Promise.allSettled([
@@ -237,6 +241,7 @@ interface EditorState {
 
   // Convert progress
   convertProgress: AssetProgress | null;
+  safetyProgress?: { completed: number; total: number } | null;
 
   // Backtracking / time-travel
   viewingCheckpoint: CheckpointInfo | null;
@@ -283,6 +288,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   error: null,
   assetProgress: null,
   convertProgress: null,
+  safetyProgress: null,
   viewingCheckpoint: null,
   history: [],
 
@@ -379,6 +385,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         (convertData) => set({ convertProgress: convertData }),
         (assetData) => set({ assetProgress: assetData }),
         () => { _sseClose = null; },
+        (progress) => set({ safetyProgress: progress }),
       );
     }
 
@@ -423,10 +430,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       }
 
       set({
-        currentStep: convertHasIncomplete ? optimisticStep : result.current_step,
+        currentStep: convertHasIncomplete && !result.state?.error_message ? optimisticStep : result.current_step,
         isComplete: assetHasIncomplete ? false : result.is_complete,
         workflowState: result.state,
-        interruptInfo: convertHasIncomplete ? null : result.interrupt,
+        interruptInfo: convertHasIncomplete && !result.state?.error_message ? null : result.interrupt,
         scriptTitle: result.state?.script_title || get().scriptTitle,
         isLoading: false,
         assetProgress: assetHasIncomplete ? ap : null,
@@ -508,7 +515,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
               : pending.current_step,
           isComplete: restoredComplete,
           workflowState: pending.state,
-          interruptInfo: convertIncomplete || assetIncomplete ? null : pending.interrupt,
+          interruptInfo: (convertIncomplete || assetIncomplete) && !pending.state?.error_message ? null : pending.interrupt,
           scriptId: pending.state?.script_id || null,
           scriptTitle: pending.state?.script_title || '',
           workflowMode: pending.state?.workflow_mode || 'create',
@@ -541,7 +548,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         workflowMode: result.state.workflow_mode || 'create',
         isComplete: restoredComplete,
         workflowState: result.state,
-        interruptInfo: convertIncomplete || assetIncomplete ? null : interruptInfo,
+        interruptInfo: (convertIncomplete || assetIncomplete) && !result.state?.error_message ? null : interruptInfo,
         scriptTitle: result.state?.script_title || '',
         scriptId: result.state?.script_id || null,
         convertProgress: progress.convertProgress,
@@ -643,6 +650,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       error: null,
       assetProgress: null,
       convertProgress: null,
+  safetyProgress: null,
       viewingCheckpoint: null,
       history: [],
     });
@@ -698,6 +706,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       () => {
         _sseClose = null;
       },
+      (progress) => set({ safetyProgress: progress }),
     );
   },
 

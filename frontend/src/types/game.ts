@@ -176,6 +176,7 @@ export interface StageTransition {
 
 // Game state response
 export interface GameStateResponse {
+  turn_processing?: boolean;
   success: boolean;
   session_id: string;
   status: GameStatus;

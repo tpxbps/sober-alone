@@ -182,7 +182,13 @@ def test_asset_plan_disables_empty_character_tts_and_omits_empty_system_message(
     sections["character_data"][0]["character_script"] = ""
     sections["clue_stages"][0]["free_discussion_notice"] = ""
     state["game_data_sections"] = sections
-    state.update(normalize_game_data(state))
+    normalized = normalize_game_data(state)
+    assert normalized["data_validation_errors"]
+    # Asset planning can still inspect a draft, but invalid data cannot be saved.
+    state["characters"][0]["character_script"] = ""
+    state["character_scripts"]["林岚"] = ""
+    state["game_data_sections"]["game_flow"][1]["children"][1]["system_notice"] = ""
+    state["game_full_process"][1]["children"][1]["system_notice"] = ""
 
     monkeypatch.setattr(editing, "_artifact_missing", lambda _script_id, _task_id: True)
     monkeypatch.setattr(settings, "MIMO_API_KEY", "test")
@@ -246,7 +252,9 @@ async def test_edit_save_updates_in_place_and_preserves_sessions_and_resources(
         ],
     }
     state.update(normalize_game_data(state))
-    result = await ScriptRepository.save_generated_script(state)
+    from reliability_support import approve
+
+    result = await ScriptRepository.save_generated_script(approve(state))
     assert result["error_message"] == ""
 
     from app.script_editor.nodes.quality_check import quality_fingerprint
@@ -254,7 +262,7 @@ async def test_edit_save_updates_in_place_and_preserves_sessions_and_resources(
     state["quality_report"] = {"content_fingerprint": quality_fingerprint(state)}
     state["script_title"] = "与已审查结构化内容不一致的缓存标题"
     rejected = await ScriptRepository.save_generated_script(state)
-    assert "实际保存内容与质量报告不一致" in rejected["error_message"]
+    assert "内容检查缺失或已失效" in rejected["error_message"]
 
     async with factory() as session:
         persisted = await session.scalar(select(Script).where(Script.script_id == "script-1"))

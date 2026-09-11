@@ -111,7 +111,7 @@ export function ScriptEditorPage({ onBack, editScriptId }: ScriptEditorPageProps
   };
 
   const handleRegenerate = async (prompt?: string) => {
-    await resumeWorkflow("regenerate", undefined, prompt);
+    await resumeWorkflow(workflowState?.error_message ? "retry_failed" : "regenerate", undefined, prompt);
   };
 
   const handleRegenerateReviewFinal = async (

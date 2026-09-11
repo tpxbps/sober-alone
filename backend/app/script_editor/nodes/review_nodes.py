@@ -134,6 +134,9 @@ def review_game_data(state: ScriptGenState) -> dict:
         "_review_action": action,
     }
 
+    if action == "regenerate":
+        result["convert_cache"] = {}
+
     # Clear rejection reason on confirm so next safety check starts fresh
     if action == "confirm":
         result["safety_rejection_reason"] = ""

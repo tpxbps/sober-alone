@@ -87,7 +87,19 @@ async def ensure_flow_controller(
             agent_manager=agent_manager,
         )
 
-    return await _flow_controllers.get_or_restore(session_id, restore)
+    controller = await _flow_controllers.get_or_restore(session_id, restore)
+    if controller:
+        current = await db_session.get(GameSession, session_id)
+        if getattr(current, "pending_speech", None):
+            from app.game.turn_state import finish_pending
+            from app.services.game_speech import session_lock
+
+            lock = session_lock(session_id)
+            if not lock.locked():
+                async with lock:
+                    controller.session = current
+                    await finish_pending(controller, db_session)
+    return controller
 
 
 class GameService:
@@ -258,6 +270,7 @@ class GameService:
         flow_controller = await ensure_flow_controller(session_id, self.db)
 
         if flow_controller:
+            player_states = await self._get_player_states(session_id)
             state = flow_controller.get_game_state()
             state["player_states"] = player_states
             state["script"] = script_info
@@ -299,6 +312,12 @@ class GameService:
         return [s.to_dict() for s in states]
 
     async def process_human_speech(self, session_id: str, content: str) -> dict[str, Any]:
+        from app.services.game_speech import session_lock
+
+        async with session_lock(session_id):
+            return await self._process_human_speech_locked(session_id, content)
+
+    async def _process_human_speech_locked(self, session_id: str, content: str) -> dict[str, Any]:
         """
         处理真人玩家发言
 
@@ -312,6 +331,13 @@ class GameService:
         flow_controller = await ensure_flow_controller(session_id, self.db)
         if not flow_controller:
             return {"success": False, "error": "游戏会话不存在或已结束"}
+
+        current = await self.db.get(GameSession, session_id)
+        if current.pending_speech:
+            from app.game.turn_state import finish_pending
+
+            flow_controller.session = current
+            await finish_pending(flow_controller, self.db)
 
         human_character_id = flow_controller.session.human_character_id
 
@@ -352,6 +378,15 @@ class GameService:
             yield event
 
     async def advance_stage(self, session_id: str) -> dict[str, Any]:
+        from app.services.game_speech import session_lock
+
+        lock = session_lock(session_id)
+        if lock.locked():
+            return {"success": False, "error": "玩家正在思考，请稍后推进流程"}
+        async with lock:
+            return await self._advance_stage_locked(session_id)
+
+    async def _advance_stage_locked(self, session_id: str) -> dict[str, Any]:
         """
         推进游戏流程
 
@@ -366,6 +401,12 @@ class GameService:
             return {"success": False, "error": "游戏会话不存在"}
 
         try:
+            current = await self.db.get(GameSession, session_id)
+            flow_controller.session = current
+            if current.pending_speech:
+                from app.game.turn_state import finish_pending
+
+                await finish_pending(flow_controller, self.db)
             transition = await flow_controller.advance_stage(self.db)
 
             # 持久化游戏会话状态变更到数据库

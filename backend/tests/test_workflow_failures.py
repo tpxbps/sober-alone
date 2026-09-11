@@ -12,6 +12,9 @@ def test_save_error_skips_optional_asset_generation():
 @pytest.mark.asyncio
 async def test_safety_check_timeout_fails_closed(monkeypatch):
     class TimeoutLlm:
+        def with_structured_output(self, *args, **kwargs):
+            return self
+
         async def ainvoke(self, _messages):
             raise TimeoutError
 
@@ -27,5 +30,5 @@ async def test_safety_check_timeout_fails_closed(monkeypatch):
     )
 
     assert result["safety_passed"] is False
-    assert result["_review_action"] == "regenerate"
-    assert "超时" in result["safety_rejection_reason"]
+    assert result["retry_step"] == "safety_check"
+    assert result["error_message"] == safety_module.GENERIC_ERROR

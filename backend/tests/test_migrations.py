@@ -1,4 +1,5 @@
 import importlib
+import json
 import os
 import sqlite3
 import subprocess
@@ -8,6 +9,85 @@ from pathlib import Path
 from app.seed import SAMPLE_SCRIPT_ID
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_legacy_beliefs_migrate_on_backup_copy_with_snapshot_names(tmp_path):
+    original = tmp_path / "legacy.db"
+    candidate = tmp_path / "candidate.db"
+    env = {**os.environ, "DATABASE_URL": f"sqlite+aiosqlite:///{original.as_posix()}"}
+
+    def migrate(command, revision):
+        subprocess.run(
+            [sys.executable, "-m", "alembic", command, revision],
+            check=True,
+            capture_output=True,
+            env=env,
+            cwd=BACKEND_ROOT,
+        )
+
+    migrate("upgrade", "0008")
+    with sqlite3.connect(original) as db:
+
+        def insert(table, **values):
+            for _, name, kind, required, default, primary in db.execute(
+                f"PRAGMA table_info({table})"
+            ):
+                if (
+                    required
+                    and default is None
+                    and name not in values
+                    and not (primary and kind == "INTEGER")
+                ):
+                    values[name] = (
+                        "{}"
+                        if kind == "JSON"
+                        else ("2026-09-11 00:00:00" if kind == "DATETIME" else 0)
+                    )
+            db.execute(
+                f"INSERT INTO {table} ({','.join(values)}) VALUES ({','.join('?' for _ in values)})",
+                tuple(values.values()),
+            )
+
+        insert(
+            "scripts", script_id="s", title="样例", game_full_process="[]", free_speech_limits="[]"
+        )
+        insert("characters", character_id="a", script_id="s", name="改名后")
+        insert(
+            "game_sessions",
+            session_id="g",
+            script_id="s",
+            human_character_id="a",
+            runtime_snapshot=json.dumps({"characters": [{"character_id": "a", "name": "旧名"}]}),
+        )
+        insert(
+            "player_states",
+            session_id="g",
+            character_id="listener",
+            suspicion_reasons=json.dumps(
+                {"旧名": {"score": 0.2}, "a": {"score": 0.8, "reason": "ID优先"}}
+            ),
+            suspected_by=json.dumps({"旧名": {"score": 0.5, "need_response": True}}),
+        )
+        db.commit()
+        with sqlite3.connect(candidate) as copy:
+            db.backup(copy)
+    before = original.read_bytes()
+    env["DATABASE_URL"] = f"sqlite+aiosqlite:///{candidate.as_posix()}"
+    migrate("upgrade", "head")
+    migrate("upgrade", "head")
+    assert original.read_bytes() == before
+    with sqlite3.connect(candidate) as db:
+        assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        reasons, scores, suspected, intensity = db.execute(
+            "SELECT suspicion_reasons,suspicion,suspected_by,suspected_intensity FROM player_states"
+        ).fetchone()
+        assert json.loads(reasons) == {"a": {"score": 0.8, "reason": "ID优先"}}
+        assert json.loads(scores) == {"a": 0.8}
+        assert json.loads(suspected)["a"]["need_response"] is True
+        assert intensity == 0.5
+        assert (
+            json.loads(db.execute("SELECT pending_speech FROM game_sessions").fetchone()[0]) == {}
+        )
 
 
 def test_compact_clue_migration_can_repair_legacy_runtime_snapshot_ids():

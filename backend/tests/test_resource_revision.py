@@ -96,6 +96,7 @@ async def test_restored_agent_memory_uses_session_snapshot_not_current_script(
         database = SimpleNamespace(
             execute=AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: session))
         )
+        database.get = AsyncMock(return_value=session)
         controller = await game_service.ensure_flow_controller(session_id, database)
         assert controller.script_data is snapshot
     assert requested == [("old-session", "script"), ("new-session", namespace)]

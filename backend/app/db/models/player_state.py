@@ -166,6 +166,9 @@ class PlayerState(Base):
         Returns:
             Dict: Agent内部状态
         """
+        from app.agents.role_state import normalize_beliefs, observations
+
+        normalize_beliefs(self, character_name_map)
         # 转换 suspicion_reasons 的 key 从 id 到 name
         my_suspicion_graph = {}
         for target_id, data in (self.suspicion_reasons or {}).items():
@@ -181,17 +184,9 @@ class PlayerState(Base):
         # 转换 player_perspectives 的 key 从 id 到 name
         # 同时处理 LIST 格式的观点（累加存储）
         my_player_perspectives = {}
-        for speaker_id, perspective in (self.player_perspectives or {}).items():
-            speaker_name = character_name_map.get(speaker_id, speaker_id)
-            if isinstance(perspective, list):
-                # LIST格式: 用分号连接所有观点
-                if perspective:
-                    combined = "；".join(perspective)
-                    my_player_perspectives[speaker_name] = combined
-            else:
-                # 兼容旧格式: 单条字符串
-                if perspective:
-                    my_player_perspectives[speaker_name] = perspective
+        for speaker_id, entries in observations(self.player_perspectives).items():
+            source_name = character_name_map.get(speaker_id, speaker_id)
+            my_player_perspectives[source_name] = "\n".join(entry["text"] for entry in entries)
 
         return {
             "my_suspicion_graph": my_suspicion_graph,

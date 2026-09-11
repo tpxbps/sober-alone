@@ -49,3 +49,5 @@ class GameAgentState(AgentState):
     # 当前剧本中所有角色名称列表（用于校验）
     character_names: list[str]
     public_clues: list[dict]
+
+    personal_script: str

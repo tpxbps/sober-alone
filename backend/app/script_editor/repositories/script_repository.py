@@ -24,9 +24,24 @@ def _calc_estimated_duration(state: ScriptGenState) -> int:
 
 async def _save_generated_script(state: ScriptGenState) -> dict:
     """Persist canonical text first, without replacing parent rows or resources."""
-    import re
-
     import aiosqlite
+
+    from app.script_editor.editing import normalize_game_data
+    from app.script_editor.nodes.quality_check import quality_approved
+    from app.script_editor.nodes.safety_check import safety_approved
+
+    normalized = normalize_game_data(state)
+    if normalized.get("data_validation_errors"):
+        return {
+            "current_step": STEP_SAVE,
+            "error_message": "；".join(normalized["data_validation_errors"]),
+        }
+    state = {**state, **normalized}
+    if not quality_approved(state) or not safety_approved(state):
+        return {
+            "current_step": STEP_SAVE,
+            "error_message": "内容检查缺失或已失效，请重新检查后保存",
+        }
 
     script_id = state.get("script_id", str(uuid.uuid4()))
     db_path = settings.DATABASE_URL.replace("sqlite+aiosqlite:///", "")
@@ -55,16 +70,7 @@ async def _save_generated_script(state: ScriptGenState) -> dict:
     }
 
     overview = game_data_sections.get("overview", "")
-    if not overview:
-        outline_raw = state.get("outline", "")
-        overview = re.sub(r"#{1,6}\s+", "", outline_raw)
-        overview = re.sub(r"\*{1,2}([^*]+)\*{1,2}", r"\1", overview)
-        overview = re.sub(r"[`*\[\]()>_~|]", "", overview)
-        overview = overview.strip()[:300]
-
-    description = game_data_sections.get("description", "") or game_data_sections.get(
-        "opening", state.get("final_draft", "")
-    )
+    description = game_data_sections.get("description", "")
     tags = game_data_sections.get("tags", "AI创作,剧本杀")
     workflow_mode = state.get("workflow_mode", "create")
     characters = list(state.get("characters", []))
