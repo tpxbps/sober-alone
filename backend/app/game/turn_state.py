@@ -44,6 +44,10 @@ async def process_turn(
     text, refs, _ = parse_clue_citations(
         content, session.revealed_clues or [], strip_unknown=not is_human
     )
+    if is_human:
+        text = content
+    if not text.strip():
+        return {"success": False, "error": "发言不能为空"}
     players = await players_for(controller, db)
     names = role_names(controller)
     record = GameRecord(

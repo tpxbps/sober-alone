@@ -16,6 +16,18 @@ NAMES = {"human": "真人", "a": "甲", "b": "乙"}
 
 
 @pytest.mark.asyncio
+async def test_human_raw_keeps_whitespace_and_citation_spelling(game):
+    db, controller = game
+    original = "  @甲 原文 `c01`\n第二行。\n"
+    await controller.process_speech("human", original, is_human=True, db_session=db)
+    record = await db.scalar(select(GameRecord).where(GameRecord.record_type == "speech"))
+    assert record.raw_content == original
+    for cid in ("a", "b"):
+        player = await db.scalar(select(PlayerState).where(PlayerState.character_id == cid))
+        assert observations(player.player_perspectives)["human"][0]["text"] == original
+
+
+@pytest.mark.asyncio
 async def test_clue_tool_uses_same_absolute_contract_and_allows_omitted_array(game, monkeypatch):
     from app.agents.context import clear_db_session, set_db_session
     from app.agents.tools import reaction
