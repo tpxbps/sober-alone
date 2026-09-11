@@ -40,7 +40,7 @@ MODEL_PROVIDER_MAP: dict[str, str] = {
 
 
 def create_llm(
-    model: SupportedModel = "deepseek-v4-flash",
+    model: SupportedModel = "deepseek-flash",
     temperature: float = 0.8,
     api_key: str | None = None,
     timeout: int | None = None,
@@ -59,6 +59,7 @@ def create_llm(
     """
     model_lower = model.lower()
     spec = get_model_spec(model_lower)
+    model_lower = spec.id
     provider = spec.provider
 
     resolved_key = api_key or settings.get_api_key(provider)
@@ -165,7 +166,7 @@ def _create_openai_compatible(
 
 
 def create_chat_model_for_agent(
-    model: str = "deepseek-v4-flash",
+    model: str = "deepseek-flash",
 ) -> BaseChatModel:
     """创建用于 Agent（如创作小助手）的聊天模型。
 

@@ -14,7 +14,7 @@ from app.core.llm_factory import create_llm
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SCRIPT_MODEL = "deepseek-v4-flash"
+DEFAULT_SCRIPT_MODEL = "deepseek-flash"
 
 # 重试配置
 MAX_RETRIES = 4

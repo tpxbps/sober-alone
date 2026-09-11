@@ -14,6 +14,7 @@ class ScriptGenState(TypedDict, total=False):
     player_count: int  # 玩家人数 (默认 4)
     difficulty: int  # 难度 1-4
     num_clue_rounds: int  # 线索轮次数量
+    ending_mode: str  # single | multiple
 
     # === 各步骤生成内容 ===
     outline: str  # 结构化大纲
@@ -34,6 +35,7 @@ class ScriptGenState(TypedDict, total=False):
     game_full_process: list[dict]  # 完整流程 JSON (匹配现有 schema)
     clue_stages: list[dict]  # canonical structured public clues
     full_truth: str  # 真相揭晓文本
+    ending_config: dict | None
     free_speech_limits: list[int]  # 各轮自由讨论发言次数
     game_data_sections: dict  # 结构化数据各部分 (用于审阅)
 

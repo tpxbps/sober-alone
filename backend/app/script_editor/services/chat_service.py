@@ -304,7 +304,7 @@ def _get_chat_agent(model: str):
 
 async def stream_chat_response(
     message: str,
-    model: str = "deepseek-v4-flash",
+    model: str = "deepseek-flash",
     chat_session_id: str = "default",
     workflow_state: dict | None = None,
 ) -> AsyncGenerator[str]:

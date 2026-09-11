@@ -302,6 +302,16 @@ class VotingService:
             await db_session.rollback()
 
     async def finalize(self, session_id: str) -> dict[str, Any]:
+        import asyncio
+
+        controller = self._get_controller(session_id)
+        if controller is None:
+            return {"success": False, "error": "游戏会话不存在"}
+        lock = controller.__dict__.setdefault("_finalize_lock", asyncio.Lock())
+        async with lock:
+            return await self._finalize(session_id)
+
+    async def _finalize(self, session_id: str) -> dict[str, Any]:
         """
         完成投票并推进到复盘阶段
 
@@ -315,7 +325,7 @@ class VotingService:
             return {"success": False, "error": "游戏会话不存在"}
 
         # 幂等：如果已经推进到 review 阶段，直接返回已有结果
-        if flow_controller.session.current_stage == "review":
+        if flow_controller.session.current_stage in ("review", "completed"):
             gs_result = await self.db.execute(
                 select(GameSession).where(GameSession.session_id == session_id)
             )
@@ -325,7 +335,7 @@ class VotingService:
                 "vote_results": game_session.vote_result if game_session else None,
                 "transition": {
                     "from_stage": "vote",
-                    "to_stage": "review",
+                    "to_stage": flow_controller.session.current_stage,
                     "message": "投票已统计完毕",
                 },
             }
@@ -389,6 +399,12 @@ class VotingService:
         if not vote_results:
             return {"success": False, "error": "没有投票记录"}
 
+        from app.game.endings import select_ending
+
+        ending = select_ending(flow_controller.script_data, vote_results)
+        if ending:
+            vote_results["ending"] = ending
+
         # 3. 更新最终投票结果到游戏会话
         result = await self.db.execute(
             select(GameSession).where(GameSession.session_id == session_id)
@@ -418,6 +434,25 @@ class VotingService:
             timestamp=datetime.now(),
         )
         self.db.add(review_record)
+        if ending:
+            from app.core.config import settings
+            from app.game.endings import render_ending
+            from app.game.resource_revision import resource_namespace
+
+            namespace = resource_namespace(flow_controller.script_data)
+            relative_audio = f"scripts/{namespace}/system_messages/ending_{ending['when']}.wav"
+            self.db.add(
+                GameRecord(
+                    session_id=session_id,
+                    record_type="system",
+                    stage="review",
+                    raw_content=render_ending(ending),
+                    timestamp=datetime.now(),
+                    audio_url=f"/audio/{relative_audio}"
+                    if (settings.audio_dir / relative_audio).is_file()
+                    else None,
+                )
+            )
 
         # 推进到复盘阶段
         transition = await flow_controller.advance_stage(self.db)
@@ -460,7 +495,7 @@ class VotingService:
                 "from_stage": transition.from_stage,
                 "to_stage": transition.to_stage,
                 "message": transition.message,
-                "system_notice": transition.system_notice,
+                "system_notice": "",
             },
         }
 

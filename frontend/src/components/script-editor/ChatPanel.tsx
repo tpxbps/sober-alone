@@ -24,7 +24,7 @@ export function ChatPanel({ threadId, onClose }: ChatPanelProps) {
   const [chatSessionId] = useState(() => generateSessionId());
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
-  const [model, setModel] = useState("deepseek-v4-flash");
+  const [model, setModel] = useState("deepseek-flash");
   const [availableModels, setAvailableModels] = useState<AIModelOption[]>([]);
   const [modelReason, setModelReason] = useState("正在检查模型能力…");
   const [isStreaming, setIsStreaming] = useState(false);

@@ -11,6 +11,7 @@ import type {
 import { LoadingButton } from "./EditorControls";
 import { getButtonLoadingMessage } from "./editorMessages";
 import { STEP_VOICE_GROUPS, STEP_VOICE_OPTIONS } from "@/lib/stepVoices";
+import { EndingEditor } from "./EndingEditor";
 
 export function ReviewGameDataStage({
   editedGameData,
@@ -244,6 +245,8 @@ export function ReviewGameDataStage({
             </div>
           </div>
         </CollapsibleSection>
+
+        <EndingEditor data={editedGameData} onChange={(value) => updateField(["ending_config"], value)} />
 
         <CollapsibleSection
           title="结构化公开线索"

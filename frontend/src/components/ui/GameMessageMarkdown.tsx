@@ -1,8 +1,11 @@
-import React, { type ReactNode } from "react";
-import ReactMarkdown from "react-markdown";
+import React, { useMemo, type ReactNode } from "react";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Character, PublicClue } from "@/types/game";
 import { ClueCitationHover } from "../game/ClueCitationHover";
+
+const NO_CHARACTERS: Character[] = [];
+const NO_CLUES: PublicClue[] = [];
 
 interface GameMessageMarkdownProps {
   children: string;
@@ -188,13 +191,13 @@ function processChildrenWithHighlights(
 export function GameMessageMarkdown({
   children,
   className,
-  characters = [],
+  characters = NO_CHARACTERS,
   preserveWhitespace = false,
-  publicClues = [],
+  publicClues = NO_CLUES,
 }: GameMessageMarkdownProps) {
   // Normalize mentions, keep clue references at their exact sentence position,
   // and only activate IDs that the server says have already been revealed.
-  const clueMap = new Map(publicClues.map((clue) => [clue.id.toLowerCase(), clue]));
+  const clueMap = useMemo(() => new Map(publicClues.map((clue) => [clue.id.toLowerCase(), clue])), [publicClues]);
   const contentWithCompatibilityRefs = normalizeClueSyntax(
     children.replace(/@{2,}/g, "@"),
     clueMap,
@@ -208,15 +211,8 @@ export function GameMessageMarkdown({
     })
     .trim();
 
-  return (
-    <div
-      className={`markdown-content relative max-w-none break-words ${
-        preserveWhitespace ? "whitespace-pre-wrap" : ""
-      } ${className || ""}`}
-    >
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
+  // Keep renderer identities stable while playback progress updates the parent.
+  const components = useMemo<Components>(() => ({
           // 自定义段落渲染 - 在这里处理角色名称高亮
           p: ({ children }) => (
             <p className="mb-1 last:mb-0 leading-relaxed">
@@ -293,7 +289,17 @@ export function GameMessageMarkdown({
           ),
           // 处理换行 - 将 \n 转换为较小间距的换行
           br: () => <br className="leading-tight" />,
-        }}
+        }), [characters, clueMap]);
+
+  return (
+    <div
+      className={`markdown-content relative max-w-none break-words ${
+        preserveWhitespace ? "whitespace-pre-wrap" : ""
+      } ${className || ""}`}
+    >
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={components}
       >
         {normalizedContent}
       </ReactMarkdown>

@@ -27,6 +27,7 @@ RUNTIME_SNAPSHOT_FIELDS = (
     "clue_stages",
     "clue_schema_version",
     "full_truth",
+    "ending_config",
     "cover_image_url",
     "free_speech_limits",
     "characters",
@@ -143,7 +144,11 @@ class GameRuntimeRepository:
                 script_data["game_full_process"] = json.loads(script_data["game_full_process"])
             except json.JSONDecodeError:
                 script_data["game_full_process"] = []
-        for field, fallback in (("clue_stages", []), ("free_speech_limits", [])):
+        for field, fallback in (
+            ("clue_stages", []),
+            ("free_speech_limits", []),
+            ("ending_config", None),
+        ):
             if isinstance(script_data.get(field), str):
                 try:
                     script_data[field] = json.loads(script_data[field])

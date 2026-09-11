@@ -265,6 +265,13 @@ export function CheckpointView({
                   </div>
                 ) : null}
 
+                {gds.ending_config?.branches.map((branch) => (
+                  <div key={branch.when}>
+                    <h4 className="text-sm font-semibold text-primary mb-2">结局 · {branch.title}</h4>
+                    <Markdown className="text-sm">{branch.text}</Markdown>
+                  </div>
+                ))}
+
                 {!gds.overview &&
                 !gds.opening &&
                 charData.length === 0 &&
@@ -302,4 +309,3 @@ export function CheckpointView({
     </div>
   );
 }
-

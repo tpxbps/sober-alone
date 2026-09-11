@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 export const WORKFLOW_WAIT_MESSAGE =
   "单个节点可能耗时数分钟，且剧本越复杂耗时越久，请耐心等待～";
 export const WORKFLOW_MOTTO =
-  "「不诱于誉，不恐于诽，率道而行，端然正己。」 剧本创作工作流全程由 deepseek-v4-flash 稳定执行。";
+  "「不诱于誉，不恐于诽，率道而行，端然正己。」 剧本创作工作流全程由 deepSeek-v4.1-flash 稳定执行。";
 
 const TYPE_INTERVAL_MS = 42;
 const FULL_MESSAGE_HOLD_MS = 2400;

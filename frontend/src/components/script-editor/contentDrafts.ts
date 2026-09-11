@@ -18,6 +18,7 @@ export function workflowDraftKey(
     interruptInfo?.step || "no-interrupt",
     interruptInfo?.generated_content || "",
     interruptInfo?.quality_report?.report_id || "",
+    interruptInfo?.game_data_sections ? JSON.stringify(interruptInfo.game_data_sections) : "",
   ].join(":");
 }
 

@@ -48,7 +48,7 @@ test('未配置主模型时选角安全降级且不会产生页面异常', async
           {
             provider: 'deepseek',
             provider_name: 'DeepSeek',
-            model: 'deepseek-v4-flash',
+            model: 'deepseek-flash',
             configured: false,
             reason: '未配置 deepseek API Key',
           },
@@ -93,11 +93,11 @@ test('模型服务偏慢时只提示体验风险且仍可选择并开始游戏',
         mode: 'local-first-single-user-single-process',
         models: [
           {
-            id: 'deepseek-v4-flash',
-            name: 'deepseek-v4-flash',
+            id: 'deepseek-flash',
+            name: 'deepseek-flash',
             provider: 'deepseek',
             provider_name: 'DeepSeek',
-            model: 'deepseek-v4-flash',
+            model: 'deepseek-flash',
             configured: true,
             reason: '已配置',
           },
@@ -124,7 +124,7 @@ test('模型服务偏慢时只提示体验风险且仍可选择并开始游戏',
         cached: false,
         models: [
           {
-            model: 'deepseek-v4-flash',
+            model: 'deepseek-flash',
             status: 'normal',
             latency_ms: 420,
             first_token_latency_ms: 420,

@@ -7,11 +7,11 @@ const capabilities: SystemCapabilities = {
   mode: 'local-first-single-user-single-process',
   models: [
     {
-      id: 'deepseek-v4-flash',
+      id: 'deepseek-flash',
       name: 'DeepSeek V4 Flash',
       provider: 'deepseek',
       provider_name: 'DeepSeek',
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-flash',
       configured: true,
       reason: '已配置',
     },
@@ -36,7 +36,7 @@ const capabilities: SystemCapabilities = {
 describe('capability adapters', () => {
   it('exposes only models whose provider key is configured', () => {
     expect(configuredModels(capabilities).map((model) => model.id)).toEqual([
-      'deepseek-v4-flash',
+      'deepseek-flash',
     ])
   })
 

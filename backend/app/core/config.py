@@ -48,8 +48,8 @@ class Settings(BaseSettings):
 
     # 默认LLM提供商
     DEFAULT_LLM_PROVIDER: str = "deepseek"
-    DEFAULT_LLM_MODEL: str | None = "deepseek-v4-flash"  # 为None时使用DEFAULT_MODELS中的默认值
-    SCRIPT_EDITOR_MODEL: str | None = "deepseek-v4-flash"
+    DEFAULT_LLM_MODEL: str | None = "deepseek-flash"  # 为None时使用DEFAULT_MODELS中的默认值
+    SCRIPT_EDITOR_MODEL: str | None = "deepseek-flash"
 
     # Vector database
     CHROMA_PERSIST_DIR: str = str(LOCAL_DATA_DIR / "chroma")
@@ -82,12 +82,12 @@ class Settings(BaseSettings):
 
     def get_llm_model_name(self, provider: str | None = None) -> str:
         """获取LLM模型名称"""
-        from app.core.model_registry import DEFAULT_MODELS
+        from app.core.model_registry import DEFAULT_MODELS, MODEL_ALIASES
 
         provider = provider or self.DEFAULT_LLM_PROVIDER
         if provider == self.DEFAULT_LLM_PROVIDER and self.DEFAULT_LLM_MODEL:
-            return self.DEFAULT_LLM_MODEL
-        return DEFAULT_MODELS.get(provider, "deepseek-v4-flash")
+            return MODEL_ALIASES.get(self.DEFAULT_LLM_MODEL.lower(), self.DEFAULT_LLM_MODEL)
+        return DEFAULT_MODELS.get(provider, "deepseek-flash")
 
     def get_api_key(self, provider: str) -> str | None:
         """获取指定提供商的API Key"""

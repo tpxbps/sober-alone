@@ -22,6 +22,7 @@ import { IdeaStage } from "./IdeaStage";
 import { cloneGameDataSections, workflowDraftKey } from "./contentDrafts";
 import { DefaultReviewStage } from "./DefaultReviewStage";
 import { AssetPlanDialog } from "./AssetPlanDialog";
+import { useTextDraft } from "./useTextDraft";
 
 // === Props ===
 
@@ -51,6 +52,7 @@ interface ContentPanelProps {
     player_count: number;
     difficulty: number;
     num_clue_rounds: number;
+    ending_mode?: "single" | "multiple";
   }) => void;
   onOpenProgressStream?: () => void;
   onCloseProgressStream?: () => void;
@@ -176,6 +178,7 @@ function ContentPanelBody({
   const [playerCount, setPlayerCount] = useState(4);
   const [difficulty, setDifficulty] = useState(1);
   const [numClueRounds, setNumClueRounds] = useState(2);
+  const [endingMode, setEndingMode] = useState<"single" | "multiple">("single");
 
   // Global mole game (decoupled from buttons)
   const [showMoleGame, setShowMoleGame] = useState(false);
@@ -189,8 +192,9 @@ function ContentPanelBody({
 
 
   // Game data review state
-  const [editedGameData, setEditedGameData] = useState<GameDataSections | null>(
-    null
+  const gameDataSource = interruptInfo?.game_data_sections || workflowState?.game_data_sections;
+  const [editedGameData, setEditedGameData] = useTextDraft<GameDataSections | null>(
+    "review_game_data", JSON.stringify(gameDataSource || null), cloneGameDataSections(gameDataSource)
   );
 
   // Pre-fill idea form from workflowState (after rewind to idea phase)
@@ -201,24 +205,11 @@ function ContentPanelBody({
       if (workflowState.player_count)
         setPlayerCount(workflowState.player_count);
       if (workflowState.difficulty) setDifficulty(workflowState.difficulty);
+      setEndingMode(workflowState.ending_mode || "single");
       if (workflowState.num_clue_rounds)
         setNumClueRounds(workflowState.num_clue_rounds);
     }
   }, [isIdeaPhase, workflowState]);
-
-  // Initialize game data from interrupt, with fallback to workflowState
-  useEffect(() => {
-    if (isReviewGameData && !editedGameData) {
-      const source =
-        interruptInfo?.game_data_sections || workflowState?.game_data_sections;
-      if (
-        source &&
-        (source.opening || source.character_scripts || source.game_flow?.length)
-      ) {
-        setEditedGameData(cloneGameDataSections(source));
-      }
-    }
-  }, [isReviewGameData, interruptInfo, workflowState, editedGameData]);
 
   /* eslint-enable react-hooks/set-state-in-effect */
 
@@ -284,6 +275,8 @@ function ContentPanelBody({
           setPlayerCount={setPlayerCount}
           difficulty={difficulty}
           setDifficulty={setDifficulty}
+          endingMode={endingMode}
+          setEndingMode={setEndingMode}
           numClueRounds={numClueRounds}
           setNumClueRounds={setNumClueRounds}
           error={error}

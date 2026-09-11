@@ -42,6 +42,7 @@ export const editorApi = {
     player_count?: number;
     difficulty?: number;
     num_clue_rounds?: number;
+    ending_mode?: "single" | "multiple";
     prompts?: Record<string, string>;
   }): Promise<EditorOperationAccepted> => {
     const response = await api.post('/script-editor/start', params);

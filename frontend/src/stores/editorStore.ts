@@ -248,6 +248,7 @@ interface EditorState {
     player_count?: number;
     difficulty?: number;
     num_clue_rounds?: number;
+    ending_mode?: "single" | "multiple";
   }) => Promise<void>;
   startEditWorkflow: (scriptId: string) => Promise<void>;
   resumeWorkflow: (action: string, content?: string, prompt?: string, gameDataSections?: unknown, humanReview?: string, selectedAssetIds?: string[], qualityReportId?: string) => Promise<void>;

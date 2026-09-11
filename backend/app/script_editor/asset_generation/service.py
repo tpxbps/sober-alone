@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.core.config import settings
+from app.game.endings import ending_audio_tasks
 from app.script_editor.asset_generation.progress import (
     _init_asset_progress,
     _mark_progress_complete,
@@ -84,6 +85,11 @@ async def _generate_assets(state: ScriptGenState) -> dict:
                     "status": "pending",
                 }
             )
+
+    tts_sys_tasks.extend(
+        {"id": item["id"], "label": item["label"], "status": "pending"}
+        for item in ending_audio_tasks(state)
+    )
 
     # 构建任务树
     phases = [
@@ -396,6 +402,7 @@ async def _run_tts(
             characters=characters,
             game_full_process=state.get("game_full_process", []),
             clue_stages=state.get("clue_stages", []),
+            ending_config=state.get("ending_config"),
             task_callback=task_callback,
             selected_task_ids=task_ids,
             force=force,
@@ -425,7 +432,10 @@ def _delete_tts_audio(script_id: str, task_id: str):
     from app.services.tts_service import AUDIO_ROOT
 
     try:
-        if task_id.startswith("tts_sys_"):
+        if task_id.startswith("tts_ending_"):
+            identifier = task_id.removeprefix("tts_")
+            path = AUDIO_ROOT / "scripts" / script_id / "system_messages" / f"{identifier}.wav"
+        elif task_id.startswith("tts_sys_"):
             # Parse tts_sys_{i} or tts_sys_{i}_{j} → stage_{i} or stage_{i}_child_{j}
             parts = task_id.split("_")
             stage_idx = parts[2]
@@ -546,7 +556,16 @@ async def _retry_single_asset(script_id: str, task_id: str, state: ScriptGenStat
             game_full_process = state.get("game_full_process", [])
             character_scripts = state.get("character_scripts", {})
 
-            if task_id.startswith("tts_sys_"):
+            if task_id.startswith("tts_ending_"):
+                ending = next((e for e in ending_audio_tasks(state) if e["id"] == task_id), None)
+                if ending:
+                    await generate_single_system_audio(
+                        script_id, ending["path"], ending["text"], "review"
+                    )
+                    result = TaskResult(ok=True)
+                else:
+                    result = TaskResult(ok=False, error="结局分支不存在")
+            elif task_id.startswith("tts_sys_"):
                 # System message: parse stage index and optional child index
                 # IDs: tts_sys_{i} or tts_sys_{i}_{j}
                 # File identifiers: stage_{i} or stage_{i}_child_{j}

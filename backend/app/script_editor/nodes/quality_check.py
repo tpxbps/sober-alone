@@ -113,7 +113,7 @@ async def check_game_quality(state: dict) -> dict:
         "capability_version": CAPABILITY_VERSION,
         "check_version": QUALITY_CHECK_VERSION,
         "checked_at": datetime.now(timezone.utc).isoformat(),
-        "model": settings.SCRIPT_EDITOR_MODEL or "deepseek-v4-flash",
+        "model": settings.SCRIPT_EDITOR_MODEL or "deepseek-flash",
         "findings": [],
     }
     failure_reason = "model_or_parse_error"

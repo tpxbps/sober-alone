@@ -29,6 +29,7 @@ class Script(Base):
     clue_stages: Mapped[list] = mapped_column(JSON, default=list)
     clue_schema_version: Mapped[int] = mapped_column(Integer, default=0)
     full_truth: Mapped[str] = mapped_column(Text, default="")
+    ending_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     cover_image_url: Mapped[str] = mapped_column(String(500), default="")
     free_speech_limits: Mapped[list] = mapped_column(JSON, default=list)
     is_ai_generated: Mapped[bool] = mapped_column(Boolean, default=False)

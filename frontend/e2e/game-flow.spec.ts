@@ -65,7 +65,7 @@ test('大厅 → 选角 → 发言 → 推进 → 投票 → 复盘', async ({ p
           {
             provider: 'deepseek',
             provider_name: 'DeepSeek',
-            model: 'deepseek-v4-flash',
+            model: 'deepseek-flash',
             configured: true,
             reason: '已配置',
           },

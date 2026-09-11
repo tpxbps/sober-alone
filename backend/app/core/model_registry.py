@@ -21,7 +21,7 @@ class ModelSpec:
 
 
 MODEL_SPECS = (
-    ModelSpec("deepseek-v4-flash", "deepseek-v4-flash", "deepseek", "DeepSeek"),
+    ModelSpec("deepseek-flash", "deepSeek-v4.1-flash", "deepseek", "DeepSeek"),
     ModelSpec("step-3.5-flash", "step-3.5-flash", "stepfun", "StepFun"),
     ModelSpec(
         "qwen3.8-flash",
@@ -49,7 +49,7 @@ MODEL_SPECS = (
 )
 MODEL_BY_ID = {spec.id: spec for spec in MODEL_SPECS}
 DEFAULT_MODELS = {
-    "deepseek": "deepseek-v4-flash",
+    "deepseek": "deepseek-flash",
     "stepfun": "step-3.5-flash",
     "alibaba": "qwen3.8-flash",
     "bytedance": "doubao-seed-2-0-mini-260215",
@@ -60,9 +60,16 @@ DEFAULT_MODELS = {
 PROBE_FILE = LOCAL_DATA_DIR / "model-probes.json"
 
 
+MODEL_ALIASES = {
+    "deepseek-v4-flash": "deepseek-flash",
+    "deepseek-v4-flash-vision-exp": "deepseek-flash",
+}
+
+
 def get_model_spec(model_id: str) -> ModelSpec:
+    canonical_id = MODEL_ALIASES.get(model_id.lower(), model_id.lower())
     try:
-        return MODEL_BY_ID[model_id.lower()]
+        return MODEL_BY_ID[canonical_id]
     except KeyError as exc:
         raise ValueError(
             f"不支持的模型: {model_id}。支持的模型: {', '.join(sorted(MODEL_BY_ID))}"

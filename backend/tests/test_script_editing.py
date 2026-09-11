@@ -237,6 +237,14 @@ async def test_edit_save_updates_in_place_and_preserves_sessions_and_resources(
 
     state = hydrate_completed_script(script, characters, script.owner_key_hash or "")
     state["game_data_sections"]["title"] = "原位更新标题"
+    state["game_data_sections"]["ending_config"] = {
+        "mode": "multiple",
+        "culprit_character_id": "c1",
+        "branches": [
+            {"when": outcome, "title": outcome, "text": f"{outcome}的结局正文"}
+            for outcome in ("correct", "incorrect", "tie", "no_votes")
+        ],
+    }
     state.update(normalize_game_data(state))
     result = await ScriptRepository.save_generated_script(state)
     assert result["error_message"] == ""
@@ -256,6 +264,7 @@ async def test_edit_save_updates_in_place_and_preserves_sessions_and_resources(
         session_count = await session.scalar(select(func.count()).select_from(GameSession))
         assert persisted is not None
         assert persisted.title == "原位更新标题"
+        assert persisted.ending_config == state["game_data_sections"]["ending_config"]
         assert persisted.created_at == created_at
         assert persisted.cover_image_url == "/images/old-cover.png"
         assert persisted_character is not None
@@ -263,3 +272,44 @@ async def test_edit_save_updates_in_place_and_preserves_sessions_and_resources(
         assert session_count == 1
 
     await engine.dispose()
+
+
+def test_invalid_ending_returns_to_data_review_and_branch_edit_invalidates_quality(monkeypatch):
+    from app.game.content_quality import CAPABILITY_VERSION
+    from app.script_editor.nodes.quality_check import (
+        QUALITY_CHECK_VERSION,
+        quality_approved,
+        quality_fingerprint,
+    )
+
+    script, characters = completed_script()
+    state = hydrate_completed_script(script, characters, script.owner_key_hash or "")
+    config = {
+        "mode": "multiple",
+        "culprit_character_id": "c1",
+        "branches": [
+            {"when": outcome, "title": outcome, "text": f"{outcome}正文"}
+            for outcome in ("correct", "incorrect", "tie", "no_votes")
+        ],
+    }
+    state["game_data_sections"]["ending_config"] = config
+    state.update(normalize_game_data(state))
+    assert state["data_validation_errors"] == []
+    state["quality_report"] = {
+        "report_id": "r",
+        "status": "passed",
+        "capability_version": CAPABILITY_VERSION,
+        "check_version": QUALITY_CHECK_VERSION,
+        "content_fingerprint": quality_fingerprint(state),
+    }
+    assert quality_approved(state)
+    state["game_data_sections"]["ending_config"]["branches"][0]["text"] = "新的结局"
+    assert not quality_approved(state)
+    monkeypatch.setattr(editing, "_artifact_missing", lambda *_: False)
+    plan = prepare_asset_plan(state)["asset_plan"]
+    ending_tasks = [t for t in plan if t["id"].startswith("tts_ending_")]
+    assert len(ending_tasks) == 4 and all(t["available"] and t["changed"] for t in ending_tasks)
+    state["game_data_sections"]["ending_config"]["branches"].pop()
+    result = normalize_game_data(state)
+    assert result["_review_action"] == "invalid"
+    assert any("结局配置" in e for e in result["data_validation_errors"])

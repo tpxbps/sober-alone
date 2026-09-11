@@ -48,6 +48,7 @@ export interface EditorWorkflowState {
   player_count: number;
   difficulty: number;
   num_clue_rounds: number;
+  ending_mode?: "single" | "multiple";
   outline: string;
   characters: Array<{
     character_id?: string;
@@ -197,7 +198,15 @@ export interface CharacterGameData {
   script_summary?: string;
 }
 
+export type EndingOutcome = "correct" | "incorrect" | "tie" | "no_votes";
+export interface EndingConfig {
+  mode: "multiple";
+  culprit_character_id: string;
+  branches: Array<{ when: EndingOutcome; title: string; text: string }>;
+}
+
 export interface GameDataSections {
+  ending_config?: EndingConfig | null;
   title?: string;
   difficulty?: number;
   player_count?: number;

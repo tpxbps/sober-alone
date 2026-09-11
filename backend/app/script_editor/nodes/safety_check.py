@@ -47,7 +47,7 @@ async def safety_check(state: ScriptGenState) -> dict:
     try:
         from app.core.llm_factory import create_llm
 
-        llm = create_llm(model="deepseek-v4-flash", temperature=0.1, timeout=60, max_retries=2)
+        llm = create_llm(model="deepseek-flash", temperature=0.1, timeout=60, max_retries=2)
 
         response = await asyncio.wait_for(
             llm.ainvoke(
@@ -136,6 +136,9 @@ def _assemble_review_text(sections: dict) -> str:
 
     if sections.get("full_truth"):
         parts.append(f"【完整真相】\n{sections['full_truth']}")
+
+    for branch in (sections.get("ending_config") or {}).get("branches", []):
+        parts.append(f"【结局：{branch.get('title', '')}】\n{branch.get('text', '')}")
 
     for name, script in (sections.get("character_scripts") or {}).items():
         parts.append(f"【{name}的个人剧本】\n{script[:2000]}")

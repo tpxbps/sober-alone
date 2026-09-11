@@ -1,4 +1,4 @@
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 interface MarkdownProps {
@@ -6,12 +6,7 @@ interface MarkdownProps {
   className?: string;
 }
 
-export function Markdown({ children, className }: MarkdownProps) {
-  return (
-    <div className={`markdown-content max-w-none break-words overflow-hidden ${className || ""}`}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
+const MARKDOWN_COMPONENTS: Components = {
           p: ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>,
           ul: ({ children }) => <ul className="list-disc pl-5 mb-2 space-y-0.5">{children}</ul>,
           ol: ({ children }) => <ol className="list-decimal pl-5 mb-2 space-y-0.5">{children}</ol>,
@@ -76,7 +71,14 @@ export function Markdown({ children, className }: MarkdownProps) {
               {children}
             </a>
           ),
-        }}
+        };
+
+export function Markdown({ children, className }: MarkdownProps) {
+  return (
+    <div className={`markdown-content max-w-none break-words overflow-hidden ${className || ""}`}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={MARKDOWN_COMPONENTS}
       >
         {children}
       </ReactMarkdown>

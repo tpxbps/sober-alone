@@ -61,7 +61,8 @@ interface ChatAreaProps {
 // 格式化模型名称显示
 function getModelDisplayName(modelId: string | undefined | null): string {
   if (!modelId) return "";
-  return modelId;
+  return ["deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"].includes(modelId.toLowerCase())
+    ? "deepSeek-v4.1-flash" : modelId;
 }
 
 export function ChatArea({

@@ -93,11 +93,15 @@ class AgentManager:
             llm_provider = char_llm_config.get("provider", settings.DEFAULT_LLM_PROVIDER)
             llm_model = char_llm_config.get("model")
             if llm_model:
-                from app.core.model_registry import MODEL_BY_ID
+                from app.core.model_registry import get_model_spec
 
-                model_spec = MODEL_BY_ID.get(str(llm_model).lower())
+                try:
+                    model_spec = get_model_spec(str(llm_model))
+                except ValueError:
+                    model_spec = None
                 if model_spec:
                     llm_provider = model_spec.provider
+                    llm_model = model_spec.id
             if not llm_provider or not settings.get_api_key(llm_provider):
                 llm_provider = settings.DEFAULT_LLM_PROVIDER
                 llm_model = settings.get_llm_model_name(llm_provider)

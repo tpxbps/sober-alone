@@ -103,7 +103,7 @@ async def test_missing_chroma_collection_is_a_quiet_capability_check():
 @pytest.mark.parametrize(
     "model, provider, method",
     [
-        ("deepseek-v4-flash", "deepseek", "json_schema"),
+        ("deepseek-flash", "deepseek", "json_schema"),
         ("glm-5.3-flash", "zhipuai", "json_mode"),
     ],
 )

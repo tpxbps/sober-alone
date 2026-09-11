@@ -45,7 +45,7 @@ async def review_by_llm(state: ScriptGenState) -> dict:
     review_opinion = await call_llm(
         system_prompt,
         user_content,
-        llm=create_llm(model=settings.SCRIPT_EDITOR_MODEL or "deepseek-v4-flash", temperature=0.1),
+        llm=create_llm(model=settings.SCRIPT_EDITOR_MODEL or "deepseek-flash", temperature=0.1),
     )
 
     return {

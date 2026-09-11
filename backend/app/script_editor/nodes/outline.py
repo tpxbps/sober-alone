@@ -36,7 +36,7 @@ async def generate_outline(state: ScriptGenState) -> dict:
         from app.core.llm_factory import create_llm
 
         llm = create_llm(
-            model="deepseek-v4-flash", temperature=0.85, timeout=180, disable_thinking=True
+            model="deepseek-flash", temperature=0.85, timeout=180, disable_thinking=True
         )
         structured_llm = llm.with_structured_output(
             OutlineResult, method="function_calling", tool_choice="auto"

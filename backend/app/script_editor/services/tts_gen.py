@@ -10,6 +10,7 @@ import re
 from collections.abc import Callable, Coroutine
 
 from app.game.clues import render_clue_tts
+from app.game.endings import ending_audio_tasks
 from app.services.tts_service import TTSService
 
 logger = logging.getLogger(__name__)
@@ -152,6 +153,7 @@ async def generate_script_tts(
     task_callback: Callable | None = None,
     selected_task_ids: set[str] | None = None,
     force: bool = False,
+    ending_config: dict | None = None,
 ) -> dict:
     """
     为新剧本生成所有 TTS 音频（全量并行）
@@ -273,6 +275,23 @@ async def generate_script_tts(
                             ),
                         )
                     )
+
+    for ending in ending_audio_tasks({"ending_config": ending_config}):
+        if selected_task_ids is None or ending["id"] in selected_task_ids:
+            tasks.append(
+                (
+                    ending["id"],
+                    _generate_system_audio(
+                        script_id,
+                        ending["path"],
+                        ending["text"],
+                        get_system_style_for_stage("review"),
+                        SYSTEM_VOICE,
+                        results,
+                        force,
+                    ),
+                )
+            )
 
     # 2. 角色个人剧本任务
     for name, script_text in character_scripts.items():

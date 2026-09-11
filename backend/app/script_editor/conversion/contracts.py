@@ -2,6 +2,8 @@
 
 from pydantic import BaseModel, Field
 
+from app.game.endings import EndingBranch
+
 
 class ClueItemResult(BaseModel):
     """One independently citable public clue."""
@@ -41,6 +43,14 @@ class ClueStagesResult(BaseModel):
 
 class ScenesResult(BaseModel):
     """非线索场景的结构化输出 — 开场 + 投票 + 真相"""
+
+    ending_culprit_name: str = Field(
+        default="", description="多结局时用于最终票选判定的真凶姓名，必须来自角色列表；单结局留空"
+    )
+    ending_branches: list[EndingBranch] = Field(
+        default_factory=list,
+        description="多结局须含correct、incorrect、tie、no_votes四种结果各一个后续结局；单结局为空，不改变案件真相",
+    )
 
     opening_notice: str = Field(
         default="",

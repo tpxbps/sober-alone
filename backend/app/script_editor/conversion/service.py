@@ -39,7 +39,7 @@ def _get_structured_llm():
     from app.core.llm_factory import create_llm
 
     return create_llm(
-        model="deepseek-v4-flash",
+        model="deepseek-flash",
         temperature=0.5,
         timeout=180,
         max_retries=2,
@@ -255,7 +255,7 @@ async def _run_game_scenes(base_llm, script_id: str, state: ScriptGenState, char
             f"## 剧本标题\n{state.get('script_title', '')}\n\n"
             f"## 角色列表（{state.get('player_count', 4)}人）\n{chars_summary}\n\n"
             f"## 终稿全文\n---\n{state.get('final_draft', '')}\n---\n\n"
-            f"请生成开场、投票和真相揭晓的系统消息。"
+            f"请生成开场、投票和真相揭晓的系统消息。\n结局模式：{state.get('ending_mode', 'single')}。"
         )
         result = await asyncio.wait_for(
             llm.ainvoke(
@@ -671,11 +671,25 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
     if not system_prompts_map:
         system_prompts_map = _generate_fallback_prompts(characters, character_scripts)
 
+    ending_config = None
+    if state.get("ending_mode") == "multiple":
+        culprit_name = scenes_result.ending_culprit_name if scenes_result else ""
+        ending_config = {
+            "mode": "multiple",
+            "culprit_character_id": next(
+                (c["character_id"] for c in characters if c["name"] == culprit_name), ""
+            ),
+            "branches": [b.model_dump() for b in scenes_result.ending_branches]
+            if scenes_result
+            else [],
+        }
+
     game_data_sections = {
         "opening": _extract_opening(game_full_process),
         "clue_stages": clue_stages,
         "truth_reveal": truth_reveal_notice,
         "full_truth": full_truth,
+        "ending_config": ending_config,
         "game_flow": game_full_process,
         "free_speech_limits": free_speech_limits,
         "character_scripts": character_scripts,
@@ -735,6 +749,7 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
         "game_full_process": game_full_process,
         "clue_stages": clue_stages,
         "full_truth": full_truth,
+        "ending_config": ending_config,
         "free_speech_limits": free_speech_limits,
         "character_scripts": character_scripts,
         "system_prompts_map": system_prompts_map,

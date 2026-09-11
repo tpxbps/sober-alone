@@ -6,12 +6,14 @@ import hashlib
 import json
 from typing import Any
 
-CAPABILITY_VERSION = "public-discussion-v1"
+CAPABILITY_VERSION = "public-discussion-v2"
 RUBRIC_VERSION = "script-quality-v2"
-GAMEPLAY_CONTRACT = """【实际游戏能力｜public-discussion-v1】
+GAMEPLAY_CONTRACT = """【实际游戏能力｜public-discussion-v2】
 本剧本用于一名真人与多个 AI 角色进行公开文字讨论。角色可阅读自己的剧本，系统按轮次向所有人
 公开固定线索，最后投票并揭晓固定真相。@角色仍是公开发言。玩家不能实际私聊、移动搜证、
-交换或销毁物品，也不能触发隐藏行动或改变结局。历史剧情可以描述这些行为，但当前游玩任务
+交换或销毁物品，也不能触发隐藏行动或平票重投。可选择单结局，或按最终单次投票的正确指认、
+错误指认、平票、无有效票四种结果展示不同后续结局；案件真相不变，不依赖隐藏行动或AI临场判定。
+历史剧情可以描述这些行为，但当前游玩任务
 必须通过公开交流和推理完成。不要用“如果游戏允许”等措辞布置不存在的操作。
 角色必须知道其本人经历和行为；不能为隐藏真相而对扮演者隐藏其已知的作案事实。
 推理必需的证据应在投票前可获得，结局不能才补充决定性事实。"""
@@ -60,6 +62,12 @@ def script_content(script: dict, characters: list[dict] | None = None) -> dict:
     )
     result = {k: _prose(script.get(k)) for k in ("title", "overview", "description", "full_truth")}
     result.update({k: int(script.get(k) or 0) for k in ("difficulty", "player_count")})
+    from app.game.endings import normalize_endings
+
+    endings = normalize_endings(script.get("ending_config"))
+    # Omit the default so upgrading does not invalidate legacy content or resources.
+    if endings:
+        result["ending_config"] = endings
     result["game_full_process"] = _process(
         _decode(script.get("game_flow", script.get("game_full_process")), [])
     )
@@ -112,7 +120,7 @@ def public_ai_review(review: dict | None, fingerprint: str) -> dict | None:
     if not review or not fingerprint or review.get("content_fingerprint") != fingerprint:
         return None
     if (
-        review.get("capability_version") != CAPABILITY_VERSION
+        review.get("capability_version") not in ("public-discussion-v1", CAPABILITY_VERSION)
         or review.get("rubric_version") != RUBRIC_VERSION
     ):
         return None

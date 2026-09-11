@@ -42,7 +42,7 @@ def get_prompt(step: str, state: Mapping[str, Any]) -> str:
 
     # 格式化模板变量
     try:
-        return template.format(
+        prompt = template.format(
             player_count=state.get("player_count", 4),
             difficulty=state.get("difficulty", 1),
             difficulty_label=DIFFICULTY_LABELS.get(state.get("difficulty", 1), "简单"),
@@ -50,7 +50,14 @@ def get_prompt(step: str, state: Mapping[str, Any]) -> str:
             num_clue_rounds=state.get("num_clue_rounds", 2),
         )
     except KeyError:
-        return template
+        prompt = template
+    mode = state.get("ending_mode", "single")
+    description = (
+        "多结局：为最终投票正确、错误、平票、无有效票分别设计后续结局，明确用于判定的真凶；案件事实不随投票改变，不安排重投或追加讨论。"
+        if mode == "multiple"
+        else "单结局：所有投票结果揭晓相同真相，不生成结局分支。"
+    )
+    return prompt + "\n【本剧本结局模式】" + description
 
 
 def get_default_prompts() -> dict[str, str]:

@@ -10,6 +10,7 @@ from typing import Any
 from app.core.config import settings
 from app.db.models import Character, Script
 from app.game.clues import derive_game_process, normalize_clue_stages, render_clue_tts
+from app.game.endings import ending_audio_tasks, normalize_endings
 from app.script_editor.state import (
     STEP_NORMALIZE_GAME_DATA,
     STEP_PREPARE_ASSET_PLAN,
@@ -116,6 +117,7 @@ def hydrate_completed_script(
         "clue_stages": clue_stages,
         "truth_reveal": _extract_truth_reveal(game_flow),
         "full_truth": script.full_truth or "",
+        "ending_config": copy.deepcopy(script.ending_config),
         "game_flow": game_flow,
         "free_speech_limits": limits,
         "character_scripts": character_scripts,
@@ -126,6 +128,7 @@ def hydrate_completed_script(
     }
     state: ScriptGenState = {
         "workflow_mode": "edit",
+        "ending_mode": "multiple" if script.ending_config else "single",
         "owner_key_hash": owner_key_hash,
         "script_id": script.script_id,
         "script_title": script.title,
@@ -139,6 +142,7 @@ def hydrate_completed_script(
         "game_full_process": game_flow,
         "clue_stages": clue_stages,
         "full_truth": script.full_truth or "",
+        "ending_config": copy.deepcopy(script.ending_config),
         "free_speech_limits": limits,
         "game_data_sections": sections,
         "cover_image_url": script.cover_image_url or "",
@@ -266,6 +270,10 @@ def normalize_game_data(state: ScriptGenState) -> dict[str, Any]:
                 or ""
             ).strip():
                 errors.append(f"{item.get('name', '角色')}的{label}不能为空")
+    try:
+        sections["ending_config"] = normalize_endings(sections.get("ending_config"), character_data)
+    except (TypeError, ValueError) as exc:
+        errors.append(f"结局配置不正确：{exc}")
     if not str(sections.get("full_truth", "") or "").strip():
         errors.append("完整真相不能为空")
     types = [stage.get("type") for stage in game_flow]
@@ -364,6 +372,8 @@ def normalize_game_data(state: ScriptGenState) -> dict[str, Any]:
         "game_full_process": game_flow,
         "clue_stages": clue_stages,
         "full_truth": str(sections.get("full_truth", "") or ""),
+        "ending_config": sections.get("ending_config"),
+        "ending_mode": "multiple" if sections.get("ending_config") else "single",
         "free_speech_limits": limits,
         "characters": characters,
         "character_scripts": scripts,
@@ -464,6 +474,19 @@ def _task_dependencies(state: ScriptGenState) -> list[dict[str, Any]]:
                         },
                     }
                 )
+    for ending in ending_audio_tasks(sections):
+        tasks.append(
+            {
+                "id": ending["id"],
+                "phase": "tts",
+                "label": ending["label"],
+                "dependencies": {
+                    "path": ending["path"],
+                    "stage_type": "review",
+                    "text": ending["text"],
+                },
+            }
+        )
     for character in characters:
         cid = character.get("character_id", "")
         name = character.get("name", "")
@@ -497,6 +520,11 @@ def _artifact_missing(script_id: str, task_id: str) -> bool:
     if task_id.startswith("avatar_"):
         cid = task_id.removeprefix("avatar_")
         return not (settings.image_dir / "scripts" / script_id / "avatars" / f"{cid}.png").exists()
+    if task_id.startswith("tts_ending_"):
+        identifier = task_id.removeprefix("tts_")
+        return not (
+            settings.audio_dir / "scripts" / script_id / "system_messages" / f"{identifier}.wav"
+        ).exists()
     if task_id.startswith("tts_sys_"):
         parts = task_id.split("_")
         identifier = f"stage_{parts[2]}"
@@ -556,7 +584,7 @@ def prepare_asset_plan(state: ScriptGenState) -> dict[str, Any]:
         else:
             available = bool(settings.MIMO_API_KEY)
             reason = "未配置 MIMO_API_KEY"
-            if task_id.startswith("tts_") and not task_id.startswith("tts_sys_"):
+            if task_id.startswith("tts_") and not task_id.startswith(("tts_sys_", "tts_ending_")):
                 if not task["dependencies"].get("script"):
                     available = False
                     reason = "角色个人剧本为空"

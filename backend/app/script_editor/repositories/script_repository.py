@@ -180,6 +180,17 @@ async def _save_generated_script(state: ScriptGenState) -> dict:
                         (script_id, char_id, *values[:9], avatar, avatar, values[9]),
                     )
 
+            from app.game.endings import normalize_endings
+
+            ending_config = normalize_endings(game_data_sections.get("ending_config"), characters)
+            await db.execute(
+                "UPDATE scripts SET ending_config = ? WHERE script_id = ?",
+                (
+                    json.dumps(ending_config, ensure_ascii=False) if ending_config else None,
+                    script_id,
+                ),
+            )
+
             from app.game.content_quality import content_fingerprint
 
             db.row_factory = aiosqlite.Row

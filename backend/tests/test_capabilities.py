@@ -63,7 +63,7 @@ def test_summary_model_falls_back_to_primary_without_stepfun(monkeypatch):
     model, kwargs = llm_factory.create_summary_llm()
 
     assert model is sentinel
-    assert kwargs["model"] == "deepseek-v4-flash"
+    assert kwargs["model"] == "deepseek-flash"
     assert kwargs["disable_thinking"] is True
 
 

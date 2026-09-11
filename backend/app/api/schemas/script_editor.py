@@ -1,3 +1,4 @@
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -8,6 +9,7 @@ class StartWorkflowRequest(BaseModel):
     player_count: int = 4
     difficulty: int = 1
     num_clue_rounds: int = 2
+    ending_mode: Literal["single", "multiple"] = "single"
     prompts: dict | None = None
 
 
@@ -42,6 +44,6 @@ class ForkRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str
-    model: str = "deepseek-v4-flash"
+    model: str = "deepseek-flash"
     chat_session_id: str
     workflow_thread_id: str | None = None
