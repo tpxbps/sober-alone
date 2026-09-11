@@ -306,6 +306,7 @@ def test_invalid_ending_returns_to_data_review_and_branch_edit_invalidates_quali
     state["game_data_sections"]["ending_config"]["branches"][0]["text"] = "新的结局"
     assert not quality_approved(state)
     monkeypatch.setattr(editing, "_artifact_missing", lambda *_: False)
+    monkeypatch.setattr(settings, "MIMO_API_KEY", "test")
     plan = prepare_asset_plan(state)["asset_plan"]
     ending_tasks = [t for t in plan if t["id"].startswith("tts_ending_")]
     assert len(ending_tasks) == 4 and all(t["available"] and t["changed"] for t in ending_tasks)
