@@ -161,7 +161,7 @@ async function waitForOperation(
     if (result.operation_status === 'failed') {
       throw new Error(result.error_message || '后台操作失败');
     }
-    if (result.operation_status === 'complete' && result.state && result.current_step) {
+    if ((result.operation_status === 'complete' || result.operation_status === 'paused') && result.state && result.current_step) {
       return result as EditorOperationResponse & (StartWorkflowResponse | ResumeWorkflowResponse);
     }
     await onPending?.();

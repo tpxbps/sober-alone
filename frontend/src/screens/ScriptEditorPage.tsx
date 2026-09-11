@@ -9,7 +9,8 @@ import {
   Check,
   X,
 } from "lucide-react";
-import { AnimatePresence } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { OutlineWorkspace } from "@/components/script-editor/OutlineWorkspace";
 import { useEditorStore } from "@/stores/editorStore";
 import { HorizontalTimeline } from "@/components/script-editor/HorizontalTimeline";
 import { ContentPanel } from "@/components/script-editor/ContentPanel";
@@ -55,11 +56,32 @@ export function ScriptEditorPage({ onBack, editScriptId }: ScriptEditorPageProps
   } = useEditorStore();
 
   const [showMobileChat, setShowMobileChat] = useState(false);
+  const reducedMotion = useReducedMotion();
+  const [desktop, setDesktop] = useState(() => window.matchMedia("(min-width: 1024px)").matches);
+  const [assistantDismissed, setAssistantDismissed] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia("(min-width: 1024px)");
+    const update = () => setDesktop(query.matches);
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+  const ideaLayout = !threadId && !isStarting;
+  const assistantDocked = ideaLayout && desktop && !assistantDismissed && !showMobileChat;
+  const outlineActive = !viewingCheckpoint && !editScriptId && (
+    (isStarting && !workflowState) ||
+    (getPhaseFromStep(currentStep) === "outline" && Boolean(workflowState?.outline_session))
+  );
   const [showSettings, setShowSettings] = useState(false);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editTitleValue, setEditTitleValue] = useState("");
   const initializationRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!showMobileChat) return;
+    const close = (event: KeyboardEvent) => { if (event.key === "Escape") setShowMobileChat(false); };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [showMobileChat]);
 
   // Restore session on mount
   useEffect(() => {
@@ -80,7 +102,9 @@ export function ScriptEditorPage({ onBack, editScriptId }: ScriptEditorPageProps
     player_count: number;
     difficulty: number;
     num_clue_rounds: number;
+    ending_mode?: "single" | "multiple";
   }) => {
+    setShowMobileChat(false);
     await startWorkflow(params);
   };
 
@@ -185,7 +209,7 @@ export function ScriptEditorPage({ onBack, editScriptId }: ScriptEditorPageProps
     <div className="h-screen bg-background flex flex-col overflow-hidden">
       {/* Header */}
       <header className="shrink-0 border-b border-border/50 bg-background/80 backdrop-blur-xl">
-        <div className="lg:max-w-[70%] w-full mx-auto px-3 py-3 flex items-center gap-3">
+        <div className="max-w-[1320px] w-full mx-auto px-3 py-3 flex items-center gap-3">
           <button
             onClick={handleBackToLobby}
             aria-label="返回剧本大厅"
@@ -302,9 +326,9 @@ export function ScriptEditorPage({ onBack, editScriptId }: ScriptEditorPageProps
           )}
           <button
             aria-label="创作小助手"
-            aria-expanded={showMobileChat}
-            onClick={() => setShowMobileChat(!showMobileChat)}
-            className="lg:hidden p-2 rounded-lg hover:bg-secondary/50 text-primary shrink-0"
+            aria-expanded={assistantDocked || showMobileChat}
+            onClick={() => { if (assistantDocked) setAssistantDismissed(true); else setShowMobileChat(!showMobileChat); }}
+            className="p-2 rounded-lg hover:bg-secondary/50 text-primary shrink-0"
           >
             <MessageCircle className="w-5 h-5" />
           </button>
@@ -320,7 +344,7 @@ export function ScriptEditorPage({ onBack, editScriptId }: ScriptEditorPageProps
 
       {/* Horizontal Timeline */}
       <div className="shrink-0 border-b border-border/30 overflow-x-auto scrollbar-thin">
-        <div className="lg:max-w-[70%] w-full mx-auto px-3">
+        <div className="max-w-[1320px] w-full mx-auto px-3">
           <HorizontalTimeline
             currentStep={currentStep || "init"}
             isComplete={isComplete}
@@ -332,11 +356,11 @@ export function ScriptEditorPage({ onBack, editScriptId }: ScriptEditorPageProps
       </div>
 
       {/* Main content area */}
-      <div className="flex-1 flex min-h-0 lg:max-w-[70%] w-full mx-auto px-3">
+      <div className="flex-1 flex min-h-0 max-w-[1320px] w-full mx-auto px-3 relative">
         {/* Left: Content Panel — 60% on desktop, full on mobile */}
-        <div className="lg:w-[60%] w-full min-w-0 border-r border-border/30 flex flex-col">
+        <motion.div layout transition={{ duration: reducedMotion ? 0 : 0.25 }} className={`w-full min-w-0 flex flex-col ${assistantDocked ? "lg:mr-[380px]" : ""}`}>
           <div className="flex-1 min-h-0 overflow-y-auto">
-            <ContentPanel
+            {outlineActive ? <OutlineWorkspace key={threadId || "starting"} threadId={threadId} /> : <ContentPanel
               interruptInfo={interruptInfo}
               currentStep={currentStep || "init"}
               isComplete={isComplete}
@@ -360,36 +384,34 @@ export function ScriptEditorPage({ onBack, editScriptId }: ScriptEditorPageProps
               onRetryAsset={handleRetryAsset}
               onRetryConvert={handleRetryConvert}
               viewingCheckpoint={viewingCheckpoint}
-            />
+            />}
           </div>
-          <div className="min-h-7 shrink-0 px-4 pb-2 text-sm text-muted-foreground/50 leading-relaxed">
+          {!outlineActive && <div className="min-h-7 shrink-0 px-4 pb-2 text-sm text-muted-foreground/50 leading-relaxed">
             <WorkflowFooterMessage
               key={isLoading || isStarting ? `working:${currentStep}` : "idle"}
               isWorking={isLoading || isStarting}
             />
-          </div>
-        </div>
-
-        {/* Right: Chat Panel — 40%, desktop only */}
-        <div className="w-[40%] shrink-0 hidden lg:block">
-          <ChatPanel threadId={threadId} />
-        </div>
-      </div>
-
-      {/* Mobile chat tooltip */}
-      {showMobileChat && (
-        <div
-          role="dialog"
-          aria-label="创作小助手"
-          onKeyDown={(event) => { if (event.key === "Escape") setShowMobileChat(false); }}
-          className="lg:hidden fixed top-24 right-4 z-50 w-80 max-w-[calc(100vw-2rem)] h-[min(420px,calc(100dvh-8rem))] rounded-xl border border-border/50 bg-background shadow-2xl overflow-hidden"
+          </div>}
+        </motion.div>
+        <motion.aside
+          initial={false}
+          animate={{ opacity: assistantDocked || showMobileChat ? 1 : 0, scale: assistantDocked || showMobileChat ? 1 : 0.92,
+                     y: assistantDocked || showMobileChat ? 0 : -16 }}
+          transition={{ duration: reducedMotion ? 0 : 0.25 }}
+          style={{ transformOrigin: "top right" }}
+          aria-hidden={!assistantDocked && !showMobileChat}
+          inert={!assistantDocked && !showMobileChat}
+          onKeyDown={event => { if (event.key === "Escape") setShowMobileChat(false); }}
+          className={`border border-border/50 bg-background overflow-hidden
+            ${assistantDocked ? "hidden lg:block absolute right-3 top-0 bottom-0 w-[360px] border-y-0 border-r-0"
+              : "fixed right-4 top-20 z-50 h-[min(620px,calc(100dvh-6rem))] w-[400px] max-w-[calc(100vw-2rem)] rounded-2xl shadow-2xl"}
+            ${!assistantDocked && !showMobileChat ? "pointer-events-none" : ""}`}
         >
-          <ChatPanel
-            threadId={threadId}
-            onClose={() => setShowMobileChat(false)}
-          />
-        </div>
-      )}
+          <div role="dialog" aria-label="创作小助手" className="h-full">
+            <ChatPanel threadId={threadId} onClose={() => { setShowMobileChat(false); setAssistantDismissed(true); }} />
+          </div>
+        </motion.aside>
+      </div>
 
       {/* Settings Modal — editor mode: only BGM */}
       <AnimatePresence>

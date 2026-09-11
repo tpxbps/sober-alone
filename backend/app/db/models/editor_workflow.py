@@ -19,6 +19,7 @@ class EditorWorkflow(Base):
     script_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     current_step: Mapped[str] = mapped_column(String(64), default="init")
     status: Mapped[str] = mapped_column(String(20), default="idle")
+    outline_control: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now, onupdate=datetime.now

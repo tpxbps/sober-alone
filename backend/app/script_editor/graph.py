@@ -159,7 +159,34 @@ def build_script_gen_graph(checkpointer=None):
         ["init_workflow", "review_game_data"],
     )
     builder.add_edge("init_workflow", "generate_outline")
-    builder.add_edge("generate_outline", "review_outline")
+    from app.script_editor.outline.nodes import (
+        check_outline,
+        direct_outline,
+        finalize_outline,
+        wait_for_answer,
+    )
+
+    builder.add_node("outline_director", direct_outline)
+    builder.add_node("outline_wait", wait_for_answer)
+    builder.add_node("outline_finalize", finalize_outline)
+    builder.add_node("outline_check", check_outline)
+    outline_routes = {
+        "direct": "outline_director",
+        "write": "generate_outline",
+        "wait": "outline_wait",
+        "finalize": "outline_finalize",
+        "check": "outline_check",
+        "review": "review_outline",
+    }
+
+    def outline_route(state):
+        return (state.get("outline_session") or {}).get("next_action", "review")
+
+    builder.add_conditional_edges("generate_outline", outline_route, outline_routes)
+    builder.add_conditional_edges("outline_director", outline_route, outline_routes)
+    builder.add_edge("outline_wait", "generate_outline")
+    builder.add_edge("outline_finalize", "outline_check")
+    builder.add_conditional_edges("outline_check", outline_route, outline_routes)
 
     # 大纲审阅后条件路由
     builder.add_conditional_edges(

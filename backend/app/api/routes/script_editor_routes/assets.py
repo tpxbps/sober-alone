@@ -160,12 +160,26 @@ async def progress_stream(thread_id: str, owner_key_hash: str = Depends(require_
     """Stream conversion and asset progress snapshots over SSE."""
     from app.script_editor.services.progress_bus import subscribe, unsubscribe
 
-    await _authorize_thread(thread_id, owner_key_hash)
+    try:
+        await editor_operation_runner.authorize(thread_id, owner_key_hash)
+    except WorkflowNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except WorkflowAuthorizationError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
     queue = subscribe(thread_id)
 
     async def event_generator():
         try:
             yield _sse({"type": "connected"})
+            from app.script_editor.outline.runtime import projection
+            from app.script_editor.services.workflow_service import ScriptEditorWorkflowService
+
+            snapshot = await ScriptEditorWorkflowService()._get_snapshot(
+                ScriptEditorWorkflowService.config(thread_id)
+            )
+            outline = await projection(thread_id, snapshot.values.get("outline_session"))
+            if outline:
+                yield _sse({"type": "outline_snapshot", "data": outline})
 
             try:
                 script_id = await _script_id_for_thread(thread_id)
@@ -196,7 +210,11 @@ async def progress_stream(thread_id: str, owner_key_hash: str = Depends(require_
         finally:
             unsubscribe(thread_id, queue)
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 def _sse(event: dict) -> str:

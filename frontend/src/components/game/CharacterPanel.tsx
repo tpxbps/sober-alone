@@ -1,3 +1,4 @@
+import { CharacterPreview } from "./CharacterPreview";
 import { motion } from "framer-motion";
 import { Mic, MicOff } from "lucide-react";
 import type { PlayerState, Character, GameStage } from "@/types/game";
@@ -55,8 +56,20 @@ export function CharacterPanel({
         const human = isHuman(character.character_id);
 
         return (
+          <CharacterPreview key={character.character_id} name={character.name} src={character.portrait_url || character.avatar_url}
+            side={side === "left" ? "right" : "left"}
+            details={<>
+              <h3 className="text-base font-semibold">{character.name}</h3>
+              <p className="mt-1 text-xs text-muted-foreground">{character.occupation}</p>
+              <p className="mt-3 whitespace-pre-wrap leading-relaxed text-muted-foreground">
+                {character.profile || character.character_script_summary || "暂无角色简介"}
+              </p>
+              {playerState && <div className="mt-4 space-y-2 border-t border-border/50 pt-3 text-xs">
+                <p className="flex justify-between"><span>本阶段发言</span><span>{playerState.speeches_this_round ?? 0} 次</span></p>
+                {stage === "free_discussion" && <p className="flex justify-between"><span>剩余发言机会</span><span>{playerState.remaining_speech_count ?? "-"} 次</span></p>}
+              </div>}
+            </>}>
           <motion.div
-            key={character.character_id}
             initial={{ opacity: 0, x: side === "left" ? -20 : 20 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: index * 0.1 }}
@@ -152,73 +165,8 @@ export function CharacterPanel({
             </div>
             </button>
 
-            {/* Hover tooltip */}
-            <div
-              role="tooltip"
-              className={`absolute ${
-                side === "left" ? "left-full" : "right-full"
-              }
-                ${
-                  index === 0
-                    ? "top-0"
-                    : index === displayCharacters.length - 1
-                      ? "bottom-0"
-                      : "top-1/2 -translate-y-1/2"
-                }
-                z-[60] opacity-0 group-hover:opacity-100 group-focus-within:opacity-100
-                transition-opacity duration-200
-                pointer-events-none group-hover:pointer-events-auto group-focus-within:pointer-events-auto
-                ${side === "left" ? "pl-2" : "pr-2"}`}
-            >
-              <div className="p-4 rounded-xl bg-popover border border-border shadow-lg text-sm w-80">
-                <div className="flex items-center gap-2 mb-2">
-                  <div
-                    className="w-8 h-8 rounded-full overflow-hidden bg-gradient-to-br from-primary/30 to-accent/30
-                                flex items-center justify-center text-sm font-bold shrink-0"
-                  >
-                    {character.avatar_url ? (
-                      <img
-                        src={character.avatar_url}
-                        alt={character.name}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      character.name[0]
-                    )}
-                  </div>
-                  <div>
-                    <p className="font-medium">{character.name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {character.occupation}
-                    </p>
-                  </div>
-                </div>
-                <p className="text-xs text-muted-foreground leading-relaxed max-h-32 overflow-y-auto scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
-                  {character.profile ||
-                    character.character_script_summary ||
-                    "暂无角色简介"}
-                </p>
-                {playerState && (
-                  <div className="mt-3 pt-2 border-t border-border/50 text-xs space-y-1">
-                    <div className="flex justify-between text-muted-foreground">
-                      <span>本阶段发言</span>
-                      <span className="text-foreground">
-                        {playerState.speeches_this_round ?? 0} 次
-                      </span>
-                    </div>
-                    {stage === "free_discussion" && (
-                      <div className="flex justify-between text-muted-foreground">
-                        <span>剩余发言机会</span>
-                        <span className="text-foreground">
-                          {playerState.remaining_speech_count ?? "-"} 次
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
           </motion.div>
+          </CharacterPreview>
         );
       })}
     </div>

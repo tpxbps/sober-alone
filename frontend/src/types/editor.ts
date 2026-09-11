@@ -1,3 +1,4 @@
+import type { OutlineProgress, OutlineSession } from "./outline";
 // Script Editor Types
 
 export interface StepInfo {
@@ -50,6 +51,7 @@ export interface EditorWorkflowState {
   num_clue_rounds: number;
   ending_mode?: "single" | "multiple";
   outline: string;
+  outline_session?: OutlineSession | null;
   characters: Array<{
     character_id?: string;
     name: string;
@@ -89,7 +91,7 @@ export interface EditorOperationAccepted {
   success: boolean;
   thread_id: string;
   operation_id: string;
-  operation_status: 'queued' | 'running' | 'complete' | 'failed';
+  operation_status: 'queued' | 'running' | 'complete' | 'failed' | 'paused';
   target_step: string;
   progress?: { message?: string; percent?: number };
   error_message?: string;
@@ -99,6 +101,7 @@ export type EditorOperationResponse = EditorOperationAccepted &
   Partial<StartWorkflowResponse & ResumeWorkflowResponse>;
 
 export interface WorkflowStateResponse {
+  outline_progress?: OutlineProgress | null;
   success: boolean;
   thread_id: string;
   current_step: string;
@@ -128,7 +131,7 @@ export interface WorkflowPhase {
 // Display phases
 export const WORKFLOW_PHASES: WorkflowPhase[] = [
   { phase: "idea", label: "构思大纲", desc: "输入故事创意，设定基本参数", isAuto: false },
-  { phase: "outline", label: "大纲审阅", desc: "审阅并修改AI生成的剧本大纲", isAuto: false },
+  { phase: "outline", label: "大纲共创", desc: "共同决定剧情方向，审阅完整大纲", isAuto: false },
   { phase: "first_draft", label: "初稿创作", desc: "基于大纲撰写完整剧本初稿并审阅", isAuto: false },
   { phase: "review_report", label: "审稿意见", desc: "确认AI意见与真人补充", isAuto: false },
   { phase: "review_final", label: "终稿确认", desc: "编辑并确认完整终稿", isAuto: false },
@@ -141,7 +144,7 @@ export type WorkflowPhaseKey = (typeof WORKFLOW_PHASES)[number]["phase"];
 // Map backend step name → display phase
 export function getPhaseFromStep(step: string): WorkflowPhaseKey {
   if (!step || step === "init") return "idea";
-  if (step === "generate_outline" || step === "review_outline") return "outline";
+  if (step === "generate_outline" || step === "review_outline" || step.startsWith("outline_")) return "outline";
   if (step === "generate_first_draft" || step === "review_first_draft")
     return "first_draft";
   if (step === "review_by_llm" || step === "review_report") return "review_report";

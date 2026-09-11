@@ -29,6 +29,10 @@ ACTIVE_STATUSES = ("queued", "running")
 class EditorOperationRunner:
     def __init__(self) -> None:
         self._tasks: dict[str, asyncio.Task] = {}
+        self._command_locks: dict[str, asyncio.Lock] = {}
+
+    def command_lock(self, thread_id: str) -> asyncio.Lock:
+        return self._command_locks.setdefault(thread_id, asyncio.Lock())
 
     async def queue_start(
         self, request: StartWorkflowRequest, owner_key_hash: str
@@ -66,6 +70,22 @@ class EditorOperationRunner:
     async def queue_resume(
         self, thread_id: str, request: ResumeWorkflowRequest, owner_key_hash: str
     ) -> dict[str, Any]:
+        async with self.command_lock(thread_id):
+            return await self._queue_resume(thread_id, request, owner_key_hash)
+
+    async def _queue_resume(
+        self, thread_id: str, request: ResumeWorkflowRequest, owner_key_hash: str
+    ) -> dict[str, Any]:
+        service = ScriptEditorWorkflowService()
+        snapshot = await service._get_snapshot(service.config(thread_id))
+        if snapshot.values.get("outline_session") and (
+            snapshot.values["outline_session"].get("pending_question")
+            or (
+                snapshot.values.get("current_step") == "generate_outline"
+                and not (service.extract_interrupt(snapshot) or {}).get("step") == "review_outline"
+            )
+        ):
+            raise ValueError("请通过大纲共创操作继续当前流程")
         async with AsyncSessionLocal() as db:
             workflow = await db.get(EditorWorkflow, thread_id)
             if not workflow:
@@ -121,6 +141,9 @@ class EditorOperationRunner:
             script_id=script_id,
             current_step=target_step,
             status="running",
+            outline_control={"revision": 1, "paused": False, "questions_stopped": False}
+            if kind == "start"
+            else {},
         )
         async with AsyncSessionLocal() as db:
             db.add(workflow)
@@ -155,7 +178,10 @@ class EditorOperationRunner:
                 )
                 for operation in pending:
                     operation.status = "queued"
-                    operation.progress = {"message": "服务重启后恢复执行"}
+                    operation.progress = {
+                        **(operation.progress or {}),
+                        "message": "服务重启后恢复执行",
+                    }
                 await db.commit()
         except OperationalError:
             # Keeps isolated lifespan tests/injected engines independent. Normal startup
@@ -184,14 +210,19 @@ class EditorOperationRunner:
             response = self._accepted(operation)
             if operation.error_message:
                 response["error_message"] = operation.error_message
-        if response["operation_status"] == "complete":
-            live = await ScriptEditorWorkflowService().get_state(thread_id)
+        if response["operation_status"] in {"complete", "paused"}:
+            from app.script_editor.outline.runtime import workflow_response
+
+            live = await workflow_response(ScriptEditorWorkflowService(), thread_id)
             response.update(live)
             state = live.get("state", {})
             response["script_id"] = state.get("script_id", "")
             response["script_title"] = state.get("script_title", "")
             response["operation_id"] = operation_id
-            response["operation_status"] = "complete"
+            response["operation_status"] = operation.status
+            from app.script_editor.outline.runtime import projection
+
+            response["outline_progress"] = await projection(thread_id, state.get("outline_session"))
         return response
 
     async def authorize(self, thread_id: str, owner_key_hash: str) -> EditorWorkflow:
@@ -204,16 +235,25 @@ class EditorOperationRunner:
             return workflow
 
     async def _run(self, operation_id: str) -> None:
+        from app.script_editor.outline.actions import (
+            emit_final,
+            execute_action,
+            finish_automatic_answers,
+        )
+        from app.script_editor.outline.runtime import OutlineRuntime, current_runtime, live_runtimes
+
+        runtime = None
+        token = None
         try:
             async with AsyncSessionLocal() as db:
                 operation = await db.get(EditorOperation, operation_id)
-                if not operation:
+                if not operation or operation.status not in ACTIVE_STATUSES:
                     return
                 workflow = await db.get(EditorWorkflow, operation.thread_id)
                 if not workflow:
                     return
                 operation.status = "running"
-                operation.progress = {"message": "后台执行中"}
+                operation.progress = {**(operation.progress or {}), "message": "后台执行中"}
                 await db.commit()
                 kind = operation.kind
                 target_step = operation.target_step
@@ -221,6 +261,11 @@ class EditorOperationRunner:
                 thread_id = operation.thread_id
                 owner_key_hash = workflow.owner_key_hash
 
+            runtime = OutlineRuntime(
+                thread_id, operation_id, operation.progress, operation.created_at.isoformat()
+            )
+            live_runtimes[thread_id] = runtime
+            token = current_runtime.set(runtime)
             service = ScriptEditorWorkflowService()
             existing = await service._get_snapshot(service.config(thread_id))
             existing_interrupt = service.extract_interrupt(existing) if existing.values else None
@@ -236,6 +281,8 @@ class EditorOperationRunner:
                     result = await service.start(
                         StartWorkflowRequest.model_validate(payload), owner_key_hash, thread_id
                     )
+            elif kind == "outline":
+                result = await execute_action(service, thread_id, payload)
             elif kind == "edit":
                 if existing_interrupt:
                     result = service._live_response(thread_id, existing)
@@ -261,13 +308,22 @@ class EditorOperationRunner:
                         thread_id, ResumeWorkflowRequest.model_validate(payload)
                     )
 
+            result = await finish_automatic_answers(service, thread_id, result)
+            if result.get("state", {}).get("outline_session"):
+                await emit_final(runtime, result["state"]["outline_session"])
             async with AsyncSessionLocal() as db:
                 operation = await db.get(EditorOperation, operation_id)
                 workflow = await db.get(EditorWorkflow, thread_id)
                 if not operation or not workflow:
                     return
+                if operation.status == "paused":
+                    return
                 operation.status = "complete"
-                operation.progress = {"message": "执行完成", "percent": 100}
+                operation.progress = {
+                    **(operation.progress or {}),
+                    "message": "执行完成",
+                    "percent": 100,
+                }
                 workflow.current_step = result.get("current_step", workflow.current_step)
                 workflow.script_id = result.get("script_id") or workflow.script_id
                 workflow.status = "complete" if result.get("is_complete") else "idle"
@@ -277,16 +333,23 @@ class EditorOperationRunner:
             raise
         except Exception as error:
             logger.exception("Editor operation %s failed", operation_id)
+            if runtime and runtime.session:
+                await emit_final(runtime, None, str(error))
             async with AsyncSessionLocal() as db:
                 operation = await db.get(EditorOperation, operation_id)
                 if operation:
                     operation.status = "failed"
                     operation.error_message = str(error)
-                    operation.progress = {"message": "执行失败"}
+                    operation.progress = {**(operation.progress or {}), "message": "执行失败"}
                     workflow = await db.get(EditorWorkflow, operation.thread_id)
                     if workflow:
                         workflow.status = "failed"
                     await db.commit()
+        finally:
+            if token is not None:
+                current_runtime.reset(token)
+            if runtime:
+                live_runtimes.pop(runtime.thread_id, None)
 
 
 editor_operation_runner = EditorOperationRunner()

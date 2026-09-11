@@ -35,7 +35,7 @@ class ScriptEditorWorkflowService:
         configurable: dict[str, Any] = {"thread_id": thread_id}
         if checkpoint_id is not None:
             configurable["checkpoint_id"] = checkpoint_id
-        return cast(RunnableConfig, {"configurable": configurable})
+        return cast(RunnableConfig, {"configurable": configurable, "recursion_limit": 100})
 
     async def _get_snapshot(self, config: RunnableConfig):
         if hasattr(self.graph, "aget_state"):
@@ -69,6 +69,9 @@ class ScriptEditorWorkflowService:
             "workflow_mode": "create",
             "owner_key_hash": owner_key_hash,
         }
+        from app.script_editor.outline.contracts import new_session
+
+        initial_state["outline_session"] = new_session()
         if request.prompts:
             initial_state["prompts"] = request.prompts
         await self.graph.ainvoke(cast(ScriptGenState, initial_state), config)
@@ -236,6 +239,7 @@ class ScriptEditorWorkflowService:
                 "ai_review",
                 "content_fingerprint",
                 "owner_key_hash",
+                "outline_session",
                 "original_snapshot",
                 "workflow_mode",
                 "script_id",
@@ -316,6 +320,8 @@ class ScriptEditorWorkflowService:
                 return {
                     "step": value.get("step", ""),
                     "step_label": value.get("step_label", ""),
+                    "question": value.get("question"),
+                    "revision": value.get("revision"),
                     "generated_content": value.get("generated_content", ""),
                     "characters": value.get("characters", []),
                     "character_scripts": value.get("character_scripts", {}),
@@ -391,6 +397,8 @@ class ScriptEditorWorkflowService:
             "difficulty": 1,
             "num_clue_rounds": 2,
             "outline": "",
+            "outline_session": None,
+            "ending_mode": "single",
             "characters": [],
             "first_draft": "",
             "review_opinion": "",

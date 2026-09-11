@@ -3,6 +3,7 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 
 from app.api.schemas.script_editor import (
     ForkRequest,
@@ -11,6 +12,9 @@ from app.api.schemas.script_editor import (
     UpdatePromptRequest,
     UpdateTitleRequest,
 )
+from app.db.models import EditorOperation
+from app.db.session import AsyncSessionLocal
+from app.script_editor.outline.contracts import OutlineAction, OutlineConflict
 from app.script_editor.ownership import require_author_key_hash
 from app.script_editor.services.operation_service import editor_operation_runner
 from app.script_editor.services.workflow_service import (
@@ -46,7 +50,14 @@ async def get_workflow_state(
     try:
         await editor_operation_runner.authorize(thread_id, owner_key_hash)
         service = ScriptEditorWorkflowService()
-        return await service.get_state(thread_id)
+        from app.script_editor.outline.runtime import projection, workflow_response
+
+        response = await workflow_response(service, thread_id)
+
+        response["outline_progress"] = await projection(
+            thread_id, response["state"].get("outline_session")
+        )
+        return response
     except WorkflowNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except WorkflowAuthorizationError as error:
@@ -184,8 +195,33 @@ async def fork_from_checkpoint(
     """Fork a workflow from a historical checkpoint."""
     try:
         service = ScriptEditorWorkflowService()
-        await editor_operation_runner.authorize(thread_id, owner_key_hash)
-        return await service.fork(thread_id, request.checkpoint_id, request.state_updates)
+        async with editor_operation_runner.command_lock(thread_id):
+            await editor_operation_runner.authorize(thread_id, owner_key_hash)
+            async with AsyncSessionLocal() as db:
+                active = await db.scalar(
+                    select(EditorOperation).where(
+                        EditorOperation.thread_id == thread_id,
+                        EditorOperation.status.in_(("queued", "running")),
+                    )
+                )
+            if active:
+                raise OutlineConflict("当前创作尚未结束，请先暂停再回退")
+            target = await service._get_snapshot(service.config(thread_id, request.checkpoint_id))
+            session = target.values.get("outline_session") or {}
+            if (
+                session
+                and target.values.get("current_step") != "init"
+                and session.get("status") not in {"ready", "needs_revision"}
+            ):
+                raise OutlineConflict(
+                    "共创过程请使用回答旁的“从这里修改”，阶段回退可选择已完成的大纲"
+                )
+            from app.script_editor.outline.actions import sync_review_fork
+
+            result = await service.fork(thread_id, request.checkpoint_id, request.state_updates)
+            return await sync_review_fork(service, thread_id, result)
+    except OutlineConflict as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
     except WorkflowNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except WorkflowAuthorizationError as error:
@@ -193,3 +229,23 @@ async def fork_from_checkpoint(
     except Exception as error:
         logger.error("Failed to fork: %s", error, exc_info=True)
         raise HTTPException(status_code=500, detail=f"分叉失败: {error}") from error
+
+
+@entry_router.post("/{thread_id}/outline/actions", status_code=202)
+async def outline_action(
+    thread_id: str,
+    request: OutlineAction,
+    owner_key_hash: str = Depends(require_author_key_hash),
+):
+    from app.script_editor.outline.actions import queue_action
+
+    try:
+        return await queue_action(editor_operation_runner, thread_id, request, owner_key_hash)
+    except WorkflowNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except WorkflowAuthorizationError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+    except OutlineConflict as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error

@@ -18,6 +18,7 @@ class ScriptGenState(TypedDict, total=False):
 
     # === 各步骤生成内容 ===
     outline: str  # 结构化大纲
+    outline_session: dict  # optional v2 co-creation; absent for legacy checkpoints
     characters: list[dict]  # 角色档案列表 [{name, gender, age, occupation, profile, appearance}]
     first_draft: str  # 初稿全文
     review_opinion: str  # 独立审稿意见
