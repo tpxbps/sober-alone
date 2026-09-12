@@ -70,22 +70,39 @@ def test_conversion_merge_preserves_round_task_shape_and_limits():
 )
 async def test_conversion_defaults_single_and_preserves_manual_endings(monkeypatch, manual):
     from app.script_editor.conversion import service
-    from app.script_editor.conversion.contracts import ScenesResult
+    from app.script_editor.conversion.contracts import ScriptMetadata, SingleCharacterResult
 
-    async def no_result(*_):
-        return None
+    async def clues(*_):
+        return ClueStagesResult(
+            clue_stages=[ClueStageItem(items=[ClueItemResult(summary="痕迹", content="证据")])]
+        )
 
     async def scenes(*_):
-        return ScenesResult(full_truth="固定案件真相", truth_reveal_notice="揭晓正文")
+        return ScenesResult(
+            opening_notice="开场",
+            summary_notice="总结",
+            vote_notice="投票",
+            full_truth="固定案件真相",
+            truth_reveal_notice="揭晓正文",
+        )
+
+    async def metadata(*_):
+        return ScriptMetadata(overview="概述", description="详情")
+
+    async def character(*_):
+        return "甲", SingleCharacterResult(
+            name="甲", character_script="个人剧本", system_prompt="人物设定"
+        )
 
     monkeypatch.setattr(service, "_get_structured_llm", lambda: None)
-    monkeypatch.setattr(service, "_run_game_clues", no_result)
+    monkeypatch.setattr(service, "_run_game_clues", clues)
     monkeypatch.setattr(service, "_run_game_scenes", scenes)
-    monkeypatch.setattr(service, "_run_metadata", no_result)
-    monkeypatch.setattr(service, "_run_character", no_result)
+    monkeypatch.setattr(service, "_run_metadata", metadata)
+    monkeypatch.setattr(service, "_run_character", character)
     result = await service.convert_to_game_data(
         {
             "script_id": "ending-conversion",
+            "num_clue_rounds": 1,
             "player_count": 1,
             "ending_mode": "multiple",
             "characters": [{"character_id": "a", "name": "甲"}],
