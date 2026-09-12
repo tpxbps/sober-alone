@@ -569,3 +569,25 @@ def test_outline_confirm_preserves_latest_text_in_both_views(monkeypatch):
     )
     assert result["outline"] == latest
     assert result["outline_session"]["final_outline"] == latest
+
+
+@pytest.mark.asyncio
+async def test_cancellation_waits_for_inflight_database_cleanup():
+    entered, release, closed = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    async def database_access():
+        entered.set()
+        try:
+            await release.wait()
+        finally:
+            closed.set()
+
+    task = asyncio.create_task(runtime.finish_database_access(database_access()))
+    await entered.wait()
+    task.cancel()
+    await asyncio.sleep(0)
+    assert not task.done()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert closed.is_set()

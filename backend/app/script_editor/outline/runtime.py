@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 import uuid
 from contextvars import ContextVar
@@ -15,6 +16,16 @@ from app.script_editor.services.progress_bus import publish
 
 current_runtime: ContextVar[OutlineRuntime | None] = ContextVar("outline_runtime", default=None)
 live_runtimes: dict[str, OutlineRuntime] = {}
+
+
+async def finish_database_access(awaitable):
+    """Release SQLite resources before a cancelled writer can be replaced."""
+    task = asyncio.ensure_future(awaitable)
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        await task
+        raise
 
 
 class OutlineRuntime:
@@ -43,6 +54,9 @@ class OutlineRuntime:
         self.answer: dict | None = None
 
     async def read_control(self) -> dict:
+        return await finish_database_access(self._read_control())
+
+    async def _read_control(self) -> dict:
         async with AsyncSessionLocal() as db:
             workflow = await db.get(EditorWorkflow, self.thread_id)
             self.control = dict(workflow.outline_control or {}) if workflow else {}
@@ -83,6 +97,9 @@ class OutlineRuntime:
             await self.save()
 
     async def save(self) -> None:
+        await finish_database_access(self._save())
+
+    async def _save(self) -> None:
         async with AsyncSessionLocal() as db:
             operation = await db.get(EditorOperation, self.operation_id)
             if operation:
