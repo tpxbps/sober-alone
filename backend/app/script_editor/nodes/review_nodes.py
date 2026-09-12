@@ -29,11 +29,14 @@ def review_outline(state: ScriptGenState) -> dict:
     action = user_response.get("action", "confirm")
     content = user_response.get("content", state.get("outline", ""))
 
-    return {
+    result = {
         "outline": content,
         "current_step": STEP_REVIEW_OUTLINE,
         "_review_action": action,  # 用于路由判断
     }
+    if state.get("outline_session"):
+        result["outline_session"] = {**state["outline_session"], "final_outline": content}
+    return result
 
 
 def review_first_draft(state: ScriptGenState) -> dict:

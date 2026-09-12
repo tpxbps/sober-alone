@@ -78,6 +78,11 @@ async def queue_action(runner, thread_id: str, request: OutlineAction, owner_key
                 raise OutlineConflict(
                     "当前操作尚未结束，请稍后重试；修改历史回答请使用“从这里修改”"
                 )
+            if request.action == "save" and (
+                session.get("status") not in {"ready", "needs_revision"}
+                or (service.extract_interrupt(snapshot) or {}).get("step") != "review_outline"
+            ):
+                raise OutlineConflict("请等待完整大纲整理完成后再保存")
             if request.action == "answer":
                 question = session.get("pending_question") or {}
                 if question.get("id") != request.question_id:
@@ -115,7 +120,7 @@ async def queue_action(runner, thread_id: str, request: OutlineAction, owner_key
                 operation_id=request.request_id,
                 thread_id=thread_id,
                 kind="outline",
-                target_step="outline_wait",
+                target_step="review_outline" if request.action == "save" else "outline_wait",
                 request_payload=request.model_dump(),
                 status="complete" if immediate else "queued",
                 progress={"message": "已接受共创操作"},
@@ -200,7 +205,21 @@ async def execute_action(service, thread_id: str, payload: dict) -> dict:
         session = snapshot.values["outline_session"]
     consumed = request.request_id in session.get("consumed_requests", [])
     question = session.get("pending_question")
-    if request.action in {"answer", "rewrite"} and not consumed:
+    if request.action == "save":
+        if not consumed:
+            saved = deepcopy(session)
+            saved.update(final_outline=request.content, status="ready", check=None)
+            saved["consumed_requests"] = [*saved.get("consumed_requests", []), request.request_id]
+            # Re-enter only the confirmation interrupt. No generation node runs.
+            await service.graph.aupdate_state(
+                config,
+                {"outline": request.content, "outline_session": saved},
+                as_node="outline_finalize",
+            )
+        snapshot = await service._get_snapshot(config)
+        if not service.extract_interrupt(snapshot):
+            await service.graph.ainvoke(None, config)
+    elif request.action in {"answer", "rewrite"} and not consumed:
         if not question or question["id"] != request.question_id:
             raise OutlineConflict("回答目标已变化，拒绝重放旧回答")
         answer = {**request.model_dump(), "source": "user"}

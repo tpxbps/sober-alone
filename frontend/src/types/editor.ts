@@ -111,6 +111,7 @@ export interface WorkflowStateResponse {
 }
 
 export interface ResumeWorkflowResponse {
+  outline_progress?: OutlineProgress | null;
   success: boolean;
   thread_id: string;
   current_step: string;

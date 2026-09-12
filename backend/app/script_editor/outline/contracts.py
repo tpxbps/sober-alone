@@ -59,16 +59,19 @@ class Direction(BaseModel):
 
 
 class OutlineAction(BaseModel):
-    action: Literal["answer", "pause", "continue", "stop_questions", "rewrite", "retry"]
+    action: Literal["answer", "pause", "continue", "stop_questions", "rewrite", "retry", "save"]
     request_id: str = Field(min_length=8, max_length=80)
     expected_revision: int = Field(ge=1)
     question_id: str | None = None
     checkpoint_id: str | None = None
     option_id: str | None = None
     other_text: str = Field(default="", max_length=8000)
+    content: str | None = Field(default=None, max_length=200000)
 
     @model_validator(mode="after")
     def valid_answer(self):
+        if self.action == "save" and (self.content is None or not self.content.strip()):
+            raise ValueError("大纲内容不能为空")
         if self.action in {"answer", "rewrite"}:
             if not self.question_id:
                 raise ValueError("请选择要回答或修改的决策点")

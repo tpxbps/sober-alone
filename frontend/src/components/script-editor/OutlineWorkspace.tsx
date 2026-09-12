@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowDown, Check, History, Loader2, RotateCcw, Sparkles } from "lucide-react";
+import { ArrowDown, Check, History, Loader2, RotateCcw, Save, Sparkles } from "lucide-react";
 import { Markdown } from "@/components/ui/Markdown";
 import { useEditorStore } from "@/stores/editorStore";
 import type { OutlineQuestion, OutlineSession } from "@/types/outline";
@@ -57,6 +57,7 @@ export function OutlineWorkspace({ threadId }: { threadId: string | null }) {
   const [viewVersion, setViewVersion] = useState<number | null>(null);
   const [editing, setEditing] = useState(false);
   const [editedOutline, setEditedOutline] = useState("");
+  const [saved, setSaved] = useState(false);
   const [hasNew, setHasNew] = useState(false);
   const scroll = useRef<HTMLDivElement>(null);
   const following = useRef(true);
@@ -115,6 +116,18 @@ export function OutlineWorkspace({ threadId }: { threadId: string | null }) {
       setRewriting(null);
       setDrafts(old => ({ ...old, [draftKey]: emptyDraft }));
     }
+  };
+  const saveOutline = async () => {
+    if (!editedOutline.trim() || disabled) return false;
+    const success = await act({ action: "save", content: editedOutline });
+    if (success) { setEditing(false); setSaved(true); }
+    return success;
+  };
+  const confirmOutline = async () => {
+    const content = editing ? editedOutline : text;
+    if (disabled || !content.trim()) return;
+    if (editing && !await saveOutline()) return;
+    await resume("confirm", content);
   };
   const versions = [...new Set(history.map(cp => cp.state.outline_session?.revision).filter((v): v is number => Boolean(v)))];
   return <div className="flex h-full min-h-0 flex-col" data-testid="outline-workspace">
@@ -188,7 +201,7 @@ export function OutlineWorkspace({ threadId }: { threadId: string | null }) {
               <p className="font-medium">完整大纲已整理</p><p className="mt-1 text-muted-foreground">查看全文、修改内容，再决定是否进入初稿。</p>
               <button onClick={() => setTab("outline")} className="mt-3 text-primary">查看完整大纲 →</button>
             </div>}
-          </> : editing && !archived ? <textarea aria-label="编辑完整大纲" value={editedOutline} onChange={e => setEditedOutline(e.target.value)}
+          </> : editing && !archived ? <textarea aria-label="编辑完整大纲" value={editedOutline} disabled={disabled} onChange={e => { setEditedOutline(e.target.value); setSaved(false); }}
             className="min-h-[55vh] w-full rounded-xl border border-border bg-background p-4 text-sm leading-7 outline-none focus:border-primary" />
             : <article className="rounded-xl border border-border/40 p-5"><Markdown>{live?.segment_id === "final" ? live.text : text || "正文将随创作逐段出现在这里。"}</Markdown>
               {live && live.segment_id !== "final" && <div className="mt-6 border-t border-border/40 pt-4"><p className="mb-2 text-xs text-primary">正在撰写</p><Markdown>{live.text}</Markdown></div>}
@@ -202,12 +215,14 @@ export function OutlineWorkspace({ threadId }: { threadId: string | null }) {
         className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-border bg-background px-4 py-2 text-xs shadow-lg"><ArrowDown className="h-3 w-3" />回到最新</button>}
     </div>
     {!archived && <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-border/40 px-4 py-3">
-      <span className="text-xs text-muted-foreground" role="status">{disabled ? "正在处理…" : paused ? "创作已暂停" : statusLabels[session?.status || "writing"]}{stopped && !final ? " · AI将自动完成后续大纲创作" : ""}</span>
+      <span className="text-xs text-muted-foreground" role="status">{disabled ? "正在处理…" : editing ? "修改后可保存；进入初稿时会自动保存" : saved ? "大纲已保存" : paused ? "创作已暂停" : statusLabels[session?.status || "writing"]}{stopped && !final ? " · AI将自动完成后续大纲创作" : ""}</span>
       <div className="flex flex-wrap items-center gap-2">
         {final ? <>
-          <button disabled={disabled} onClick={() => { if (!editing) { setEditedOutline(text); setTab("outline"); } setEditing(!editing); }}
+          <button disabled={disabled} onClick={() => { if (!editing) { setEditedOutline(text); setTab("outline"); } setSaved(false); setEditing(!editing); }}
             className="rounded-lg border border-border px-3 py-2 text-sm">{editing ? "取消编辑" : "编辑全文"}</button>
-          <button disabled={disabled || (editing && !editedOutline.trim())} onClick={() => void resume("confirm", editing ? editedOutline : text)}
+          {editing && <button disabled={disabled || !editedOutline.trim()} onClick={() => void saveOutline()}
+            className="inline-flex items-center gap-1 rounded-lg border border-primary/40 px-3 py-2 text-sm text-primary disabled:opacity-40"><Save className="h-4 w-4" />保存大纲</button>}
+          <button disabled={disabled || (editing && !editedOutline.trim())} onClick={() => void confirmOutline()}
             className="inline-flex items-center gap-1 rounded-lg bg-primary px-4 py-2 text-sm text-primary-foreground"><Check className="h-4 w-4" />确认大纲，进入初稿</button>
         </> : <>
           {!stopped && <div className="flex flex-wrap items-center gap-2">

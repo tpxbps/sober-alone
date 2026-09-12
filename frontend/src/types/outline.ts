@@ -47,11 +47,12 @@ export interface OutlineDelta {
   text: string;
 }
 export interface OutlineCommand {
-  action: "answer" | "pause" | "continue" | "stop_questions" | "rewrite" | "retry";
+  action: "answer" | "pause" | "continue" | "stop_questions" | "rewrite" | "retry" | "save";
   request_id: string;
   expected_revision: number;
   question_id?: string;
   checkpoint_id?: string;
   option_id?: string;
   other_text?: string;
+  content?: string;
 }

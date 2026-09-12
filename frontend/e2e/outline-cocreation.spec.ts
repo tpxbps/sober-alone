@@ -11,6 +11,7 @@ const question = (id: string) => ({
 });
 async function setup(page: Page) {
   let stage = 0, revision = 1, stopped = false, paused = false;
+  let savedOutline = "", lastOperation = "start", sequence = 0;
   let answers: Array<Record<string, unknown>> = [];
   const archived: unknown[] = [];
   const commands: Record<string, unknown>[] = [];
@@ -20,7 +21,7 @@ async function setup(page: Page) {
       ...(stage > 0 ? [{ id: "s2", content: "十年前的失踪案再次浮现，四人的证词无法拼成完整的一夜。" }] : [])],
     decisions: answers, pending_question: stage < 2 ? question(stage === 0 ? "q1" : "q2") : null,
     questions_asked: stage + 1, questions_stopped: stopped,
-    final_outline: stage >= 2 ? "# 雾港旧事\n\n四名故人的秘密构成了完整的案件大纲。\n\n## 真相\n守夜人利用旧案引出真正的幕后者。" : "",
+    final_outline: stage >= 2 ? savedOutline || "# 雾港旧事\n\n四名故人的秘密构成了完整的案件大纲。\n\n## 真相\n守夜人利用旧案引出真正的幕后者。" : "",
     check: stage >= 2 ? { passed: true, issues: [] } : null,
   });
   const state = () => ({
@@ -34,7 +35,7 @@ async function setup(page: Page) {
     success: true, thread_id: "co-thread", current_step: stage === 3 ? "review_first_draft" : stage < 2 ? "outline_wait" : "review_outline",
     is_complete: false, state: state(),
     interrupt: { step: stage === 3 ? "review_first_draft" : stage < 2 ? "outline_wait" : "review_outline", generated_content: stage === 3 ? "初稿正文" : state().outline, prompt_used: "" },
-    outline_progress: { operation_id: "op-" + stage + "-" + revision, revision, seq: 10 + stage,
+    outline_progress: { operation_id: lastOperation, revision, seq: 10 + stage + sequence,
       session: session(), live: null, control: { revision, paused, questions_stopped: stopped } },
   });
   await page.route("**/api/v1/**", async route => {
@@ -54,6 +55,8 @@ async function setup(page: Page) {
     if (path.endsWith("/outline/actions")) {
       const cmd = route.request().postDataJSON();
       commands.push(cmd);
+      lastOperation = cmd.request_id; sequence++;
+      if (cmd.action === "save") savedOutline = cmd.content;
       if (cmd.action === "pause") paused = true;
       if (cmd.action === "continue") paused = false;
       if (cmd.action === "stop_questions") { stopped = true; stage = 2; }
@@ -70,7 +73,7 @@ async function setup(page: Page) {
       }
       return json({ success: true, thread_id: "co-thread", operation_id: cmd.request_id, operation_status: "complete", target_step: "outline_wait" });
     }
-    if (path.endsWith("/resume")) { stage = 3; return json({ ...response(), operation_id: "draft", operation_status: "complete" }); }
+    if (path.endsWith("/resume")) { commands.push(route.request().postDataJSON()); stage = 3; return json({ ...response(), operation_id: "draft", operation_status: "complete" }); }
     return json({ success: true });
   });
   return commands;
@@ -115,6 +118,8 @@ test("大纲共创：标题、自由回答、改写与全文确认", async ({ pa
   await page.getByLabel("编辑完整大纲").fill("# 雾港旧事\n人工调整后的大纲");
   await page.getByRole("button", { name: "确认大纲，进入初稿" }).click();
   await expect(page.getByText("初稿正文")).toBeVisible();
+  expect(commands.find(c => c.action === "save")?.content).toBe("# 雾港旧事\n人工调整后的大纲");
+  expect(commands.find(c => c.action === "confirm")?.content).toBe("# 雾港旧事\n人工调整后的大纲");
   expect(commands.filter(c => c.action === "answer")).toHaveLength(1);
   expect(commands.some(c => c.action === "rewrite")).toBe(true);
 });
@@ -248,4 +253,28 @@ test("大厅与共创正文连续选择后仍能取消选择、操作按钮和�
   await page.mouse.click(10, 10);
   expect(await page.evaluate(() => getSelection()?.toString())).toBe("");
   expect(errors).toEqual([]);
+});
+
+
+test("保存大纲留在确认节点，刷新保留全文，失败时不丢草稿也不进入初稿", async ({ page }) => {
+  const commands = await setup(page);
+  await begin(page);
+  await page.getByRole("button", { name: "停止提问", exact: true }).click();
+  await page.getByRole("button", { name: "编辑全文", exact: true }).click();
+  const content = "# 手动保存的大纲\n保留最新剧情和末尾空格  ";
+  await page.getByLabel("编辑完整大纲").fill(content);
+  await page.getByRole("button", { name: "保存大纲", exact: true }).click();
+  await expect(page.getByText("大纲已保存", { exact: true })).toBeVisible();
+  expect(commands.filter(c => c.action === "confirm")).toHaveLength(0);
+  await page.reload();
+  await expect(page.getByTestId("outline-final-message")).toContainText("保留最新剧情和末尾空格");
+  await page.getByRole("button", { name: "编辑全文", exact: true }).click();
+  await expect(page.getByLabel("编辑完整大纲")).toHaveValue(content);
+  await page.getByLabel("编辑完整大纲").fill(content + "\n尚未保存的修改");
+  await page.route("**/outline/actions", route => route.fulfill({ status: 500, json: { detail: "保存测试失败" } }));
+  await page.getByRole("button", { name: "确认大纲，进入初稿", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("保存测试失败");
+  await expect(page.getByLabel("编辑完整大纲")).toHaveValue(content + "\n尚未保存的修改");
+  await expect(page.getByRole("button", { name: "保存大纲", exact: true })).toBeEnabled();
+  expect(commands.filter(c => c.action === "confirm")).toHaveLength(0);
 });

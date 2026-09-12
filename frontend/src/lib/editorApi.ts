@@ -90,6 +90,7 @@ export const editorApi = {
   ): Promise<EditorOperationResponse> => {
     const response = await api.get(
       `/script-editor/${threadId}/operations/${operationId}`,
+      { timeout: 15000 },
     );
     return response.data;
   },

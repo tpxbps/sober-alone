@@ -513,3 +513,59 @@ async def test_new_workflow_ignores_legacy_multiple_ending_request(env):
     result = await workflow_service.ScriptEditorWorkflowService().get_state(accepted["thread_id"])
     assert result["state"]["ending_mode"] == "single"
     assert "多结局" not in env[3][0][1]
+
+
+@pytest.mark.asyncio
+async def test_save_outline_is_durable_replay_safe_and_keeps_confirmation(env):
+    runner, factory, graph, calls, _ = env
+    thread, state = await start(env)
+    with pytest.raises(OutlineConflict):
+        await actions.queue_action(
+            runner, thread, command("save", state, content="过早保存"), "owner"
+        )
+    await actions.queue_action(runner, thread, command("stop_questions", state), "owner")
+    await settle(runner)
+    service = workflow_service.ScriptEditorWorkflowService()
+    state = await service.get_state(thread)
+    content = "# 人工编辑\n原样保留末尾空格与换行  \n"
+    request = command("save", state, content=content)
+    call_count = len(calls)
+    accepted = await actions.queue_action(runner, thread, request, "owner")
+    await settle(runner)
+    result = await runner.get(thread, accepted["operation_id"], "owner")
+    assert result["operation_status"] == "complete"
+    assert result["current_step"] == "review_outline"
+    assert result["state"]["outline"] == content
+    assert result["state"]["outline_session"]["final_outline"] == content
+    assert result["outline_progress"]["session"]["final_outline"] == content
+    assert result["interrupt"]["generated_content"] == content
+    assert not result["state"]["first_draft"]
+    assert len(calls) == call_count
+    assert (await actions.queue_action(runner, thread, request, "owner"))[
+        "operation_id"
+    ] == accepted["operation_id"]
+    async with factory() as db:
+        operation = await db.get(EditorOperation, request.request_id)
+        operation.status = "running"
+        await db.commit()
+    await runner.recover_pending()
+    await settle(runner)
+    restored = await workflow_service.ScriptEditorWorkflowService().get_state(thread)
+    assert restored["interrupt"]["generated_content"] == content
+    assert len(calls) == call_count
+    with pytest.raises(ValidationError):
+        command("save", state, content="  ")
+
+
+def test_outline_confirm_preserves_latest_text_in_both_views(monkeypatch):
+    from app.script_editor.nodes import review_nodes
+
+    latest = "# 最新编辑\n保存和初稿均应使用此文本  \n"
+    monkeypatch.setattr(
+        review_nodes, "interrupt", lambda _: {"action": "confirm", "content": latest}
+    )
+    result = review_nodes.review_outline(
+        {"outline": FINAL, "outline_session": {"final_outline": FINAL}}
+    )
+    assert result["outline"] == latest
+    assert result["outline_session"]["final_outline"] == latest

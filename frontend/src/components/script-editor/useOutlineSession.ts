@@ -83,6 +83,20 @@ export function useOutlineSession(threadId: string | null) {
         if (axios.isAxiosError(err) && !err.response) await editorApi.outlineAction(threadId, request);
         else throw err;
       }
+      if (command.action === "save") {
+        const deadline = Date.now() + 30000;
+        while (true) {
+          const result = await editorApi.getOperation(threadId, request.request_id);
+          if (result.operation_status === "failed") throw new Error(result.error_message || "大纲保存失败，请重试");
+          if (result.operation_status === "complete" && result.state) {
+            if (result.outline_progress) update(result.outline_progress);
+            useEditorStore.setState({ workflowState: result.state, interruptInfo: result.interrupt, error: null });
+            break;
+          }
+          if (Date.now() >= deadline) throw new Error("尚未确认保存结果，请稍后重试；编辑内容已保留");
+          await new Promise(resolve => setTimeout(resolve, 250));
+        }
+      }
       // Acceptance is durable; a failed/slow snapshot must not turn it into a
       // failed command or keep all controls locked. SSE and polling resync it.
       void refresh().catch(() => {});
@@ -96,6 +110,6 @@ export function useOutlineSession(threadId: string | null) {
       requestInFlight.current = false;
       setBusy(false);
     }
-  }, [threadId, refresh]);
+  }, [threadId, refresh, update]);
   return { progress, error, busy, act, refresh };
 }
