@@ -12,6 +12,7 @@ import { LoadingButton } from "./EditorControls";
 import { getButtonLoadingMessage } from "./editorMessages";
 import { STEP_VOICE_GROUPS, STEP_VOICE_OPTIONS } from "@/lib/stepVoices";
 import { EndingEditor } from "./EndingEditor";
+import { Markdown } from "@/components/ui/Markdown";
 
 export function ReviewGameDataStage({
   editedGameData,
@@ -377,6 +378,16 @@ export function ReviewGameDataStage({
                       className="w-full text-xs bg-transparent border border-border/30 rounded-md p-2 resize-none focus:outline-none focus:border-primary/50 scrollbar-thin"
                       style={{ minHeight: "30vh" }}
                     />
+                    <details className="mt-2 rounded-lg border border-border/30 p-3">
+                      <summary className="cursor-pointer text-xs font-medium">玩家阅读预览 · {character.name}</summary>
+                      <div className="mt-3 space-y-4 text-sm">
+                        <div className="rounded-lg bg-secondary/20 p-3">
+                          <p className="mb-2 text-xs font-medium text-primary">快速了解 · 仅本人可见</p>
+                          <Markdown>{character.script_summary || "角色速览待完善"}</Markdown>
+                        </div>
+                        <Markdown>{character.character_script || "个人剧本待完善"}</Markdown>
+                      </div>
+                    </details>
                   </div>
                 ))}
           </div>
@@ -472,10 +483,12 @@ export function ReviewGameDataStage({
                 </div>
                 <div>
                   <label className="block text-xs text-muted-foreground mb-0.5">
-                    个人剧本摘要
+                    真人角色速览（仅本人可见）
                   </label>
                   <textarea
                     value={cd.script_summary || ""}
+                    aria-label={`${cd.name}的真人角色速览`}
+                    placeholder="你是谁、记住这些事、你在意什么、你想问清什么"
                     onChange={(e) => updateField(["character_data", String(idx), "script_summary"], e.target.value)}
                     className="w-full h-20 text-xs bg-transparent border border-border/30 rounded-md p-2 resize-none focus:outline-none focus:border-primary/50"
                   />
@@ -579,7 +592,7 @@ export function ReviewGameDataStage({
                 </div>
                 <div>
                   <label className="block text-xs text-muted-foreground mb-0.5">
-                    系统提示词
+                    AI 扮演设置（不向玩家展示）
                   </label>
                   <textarea
                     value={cd.system_prompt || ""}

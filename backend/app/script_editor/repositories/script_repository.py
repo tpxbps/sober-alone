@@ -148,9 +148,6 @@ async def _save_generated_script(state: ScriptGenState) -> dict:
 
                 char_script = character_scripts.get(name, "") or cd.get("character_script", "")
 
-                if not script_summary and char_script:
-                    script_summary = char_script[:200]
-
                 voice_id = cd.get("step_voice_id", "") or character_voice_ids.get(char_id, "")
 
                 values = (

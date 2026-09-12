@@ -1,6 +1,6 @@
 import { memo, useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { BookOpen, X, Lightbulb, Zap } from "lucide-react";
+import { BookOpen, X, Zap } from "lucide-react";
 import { SpeakerIcon, type SpeakerState } from "@/components/ui/SpeakerIcon";
 import { AudioSpeedButton } from "@/components/ui/AudioSpeedButton";
 import { Markdown } from "@/components/ui/Markdown";
@@ -11,7 +11,6 @@ import { ttsCapability } from "@/lib/capabilityAdapter";
 interface PlayerScriptTooltipProps {
   scriptContent: string;
   scriptSummary?: string;
-  keyInfo?: string;
   characterName?: string;
   sessionId?: string;
   scriptId?: string;
@@ -28,26 +27,15 @@ function formatTime(seconds: number): string {
 
 const StableQuickOverviewContent = memo(function StableQuickOverviewContent({
   scriptSummary,
-  keyInfo,
 }: {
   scriptSummary?: string;
-  keyInfo?: string;
 }) {
   return (
     <div className="px-4 py-3 space-y-3 select-text">
       {scriptSummary && (
         <div>
-          <h4 className="text-sm font-bold text-primary mb-1">剧本摘要</h4>
-          <p className="text-sm text-muted-foreground leading-relaxed">
-            {scriptSummary}
-          </p>
-        </div>
-      )}
-      {keyInfo && (
-        <div>
-          <h4 className="text-sm font-bold text-primary mb-1">关键信息</h4>
           <Markdown className="text-sm text-muted-foreground leading-relaxed">
-            {keyInfo}
+            {scriptSummary}
           </Markdown>
         </div>
       )}
@@ -70,7 +58,6 @@ const StableScriptContent = memo(function StableScriptContent({
 export const PlayerScriptTooltip = memo(function PlayerScriptTooltip({
   scriptContent,
   scriptSummary,
-  keyInfo,
   characterName,
   sessionId,
   scriptId,
@@ -255,18 +242,24 @@ export const PlayerScriptTooltip = memo(function PlayerScriptTooltip({
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="bg-card rounded-xl shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col overflow-hidden"
+              role="dialog"
+              aria-modal="true"
+              aria-label={characterName ? `${characterName}的剧本` : "我的剧本"}
+              className="bg-card rounded-xl shadow-2xl max-w-2xl w-full max-h-[80dvh] flex flex-col overflow-hidden"
               onClick={(e) => e.stopPropagation()}
             >
               {/* Header */}
-              <div className="flex items-center justify-between p-4 border-b border-border/50">
-                <div className="flex items-center gap-2">
+              <div className="flex shrink-0 items-center justify-between p-4 border-b border-border/50">
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
                   <BookOpen className="w-5 h-5 text-primary" />
                   <h3 className="text-lg font-bold">
                     {characterName ? `${characterName}的剧本` : "我的剧本"}
                   </h3>
-                  {(scriptSummary || keyInfo) && (
+                  {scriptSummary?.trim() && (
                     <button
+                      type="button"
+                      aria-expanded={showQuickOverview}
+                      aria-controls="player-quick-overview"
                       onClick={() => setShowQuickOverview((v) => !v)}
                       className={`flex items-center gap-1 ml-2 px-2 py-0.5 rounded-md text-xs font-medium transition-colors
                         ${
@@ -304,18 +297,20 @@ export const PlayerScriptTooltip = memo(function PlayerScriptTooltip({
 
               {/* Quick overview panel */}
               <AnimatePresence>
-                {showQuickOverview && (
+                {showQuickOverview && scriptSummary?.trim() && (
                   <motion.div
+                    id="player-quick-overview"
+                    role="region"
+                    aria-label="角色速览"
                     initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: "100vh", opacity: 1 }}
+                    animate={{ height: "auto", opacity: 1 }}
                     exit={{ height: 0, opacity: 0 }}
                     transition={{ duration: 0.2 }}
-                    className="overflow-hidden border-b border-border/30 bg-secondary/20"
+                    className="shrink-0 overflow-hidden border-b border-border/30 bg-secondary/20"
                   >
-                    <div className="h-full overflow-y-auto scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
+                    <div className="max-h-[32dvh] overflow-y-auto scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
                       <StableQuickOverviewContent
                         scriptSummary={scriptSummary}
-                        keyInfo={keyInfo}
                       />
                     </div>
                   </motion.div>
@@ -324,7 +319,7 @@ export const PlayerScriptTooltip = memo(function PlayerScriptTooltip({
 
               {/* Audio progress bar + speed control */}
               {showProgressBar && (
-                <div className="px-4 pt-2 pb-1 flex items-center gap-2">
+                <div className="shrink-0 px-4 pt-2 pb-1 flex items-center gap-2">
                   <span className="text-[10px] text-muted-foreground tabular-nums w-8 text-right">
                     {formatTime(progress)}
                   </span>
@@ -346,16 +341,6 @@ export const PlayerScriptTooltip = memo(function PlayerScriptTooltip({
                   <AudioSpeedButton />
                 </div>
               )}
-
-              {/* Guidance tip */}
-              <div className="px-4 pt-3">
-                <div className="flex items-start gap-2 p-3 rounded-lg bg-primary/5 border border-primary/10">
-                  <Lightbulb className="w-4 h-4 text-primary shrink-0 mt-0.5" />
-                  <p className="text-xs text-muted-foreground">
-                    这是你的完整角色剧本，包含你的身份、背景和秘密。在发言时请保持角色一致性，不要暴露关键信息。如果是凶手，请自然地隐藏身份。
-                  </p>
-                </div>
-              </div>
 
               {/* Content */}
               <div className="p-4 overflow-y-auto flex-1 min-h-0 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">

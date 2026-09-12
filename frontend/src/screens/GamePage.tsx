@@ -591,10 +591,6 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
           characters.find((c) => c.character_id === humanCharacterId)
             ?.character_script_summary
         }
-        keyInfo={
-          characters.find((c) => c.character_id === humanCharacterId)
-            ?.system_prompt
-        }
         characterName={
           characters.find((c) => c.character_id === humanCharacterId)?.name
         }

@@ -541,7 +541,6 @@ export function ScriptDetailModal({
                                   <TruncatedText
                                     text={
                                       char.profile ||
-                                      char.character_script_summary ||
                                       "神秘角色"
                                     }
                                   />

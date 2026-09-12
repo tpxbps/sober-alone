@@ -7,7 +7,7 @@ import json
 from typing import Any
 
 CAPABILITY_VERSION = "public-discussion-v2"
-RUBRIC_VERSION = "script-quality-v2"
+RUBRIC_VERSION = "script-quality-v3"
 GAMEPLAY_CONTRACT = """【实际游戏能力｜public-discussion-v2】
 本剧本用于一名真人与多个 AI 角色进行公开文字讨论。角色可阅读自己的剧本，系统按轮次向所有人
 公开固定线索，最后投票并揭晓固定真相。@角色仍是公开发言。玩家不能实际私聊、移动搜证、
@@ -16,15 +16,21 @@ GAMEPLAY_CONTRACT = """【实际游戏能力｜public-discussion-v2】
 历史剧情可以描述这些行为，但当前游玩任务
 必须通过公开交流和推理完成。不要用“如果游戏允许”等措辞布置不存在的操作。
 角色必须知道其本人经历和行为；不能为隐藏真相而对扮演者隐藏其已知的作案事实。
-推理必需的证据应在投票前可获得，结局不能才补充决定性事实。"""
+推理必需的证据应在投票前可获得，结局不能才补充决定性事实。
+【文本受众与知情边界】以上能力约束用于编剧和AI执行，不得照抄进角色正文、速览、公开简介或线索。
+个人剧本只写该角色的经历、关系、秘密、动机与疑问；用自然叙述表达所见和不确定，不写系统限制、
+旧稿纠错清单、工具字段名或强制辩解话术。速览只从该角色个人稿提炼，不能由全知真相补充。
+“你不知道某人其实是凶手/亲属”仍然泄露了秘密，应完全去掉该未知事实；AI角色输入同样遵守。
+角色已经说过的谎可标明为既往对外说辞，但真实经历必须清楚；保留玩家自行判断和表达的空间。
+故事中的必要设定可自然交代，不新增首次玩法教程，不以大量规则说明代替人物和推理体验。"""
 
 DIMENSIONS = {
-    "compatibility": ("系统匹配与任务可执行性", 20),
-    "consistency": ("时间线、因果和真相一致性", 20),
-    "deducibility": ("证据完整性与可推理性", 15),
+    "compatibility": ("系统匹配与任务可执行性", 10),
+    "consistency": ("时间线、因果和真相一致性", 15),
+    "deducibility": ("证据完整性与可推理性", 20),
     "fairness": ("角色公平性与辩解空间", 15),
-    "interaction": ("交流空间与分轮节奏", 10),
-    "narrative": ("叙事与人物塑造", 15),
+    "interaction": ("交流空间与分轮节奏", 15),
+    "narrative": ("叙事与人物塑造", 20),
     "onboarding": ("新手指引与表达清晰度", 5),
 }
 
@@ -102,9 +108,7 @@ def script_content(script: dict, characters: list[dict] | None = None) -> dict:
         }
         item["age"] = character.get("age")
         item["character_script_summary"] = _prose(
-            character.get("character_script_summary")
-            or character.get("script_summary")
-            or item["character_script"][:200]
+            character.get("character_script_summary") or character.get("script_summary") or ""
         )
         result["characters"].append(item)
     return result

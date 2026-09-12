@@ -46,7 +46,6 @@ export interface Character {
   character_script_summary?: string;
   profile?: string;
   appearance?: string;
-  system_prompt?: string;
   avatar_url?: string;
   portrait_url?: string;
   is_human?: boolean;

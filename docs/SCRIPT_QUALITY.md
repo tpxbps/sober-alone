@@ -1,47 +1,34 @@
-# 剧本质量与玩家反馈
+# Script quality and player-facing text
 
-创作流程依次经过大纲、初稿、AI 审稿意见确认、终稿确认、结构化数据确认、质量检查和保存。审稿意见与可选的真人补充会用于首次终稿和重新生成；审稿页可展开初稿。输入草稿保存在当前浏览器标签页，刷新可恢复。历史 `review_final` 检查点及其真人意见仍可恢复。
+Four fields serve different readers:
 
-## 保存前检查
+- `profile`: public character selection, without private secrets.
+- `character_script`: the character's own experiences, relationships, secrets and motivations.
+- `character_script_summary` (`script_summary` in the workshop): a private human-readable brief, derived from that script. It is not a truncated introduction or an agent prompt.
+- `system_prompt`: AI role instructions and author settings. Game responses never expose it.
 
-所有生成阶段共用 `public-discussion-v2` 能力说明：公开文字交流、角色自己的剧本、固定分轮公开线索、投票和固定真相。历史情节可以描述私下交流或搜证，但玩家的当前任务必须能通过公开交流完成。结构化拆分不能额外创造关键证据或隐藏行动。作者可选择单结局，或按单次投票结果设计正确指认、错误指认、平票、无有效票四个后续结局；案件真相保持一致，平票不追加讨论或重投。
+Historical actions remain valid story material. Platform constraints belong in generation and runtime instructions, not in every player's story. Unknown facts must not appear even in negated statements such as “you do not know who your father is” followed by his identity. The same knowledge boundary applies to AI input. A culprit must still know their own actions. Fictional recollections and uncertainty may remain when supported by the story.
 
-创建与编辑均先规范化数据并校验角色、线索引用、轮次和流程结构。结构错误必须修改。随后使用 `SCRIPT_EDITOR_MODEL` 配置的模型检查完整结构化文本，报告包含字段位置、原文、影响和建议。严重问题需要修改，或勾选明确的风险确认后保存；模型超时、解析失败或引文无法核验会显示“检查未完成”，可以重试或明确接受未检查风险。检查并非质量保证，也不是运营 AI 评分。
+The workshop reviews these boundaries after author edits. Its model-based quality report is separate from an optional externally maintained AI rating. Editing text invalidates the content-bound quality decision and rating. An absent brief stays absent rather than being synthesized from the first 200 characters at save time.
 
-报告及风险确认绑定内容 SHA-256 指纹、检查版本和能力版本。编辑剧情、规则或角色文字后需要重新检查；服务端在保存时验证，不依赖前端按钮状态。封面和音频不计入内容指纹。
+## Rating rubric `script-quality-v3`
 
-## 玩家评价
+The optional rating evaluates the reading, reasoning and conversation opportunities offered by the text. It does not measure player satisfaction or win rates. No real-player votes enter the calculation. Operational reports and actual script evaluations are not shipped in this repository.
 
-新建对局由服务端签发一年期匿名 HttpOnly Cookie，并仅将其摘要保存到对局。同一浏览器对同一剧本保留一个推荐选择，重玩后可以更新。清除 Cookie 或换浏览器会形成新的匿名身份，这不是自然人身份识别。旧对局不追溯获得资格。
+| Dimension | Weight | Evidence to consider |
+| --- | ---: | --- |
+| System compatibility | 10% | Can the current objectives actually be pursued? More rule disclaimers do not earn more points. |
+| Causal consistency | 15% | Can events and character knowledge coexist without retrospective patches? |
+| Deducibility | 20% | Can players combine available observations into a conclusion? A dossier announcing the answer is not an excellent deduction experience. |
+| Role fairness | 15% | Does each role have useful knowledge, decisions and defensible interpretations? Do instructions reveal other roles' secrets? |
+| Conversation and pacing | 15% | Are there reasons to question, respond, reconsider and disclose? Count neither rounds nor clue volume as quality by themselves. |
+| Narrative and characters | 20% | Do specific relationships, motives and voices support involvement? Length, ornate language and template completeness alone are not quality. |
+| Reading clarity | 5% | Can a reader understand who they are and what happened without an instruction manual? Complexity appropriate to the script is not automatically a defect. |
 
-真人投票完成且真相消息持久化后才能评价。点赞或点踩立即保存，可选文字最多 1,000 字，提交失败保留输入。文字只向该浏览器本人和有数据库访问权限的维护者开放，不提供公开评价列表。删除对局不删除评价；删除剧本会删除其评价。
+Use integer scores from 0 to 5: unusable, severe weakness, substantial weakness, adequate, good, excellent. A 3 means a workable experience, not merely presence of a field. A 4 requires concrete strengths with manageable costs. A 5 requires exceptional evidence and a countercheck; completing a checklist is insufficient. Convert `sum(score × weight) / 5` to an integer (these weights make the result integral).
 
-维护者在后端目录运行 `uv run python -m app.cli export-feedback`，可加 `--script-id <ID>` 筛选。此命令通过本地数据库权限控制访问；导出的文字可能含剧透和用户个人信息，应只保留在维护者的受限目录。
+Before scoring, reconstruct the timeline, each role's initial knowledge and round-by-round disclosure. Walk through what a human in each role could plausibly ask, infer, conceal and reconsider, without inventing dialogue or claiming a human playtest. Compare against a fixed, source-backed reference script using identical criteria, recording both advantages and disadvantages. The reference is an anchor, not a required winner or a target number.
 
-推荐标签在至少 5 票时显示。基础好评率分界为 80%、70%、40%、20%，分别对应好评、多半好评、褒贬不一、多半差评、差评。至少 20 票且达到 80% 为特别好评，低于 20% 为一片差评；至少 50 票且达到 95% 为好评如潮，不超过 5% 为差评如潮。其他情况显示待评价。统计覆盖剧本所有历史版本。大厅仅展示标签和好评率，悬浮说明仅提示完成投票并揭晓真相后可评价，不展示票数或规则。
+Caps remain evidence-based: at most 49 when the main solution requires unavailable functionality or decisive evidence arrives only after voting; at most 69 when an important current objective directs a player to unavailable functionality but the main mystery remains playable. Cite an actual passage and its contextual impact, not keywords. Serious knowledge leaks require corresponding deductions and explicit findings even if a functionality cap does not apply. Do not reward remedial disclaimers or mechanically raise scores after revisions.
 
-## 可选 AI 评分
-
-`Script.ai_review` 默认为空，只读展示经过维护者评审的结果。普通创作及编辑接口不能提交该字段。评分必须匹配内容指纹、能力版本及评分规则版本；过期或未评分均显示“AI 待评分”。公开接口只输出总分、维度分、模型和评审时间，不输出问题证据或真相。
-
-评分规则 `script-quality-v2` 的七个维度为系统匹配与任务可执行性（20%）、一致性（20%）、证据可推理性（15%）、角色公平性（15%）、交流与节奏（10%）、叙事与人物塑造（15%）、新手指引（5%）。每维 0–5 分。该评分仅衡量剧本文本，不代表实际玩家满意度、胜率或真人评价。严重问题的封顶规则不变。
-
-评分与人数、预计时长放在同一信息行，空间不足时自然换行。AI 标签显示“AI评分: 分数”；悬浮或键盘聚焦可查看模型来源和维度分。点击标签或悬浮说明中的文字均打开对应剧本详情，手机端轻触直接打开详情。
-
-实际运营剧本、评分结果、维护脚本和定时任务由部署维护者单独管理，不属于本仓库的示例数据或发布包。
-
-## 可选的版本化资源
-
-批量修订已发布剧本时，可以先准备不可变的音频目录与向量集合，再切换剧本文本。资源命名空间为 `<script_id>__<完整内容指纹>`；音频位于 `audio/scripts/<命名空间>/`，Chroma 集合沿用 `script_` 前缀和连字符转下划线的命名规则。
-
-资源生产者应验证全部音频、角色向量及其内容指纹，最后在音频目录写入 `resources.json`，至少包含 `status: "ready"` 和完整的 `content_fingerprint`。目录尚无清单时沿用原有资源路径；清单已存在但未完成、损坏或指纹不一致时拒绝选择，避免悄悄播放旧文本。
-
-对局使用自身保存的剧本快照选择资源，因此新版对局可以使用新音频和角色记忆，既有对局仍使用对应旧资源。发布者必须保留旧目录及集合，并在更新文本前完成新资源；仅修改封面不会改变选择。本机制是供资源生产者采用的发布约定，普通编辑流程仍沿用原有资源生成路径。
-
-## 多结局与兼容性
-
-`ending_config` 为可空 JSON；旧剧本的空配置继续使用单结局，其内容指纹不因升级改变。多结局配置包含 `mode: multiple`、用于判定的 `culprit_character_id` 及四个 `branches`（`when`、`title`、`text`）。服务端拒绝缺失、重复、空正文或引用其他剧本角色的分支。
-
-结局由最终票数确定，平票优先于正确或错误判定；弃票不计入候选人票数，全部弃票使用无有效票结局。各对局保存开局配置快照和本局实际结局，刷新、重试不会重新选择。投票后分别展示固定真相与选中的后续结局，其他分支、真凶判定配置不经公开剧本接口泄露。
-
-分支文本参与内容指纹及质量检查；改变分支使旧评分和风险确认失效。分支音频独立生成，可在资源计划中选择或重试；跳过音频仍可阅读完整结局。旧版本能力下的单结局评分保留兼容，新增评分使用 v2 能力协议。
+Reports must identify the content fingerprint, model, time, rubric and capability versions, seven scores, evidence and counterchecks. Public projection exposes only score metadata and dimensions. Old-rubric or changed-content ratings are displayed as pending until reevaluated; original reports should be archived by the operator.

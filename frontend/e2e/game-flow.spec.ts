@@ -19,6 +19,7 @@ const characters = [
     name: '陆鸣',
     profile: '广播主持人',
     character_script: '你的个人剧本',
+    character_script_summary: '**你是谁**：你是广播主持人陆鸣。',
   },
   { character_id: 'ai-1', name: '姜芮', profile: '节目制作人' },
   { character_id: 'ai-2', name: '陈朔', profile: '音频工程师' },
@@ -220,6 +221,14 @@ test('大厅 → 选角 → 发言 → 推进 → 投票 → 复盘', async ({ p
   await page.getByRole('button', { name: '查看我的剧本' }).last().click({ force: true })
   const scriptHeading = page.getByRole('heading', { name: '陆鸣的剧本' })
   await expect(scriptHeading).toBeVisible()
+  await page.getByRole('button', { name: '快速了解' }).click()
+  const overview = page.getByRole('region', { name: '角色速览' })
+  await expect(overview).toContainText('你是广播主持人陆鸣')
+  await expect(overview.getByText('你是谁', { exact: true })).toHaveCSS('font-weight', '700')
+  await expect.poll(async () => (await overview.boundingBox())!.height).toBeGreaterThan(30)
+  expect((await overview.boundingBox())!.height).toBeLessThan(100)
+  await page.getByRole('button', { name: '快速了解' }).click()
+  await expect(overview).toHaveCount(0)
   await page.getByRole('button', { name: '播放语音' }).click()
   await expect(page.getByRole('button', { name: '停止播放语音' })).toBeVisible()
   await page.getByRole('button', { name: '停止播放语音' }).click()
@@ -271,4 +280,47 @@ test('大厅 → 选角 → 发言 → 推进 → 投票 → 复盘', async ({ p
   await expect(page.getByRole('button', { name: '停止播放语音' })).toBeVisible()
   await page.getByRole('button', { name: '停止播放语音' }).click()
   await expect(page.getByRole('button', { name: '播放语音' })).toBeVisible()
+})
+
+test('个人速览在桌面与窄屏按内容伸展，长文本不挤掉正文且不显示 AI 指令', async ({ page }, testInfo) => {
+  let summary = '**你是谁**：广播主持人。'
+  await page.route('**/api/v1/**', async (route) => {
+    const path = new URL(route.request().url()).pathname
+    const human = { ...characters[0], is_human: true, character_script_summary: summary,
+      system_prompt: 'PRIVATE_AGENT_INSTRUCTION_MUST_NOT_RENDER' }
+    if (path.endsWith('/state')) return json(route, {
+      success: true, session_id: 'brief-layout', status: 'playing', current_stage: 'intro', current_round: 0,
+      human_character_id: 'human', current_speaker_id: 'human', speech_queue: ['human'],
+      script, characters: [human], votes: {}, agent_llm_info: {},
+      player_states: [{ character_id: 'human', character_name: '陆鸣', is_human: true, remaining_speech_count: 1 }],
+    })
+    if (path.endsWith('/records')) return json(route, { success: true, records: [] })
+    if (path.endsWith('/system/capabilities')) return json(route, { models: [], features: {
+      static_tts: { enabled: false, reason: '未配置' }, streaming_tts: { enabled: false, reason: '未配置' },
+    } })
+    return json(route, { success: true, scripts: [], models: [] })
+  })
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 844 })
+    const heights: number[] = []
+    for (const long of [false, true]) {
+      summary = long ? Array.from({ length: 24 }, (_, i) => `**回忆 ${i + 1}**：那晚我留在广播间，门外的声音让我想起还没说清的往事。`).join('\n\n') : '**你是谁**：广播主持人。'
+      await page.goto('/?session=brief-layout')
+      await page.getByRole('button', { name: '查看我的剧本' }).last().click({ force: true })
+      await page.getByRole('button', { name: '快速了解' }).click()
+      const panel = page.getByRole('region', { name: '角色速览' })
+      await expect(panel).toBeVisible()
+      await page.waitForTimeout(250) // bounded height animation
+      const box = (await panel.boundingBox())!
+      heights.push(box.height)
+      expect(box.height).toBeLessThanOrEqual(844 * 0.32 + 2)
+      await expect(page.locator('[data-player-script-content]')).toBeInViewport()
+      await expect(page.getByText('PRIVATE_AGENT_INSTRUCTION_MUST_NOT_RENDER')).toHaveCount(0)
+      if (long) {
+        expect(await panel.locator('div').first().evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true)
+      } else expect(box.height).toBeLessThan(100)
+      await page.screenshot({ path: testInfo.outputPath(`brief-${width}-${long ? 'long' : 'short'}.png`) })
+    }
+    expect(heights[1]).toBeGreaterThan(heights[0] + 100)
+  }
 })

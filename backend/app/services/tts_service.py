@@ -18,8 +18,9 @@ AUDIO_ROOT = settings.audio_dir
 
 # === 文本分块工具 ===
 
-# mimo-v2.5-tts: 8K token 上下文
-MIMO_MAX_CHARS = 4000
+# Input context size is not an audio-output budget. Keep narration requests short
+# enough to finish, then join the sentence-aligned pieces into one recording.
+MIMO_MAX_CHARS = 600
 # step-tts-mini: 1000 字限制
 STEP_MAX_CHARS = 900
 
@@ -392,6 +393,12 @@ async def _mimo_single_call(
             choices = data.get("choices", [])
             if not choices:
                 logger.warning("mimo-v2.5-tts: no choices in response")
+                return None
+
+            if choices[0].get("finish_reason") == "length":
+                logger.warning(
+                    "MiMo narration exceeded its output budget; incomplete audio rejected"
+                )
                 return None
 
             message = choices[0].get("message", {})

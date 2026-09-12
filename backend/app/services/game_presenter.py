@@ -49,11 +49,6 @@ class GameStatePresenter:
                     if character.get("character_id") == human_character_id
                     else None
                 ),
-                "system_prompt": (
-                    character.get("system_prompt")
-                    if character.get("character_id") == human_character_id
-                    else None
-                ),
             }
             for character in characters
         ]

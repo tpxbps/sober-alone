@@ -41,6 +41,41 @@ def test_content_fingerprint_matches_editor_db_and_excludes_assets():
     assert content_fingerprint(normalized) != fingerprint
 
 
+def test_private_brief_is_explicit_and_edits_invalidate_quality():
+    sections = content()
+    assert script_content(sections)["characters"][0]["character_script_summary"] == ""
+    before = content_fingerprint(sections)
+    sections["character_data"][0]["script_summary"] = "**你是谁**：角色甲。"
+    assert content_fingerprint(sections) != before
+    assert script_content(sections)["characters"][0]["character_script_summary"].startswith(
+        "**你是谁**"
+    )
+
+
+@pytest.mark.asyncio
+async def test_identity_leak_in_brief_blocks_save_and_requires_new_review(monkeypatch):
+    state = {"game_data_sections": content()}
+    state["game_data_sections"]["character_data"][0]["script_summary"] = "你不知道乙是你的父亲。"
+    finding = {
+        "severity": "major",
+        "field": "characters[0].character_script_summary",
+        "evidence": "你不知道乙是你的父亲。",
+        "impact": "私密身份提前透露给玩家",
+        "suggestion": "只保留本人已知的关系",
+    }
+    monkeypatch.setattr(quality_check, "create_llm", lambda **kw: Judge({"findings": [finding]}))
+    state.update(await quality_check.check_game_quality(state))
+    assert state["quality_report"]["status"] == "blocked"
+    assert not quality_check.quality_approved(state)
+    state["quality_acceptance"] = {
+        "report_id": state["quality_report"]["report_id"],
+        "content_fingerprint": state["quality_report"]["content_fingerprint"],
+    }
+    assert quality_check.quality_approved(state)
+    state["game_data_sections"]["character_data"][0]["script_summary"] = "我想知道乙为何帮助我。"
+    assert not quality_check.quality_approved(state)
+
+
 def test_ai_public_projection_hides_evidence_and_stale_scores():
     review = {
         "score": 60,
@@ -56,8 +91,8 @@ def test_ai_public_projection_hides_evidence_and_stale_scores():
     assert public["score"] == 60
     assert "evidence" not in public
     assert sum(item["weight"] for item in public["dimensions"]) == 100
-    assert next(item for item in public["dimensions"] if item["key"] == "narrative")["weight"] == 15
-    review["rubric_version"] = "script-quality-v1"
+    assert next(item for item in public["dimensions"] if item["key"] == "narrative")["weight"] == 20
+    review["rubric_version"] = "script-quality-v2"
     assert public_ai_review(review, "fp") is None
     review["rubric_version"] = RUBRIC_VERSION
     review["dimensions"]["fairness"] = 7

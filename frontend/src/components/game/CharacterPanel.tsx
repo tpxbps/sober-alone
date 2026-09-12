@@ -195,7 +195,6 @@ export function CharacterPanel({
                 </div>
                 <p className="text-xs text-muted-foreground leading-relaxed max-h-32 overflow-y-auto scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
                   {character.profile ||
-                    character.character_script_summary ||
                     "暂无角色简介"}
                 </p>
                 {playerState && (

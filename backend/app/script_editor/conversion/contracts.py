@@ -54,7 +54,7 @@ class ScenesResult(BaseModel):
 
     opening_notice: str = Field(
         default="",
-        description="游戏开场系统消息（800-1200字），营造悬疑氛围，介绍故事背景",
+        description="简洁的开场叙述，介绍场景与人物，不加入玩法教程或平台能力清单",
     )
     summary_notice: str = Field(
         default="",
@@ -66,11 +66,11 @@ class ScenesResult(BaseModel):
     )
     truth_reveal_notice: str = Field(
         default="",
-        description="真相揭晓系统消息（800-1500字）",
+        description="完整而精炼的真相揭晓叙述，不凑字、不添加终稿之外的关键事实",
     )
     full_truth: str = Field(
         default="",
-        description="完整真相文本（800-1500字），涵盖所有角色的真实动机和作案过程",
+        description="完整真相文本，涵盖真实动机和作案过程，保留故事语气",
     )
 
 
@@ -98,7 +98,7 @@ class SingleCharacterResult(BaseModel):
     occupation: str = Field(default="", description="职业/身份")
     character_script: str = Field(
         default="",
-        description="第一人称视角的完整个人剧本（1500-3000字）",
+        description="角色视角的完整个人剧本，忠实终稿、叙述自然，不含系统指令或他人未公开秘密",
     )
     profile: str = Field(
         default="",
@@ -114,7 +114,7 @@ class SingleCharacterResult(BaseModel):
     )
     script_summary: str = Field(
         default="",
-        description="角色剧本摘要（100-200字，概括该角色的核心经历和秘密）",
+        description="仅本人可见的真人角色速览，约200-350字，按身份、亲历、牵挂、疑问分段，只提炼个人稿，不写AI指令",
     )
     step_voice_id: str = Field(
         default="",
