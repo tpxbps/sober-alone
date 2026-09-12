@@ -1,3 +1,4 @@
+import { useEditorStore } from "@/stores/editorStore";
 import { useEffect, useState } from "react";
 import { AlertTriangle, Check } from "lucide-react";
 import { WhackAMole, MoleTrigger } from "./WhackAMole";
@@ -146,6 +147,7 @@ function ContentPanelBody({
   const isReviewFinal = currentStep === "review_final" && !!interruptInfo;
   const isReviewGameData =
     currentStep === "review_game_data" && !!interruptInfo;
+  const safetyProgress = useEditorStore((state) => state.safetyProgress);
   const isSafetyRejected =
     interruptInfo?.step === "safety_check" && interruptInfo?.rejected === true;
   const isReviewAssetPlan =
@@ -240,6 +242,13 @@ function ContentPanelBody({
       );
     }
 
+    if (isLoading && currentStep === "safety_check") {
+      return <div className="h-full flex flex-col items-center justify-center gap-4">
+        <div className="w-10 h-10 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+        <p>正在审查全部剧本内容{safetyProgress ? `（${safetyProgress.completed} / ${safetyProgress.total}）` : ""}</p>
+      </div>;
+    }
+
     // === Terminal workflow error (for example, database save failure) ===
     if (workflowState?.error_message && !isLoading) {
       return (
@@ -253,6 +262,7 @@ function ContentPanelBody({
               {workflowState.error_message}
             </p>
           </div>
+          {interruptInfo?.failed && <button onClick={() => onRegenerate()} className="px-6 py-2 rounded-lg bg-primary text-primary-foreground">重试</button>}
           <button
             onClick={onBack}
             className="mt-2 px-6 py-2.5 rounded-lg bg-secondary hover:bg-secondary/80 transition-colors text-sm"

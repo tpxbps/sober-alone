@@ -60,6 +60,9 @@ class ScriptGenState(TypedDict, total=False):
     # === 工作流控制 ===
     current_step: str  # 当前步骤标识
     error_message: str  # 错误信息
+    safety_report: dict
+    convert_cache: dict
+    retry_step: str
     safety_passed: bool  # 是否通过安全审查
     safety_rejection_reason: str  # 安全审查未通过时的原因
     _review_action: str  # 路由信号："confirm" 或 "regenerate"

@@ -179,6 +179,7 @@ export const editorApi = {
     onConvertProgress: (data: AssetProgress | null) => void,
     onAssetProgress: (data: AssetProgress | null) => void,
     onDone: () => void,
+    onSafetyProgress?: (progress: { completed: number; total: number }) => void,
     onOutline?: (type: string, data: OutlineProgress | OutlineDelta) => void,
   ): (() => void) => {
     const url = `${RAW_API_BASE}/script-editor/${threadId}/progress-stream`;
@@ -205,6 +206,7 @@ export const editorApi = {
             const parsed = JSON.parse(line.slice(6));
             if (parsed.type?.startsWith('outline_')) onOutline?.(parsed.type, parsed.data);
             else if (parsed.type === 'convert_progress') onConvertProgress(parsed.data ?? null);
+            else if (parsed.type === 'safety_progress') onSafetyProgress?.(parsed.data);
             else if (parsed.type === 'asset_progress') onAssetProgress(parsed.data ?? null);
             else if (parsed.type === 'done') {
               onDone();

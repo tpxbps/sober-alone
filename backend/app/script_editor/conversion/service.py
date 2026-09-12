@@ -42,7 +42,7 @@ def _get_structured_llm():
         model="deepseek-flash",
         temperature=0.5,
         timeout=180,
-        max_retries=2,
+        max_retries=0,
         disable_thinking=True,
     )
 
@@ -292,9 +292,11 @@ def _merge_game_process(
     返回 (game_full_process, free_speech_limits, full_truth, truth_reveal_notice, clue_stages)
     """
     # 开场
-    opening_notice = scenes_result.opening_notice if scenes_result else ""
-    if not opening_notice and outline:
-        opening_notice = f"故事背景：**【{script_title}】**\n\n{outline}"
+    if scenes_result is None or not scenes_result.opening_notice.strip():
+        raise ValueError("场景转换未完成")
+    if clues_result is None or len(clues_result.clue_stages) != num_rounds:
+        raise ValueError("线索转换未完成")
+    opening_notice = scenes_result.opening_notice
 
     process: list[dict[str, Any]] = [
         {
@@ -315,21 +317,6 @@ def _merge_game_process(
                     "free_discussion_notice": stage_data.free_discussion_notice,
                 }
             )
-    while len(raw_clue_stages) < num_rounds:
-        index = len(raw_clue_stages) + 1
-        raw_clue_stages.append(
-            {
-                "stage": index,
-                "overview": f"第 {index} 轮公开线索",
-                "items": [
-                    {
-                        "summary": f"第 {index} 轮待补充线索",
-                        "content": f"第 {index} 轮线索发现，请结合角色剧本进行分析。",
-                    }
-                ],
-                "free_discussion_notice": "进入自由讨论环节。",
-            }
-        )
     canonical_clue_stages = normalize_clue_stages(raw_clue_stages, script_id=script_id)
 
     # 线索轮次
@@ -503,11 +490,77 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
     _init_convert_progress(script_id, characters, player_count)
     base_llm = _get_structured_llm()
 
+    import hashlib
+    import json
+
+    from app.script_editor.nodes.safety_check import GENERIC_ERROR
+
+    material = {
+        key: state.get(key)
+        for key in (
+            "final_draft",
+            "characters",
+            "outline",
+            "script_title",
+            "player_count",
+            "num_clue_rounds",
+            "difficulty",
+            "ending_mode",
+            "prompts",
+        )
+    }
+    fingerprint = hashlib.sha256(
+        json.dumps(material, sort_keys=True, ensure_ascii=False).encode()
+    ).hexdigest()
+    previous = state.get("convert_cache") or {}
+    cache = (
+        dict(previous.get("results") or {}) if previous.get("fingerprint") == fingerprint else {}
+    )
+    if cache.get("discovery"):
+        characters = cache["discovery"]
+        _add_character_tasks(script_id, characters)
+
+    def failure():
+        return {
+            "current_step": STEP_CONVERT,
+            "error_message": GENERIC_ERROR,
+            "retry_step": STEP_CONVERT,
+            "convert_cache": {"fingerprint": fingerprint, "results": cache},
+            "convert_progress": get_convert_progress(script_id) or {},
+        }
+
+    async def cached(key, factory, schema, validate=lambda value: True):
+        if key in cache:
+            value = schema.model_validate(cache[key]) if schema else cache[key]
+            if validate(value):
+                _update_convert_task(script_id, key, "complete")
+                return value
+        for attempt in range(3):
+            try:
+                value = await factory()
+                if isinstance(value, tuple):
+                    value = value[1]
+                if value is None or not validate(value):
+                    raise ValueError("转换结果不完整")
+                cache[key] = value.model_dump() if schema else value
+                return value
+            except Exception:
+                pass
+            if attempt < 2:
+                await asyncio.sleep(attempt + 1)
+        _update_convert_task(script_id, key, "failed")
+        return None
+
     # === 步骤0: 角色发现（仅在 characters 为空时） ===
     if not characters:
         _update_convert_task(script_id, "discover_chars", "running")
         try:
-            discovered = await _discover_characters(final_draft, player_count)
+            discovered = await cached(
+                "discovery",
+                lambda: _discover_characters(final_draft, player_count, max_retries=1),
+                None,
+                lambda value: len(value) == player_count,
+            )
             if discovered:
                 characters = discovered
                 _update_convert_task(script_id, "discover_chars", "complete")
@@ -521,28 +574,66 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
     chars_summary = _build_characters_summary(characters)
 
     if len(characters) != player_count:
-        logger.warning(f"Character count ({len(characters)}) != player_count ({player_count})")
+        return failure()
 
-    # === 并行调用：clues + scenes + metadata + 所有角色 ===
-    coroutines = []
+    def scenes_valid(value):
+        return all(
+            getattr(value, field, "").strip()
+            for field in (
+                "opening_notice",
+                "summary_notice",
+                "vote_notice",
+                "truth_reveal_notice",
+                "full_truth",
+            )
+        )
 
-    # 线索
-    coroutines.append(_run_game_clues(base_llm, script_id, state, chars_summary))
-    # 开场/投票/真相
-    coroutines.append(_run_game_scenes(base_llm, script_id, state, chars_summary))
-    # metadata
-    coroutines.append(_run_metadata(base_llm, script_id, state))
+    def clues_valid(value):
+        return len(value.clue_stages) == num_rounds and all(
+            stage.items
+            and all(item.content.strip() and item.summary.strip() for item in stage.items)
+            for stage in value.clue_stages
+        )
 
-    # characters — stagger by 0.3s to avoid rate limiting
-    for i, c in enumerate(characters):
-
-        async def _staggered_char(idx=i, char=c):
-            await asyncio.sleep(idx * 0.3)
-            return await _run_character(base_llm, script_id, char, state, chars_summary)
-
-        coroutines.append(_staggered_char())
-
-    results = await asyncio.gather(*coroutines, return_exceptions=True)
+    jobs = [
+        cached(
+            "game_flow",
+            lambda: _run_game_clues(base_llm, script_id, state, chars_summary),
+            ClueStagesResult,
+            clues_valid,
+        ),
+        cached(
+            "game_scenes",
+            lambda: _run_game_scenes(base_llm, script_id, state, chars_summary),
+            ScenesResult,
+            scenes_valid,
+        ),
+        cached(
+            "metadata",
+            lambda: _run_metadata(base_llm, script_id, state),
+            ScriptMetadata,
+            lambda value: bool(value.overview.strip() and value.description.strip()),
+        ),
+    ]
+    for char in characters:
+        jobs.append(
+            cached(
+                f"char_{char['name']}",
+                lambda c=char: _run_character(base_llm, script_id, c, state, chars_summary),
+                SingleCharacterResult,
+                lambda value, c=char: (
+                    value.name == c["name"]
+                    and bool(value.character_script.strip() and value.system_prompt.strip())
+                ),
+            )
+        )
+    values = await asyncio.gather(*jobs)
+    if any(value is None for value in values):
+        return failure()
+    results = [
+        *values[:3],
+        *[(char["name"], value) for char, value in zip(characters, values[3:], strict=True)],
+    ]
 
     # === 收集结果 ===
     clues_result: ClueStagesResult | None = (
@@ -651,25 +742,7 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
             c["age"] = r.age
             c["occupation"] = r.occupation
         else:
-            gender = c.get("gender", "")
-            character_data.append(
-                {
-                    "character_id": c["character_id"],
-                    "name": name,
-                    "gender": gender,
-                    "age": c.get("age"),
-                    "occupation": c.get("occupation", ""),
-                    "character_script": "",
-                    "profile": "",
-                    "appearance": "",
-                    "system_prompt": "",
-                    "mimo_voice_id": _assign_mimo_voice(gender),
-                    "step_voice_id": _fallback_step_voice(gender),
-                }
-            )
-
-    if not system_prompts_map:
-        system_prompts_map = _generate_fallback_prompts(characters, character_scripts)
+            raise ValueError("角色转换未完成")
 
     # Branches are authored only in the structured editor. Preserve any saved
     # manual configuration when conversion is explicitly retried.
@@ -749,6 +822,9 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
         "character_voice_ids": character_voice_ids,
         "prompts": updated_prompts,
         "convert_progress": persisted_progress,
+        "convert_cache": {"fingerprint": fingerprint, "results": cache},
+        "error_message": "",
+        "retry_step": "",
         "current_step": STEP_CONVERT,
     }
 
@@ -798,62 +874,6 @@ def _extract_truth_reveal(game_full_process: list[dict[str, Any]]) -> str:
         if stage.get("type") == "review":
             return stage.get("system_notice", "")
     return ""
-
-
-def _create_fallback_process(state: dict[str, Any]) -> list[dict[str, Any]]:
-    num_rounds = state.get("num_clue_rounds", 2)
-    title = state.get("script_title", "未命名剧本")
-    outline = state.get("outline", "")
-
-    process: list[dict[str, Any]] = [
-        {
-            "type": "initial",
-            "stage_title": "自我介绍阶段",
-            "system_notice": f"故事背景：**【{title}】**\n\n{outline}",
-        },
-    ]
-
-    for i in range(num_rounds):
-        process.append(
-            {
-                "type": "advancement",
-                "children": [
-                    {
-                        "stage_title": f"第{i + 1}轮-线索分析阶段",
-                        "system_notice": f"第{i + 1}轮线索发现！请分析线索。",
-                    },
-                    {
-                        "stage_title": f"第{i + 1}轮-自由讨论阶段",
-                        "system_notice": "进入自由讨论环节。",
-                    },
-                ],
-            }
-        )
-
-    process.extend(
-        [
-            {
-                "type": "vote",
-                "children": [
-                    {
-                        "stage_title": "总结发言阶段",
-                        "system_notice": "请依次总结发言。",
-                    },
-                    {
-                        "stage_title": "最终投票阶段",
-                        "system_notice": "现在进行最终投票。",
-                    },
-                ],
-            },
-            {
-                "type": "review",
-                "stage_title": "游戏复盘阶段",
-                "system_notice": "游戏结束！揭晓真相...",
-            },
-        ]
-    )
-
-    return process
 
 
 def _generate_fallback_prompts(characters: list[dict], character_scripts: dict) -> dict[str, str]:

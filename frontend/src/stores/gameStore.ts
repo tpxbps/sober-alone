@@ -45,6 +45,7 @@ interface GameActions {
     current_round: number;
     player_states: PlayerState[];
     current_speaker_id?: string;
+    turn_processing?: boolean;
     next_speaker_id?: string;
     speech_queue: string[];
     has_all_spoken: boolean;
@@ -517,6 +518,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
 
   updateFromAPI: (data) => {
     set({
+      isProcessingReactions: Boolean(data.turn_processing),
       sessionId: data.session_id,
       status: data.status as GameState['status'],
       stage: data.current_stage,

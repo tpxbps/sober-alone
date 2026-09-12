@@ -47,7 +47,7 @@ export function useOutlineSession(threadId: string | null) {
       if (disposed) return;
       close = editorApi.openProgressStream(threadId, () => {}, () => {}, () => {
         if (!disposed) reconnect = setTimeout(connect, 1500);
-      }, (type, data) => {
+      }, undefined, (type, data) => {
         if (disposed) return;
         if (type === "outline_delta") {
           const applied = applyOutlineDelta(latest.current, data as OutlineDelta);

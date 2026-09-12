@@ -94,15 +94,23 @@ def _route_after_normalize(
 
 def _route_after_safety_check(
     state: ScriptGenState,
-) -> Literal["prepare_asset_plan", "save_to_database", "review_game_data", "normalize_game_data"]:
+) -> Literal[
+    "prepare_asset_plan",
+    "save_to_database",
+    "review_game_data",
+    "normalize_game_data",
+    "review_failure",
+]:
     """安全审查后路由：通过→保存，未通过→返回修改"""
-    if state.get("safety_passed", False):
+    from app.script_editor.nodes.safety_check import safety_approved
+
+    if safety_approved(state):
         if not quality_approved(state):
             return "normalize_game_data"
         if state.get("workflow_mode") == "edit":
             return "prepare_asset_plan"
         return "save_to_database"
-    return "review_game_data"
+    return "review_failure" if state.get("retry_step") == "safety_check" else "review_game_data"
 
 
 def _route_after_save(state: ScriptGenState) -> Literal["generate_assets", "end"]:
@@ -110,6 +118,22 @@ def _route_after_save(state: ScriptGenState) -> Literal["generate_assets", "end"
     if state.get("error_message"):
         return "end"
     return "generate_assets"
+
+
+def review_failure(state):
+    from langgraph.types import interrupt
+
+    response = interrupt(
+        {
+            "step": state.get("current_step"),
+            "retry_step": state.get("retry_step"),
+            "error_message": state.get("error_message"),
+            "failed": True,
+        }
+    )
+    if response.get("action") not in ("retry_failed", "regenerate"):
+        raise ValueError("失败任务只能重试")
+    return {"error_message": "", "_review_action": "retry_failed"}
 
 
 # === 构建图 ===
@@ -223,7 +247,15 @@ def build_script_gen_graph(checkpointer=None):
     )
 
     # 数据转化 → 数据审阅
-    builder.add_edge("convert_to_game_data", "review_game_data")
+    builder.add_node("review_failure", review_failure)
+    builder.add_conditional_edges(
+        "review_failure", lambda s: s["retry_step"], ["convert_to_game_data", "safety_check"]
+    )
+    builder.add_conditional_edges(
+        "convert_to_game_data",
+        lambda s: "review_failure" if s.get("error_message") else "review_game_data",
+        ["review_failure", "review_game_data"],
+    )
 
     # 数据审阅后条件路由（确认→规范化，重新生成→重新转化）
     builder.add_conditional_edges(
@@ -259,7 +291,13 @@ def build_script_gen_graph(checkpointer=None):
     builder.add_conditional_edges(
         "safety_check",
         _route_after_safety_check,
-        ["prepare_asset_plan", "save_to_database", "review_game_data", "normalize_game_data"],
+        [
+            "prepare_asset_plan",
+            "save_to_database",
+            "review_game_data",
+            "normalize_game_data",
+            "review_failure",
+        ],
     )
 
     builder.add_edge("prepare_asset_plan", "review_asset_plan")

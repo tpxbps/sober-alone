@@ -17,7 +17,7 @@ export type GameStatePatch = Pick<
   | 'votes'
   | 'voteResults'
   | 'publicClues'
->
+> & { isProcessingReactions: boolean }
 
 export function adaptGameState(state: GameStateResponse): GameStatePatch {
   const characters: Character[] = (state.characters ?? []).map((character) => ({
@@ -48,7 +48,7 @@ export function adaptGameState(state: GameStateResponse): GameStatePatch {
     : null
 
   return {
-    status: state.status,
+    isProcessingReactions: Boolean(state.turn_processing),    status: state.status,
     stage: state.current_stage,
     currentRound: state.current_round,
     playerStates: state.player_states || [],

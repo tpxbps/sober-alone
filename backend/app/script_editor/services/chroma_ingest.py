@@ -10,6 +10,7 @@ from chromadb.config import Settings as ChromaSettings
 from zhipuai import ZhipuAI
 
 from app.core.config import settings
+from app.rag.revision import script_digest
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +84,7 @@ def ingest_character(script_id: str, character: dict, script_text: str) -> None:
                     "character_id": character_id,
                     "character_name": name,
                     "ingest_version": ingest_version,
+                    "content_digest": script_digest(script_text),
                     "chunk_index": index,
                     "total_chunks": len(chunks),
                 }

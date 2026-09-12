@@ -1,6 +1,11 @@
 import pytest
 
-from app.script_editor.conversion.contracts import ClueItemResult, ClueStageItem, ClueStagesResult
+from app.script_editor.conversion.contracts import (
+    ClueItemResult,
+    ClueStageItem,
+    ClueStagesResult,
+    ScenesResult,
+)
 from app.script_editor.conversion.service import _merge_game_process
 
 
@@ -23,7 +28,13 @@ def test_conversion_merge_preserves_round_task_shape_and_limits():
 
     process, limits, full_truth, truth_notice, clue_stages = _merge_game_process(
         clues,
-        None,
+        ScenesResult(
+            opening_notice="公开开场",
+            summary_notice="总结",
+            vote_notice="投票",
+            truth_reveal_notice="真相揭晓",
+            full_truth="真相",
+        ),
         num_rounds=2,
         script_title="零点来电",
         outline="广播站旧址的最后一夜。",
@@ -41,8 +52,8 @@ def test_conversion_merge_preserves_round_task_shape_and_limits():
     assert "第一轮总述" in process[1]["children"][0]["system_notice"]
     assert "第一轮线索" in process[1]["children"][0]["system_notice"]
     assert clue_stages[0]["items"][0]["id"] == "c01"
-    assert full_truth == ""
-    assert truth_notice == "游戏结束！揭晓真相..."
+    assert full_truth == "真相"
+    assert truth_notice == "真相揭晓"
 
 
 @pytest.mark.asyncio

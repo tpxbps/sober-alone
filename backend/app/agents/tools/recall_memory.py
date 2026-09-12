@@ -44,14 +44,29 @@ async def recall_personal_script_memory(query: str, runtime: ToolRuntime) -> str
     if not script_id or not character_id:
         return "无法检索记忆。"
 
-    retriever = get_retriever()
+    from app.rag.revision import script_digest
 
-    results = await retriever.retrieve(
-        script_id=script_id, query=query, character_id=character_id, top_k=2
-    )
-
+    personal_script = state.get("personal_script", "")
+    try:
+        results = (
+            await get_retriever().retrieve(
+                script_id=script_id,
+                query=query,
+                character_id=character_id,
+                top_k=2,
+                content_digest=script_digest(personal_script),
+            )
+            if personal_script
+            else []
+        )
+    except Exception:
+        results = []
     if not results:
-        return "没有找到相关的剧本内容。"
+        return (
+            ("【本局你的完整个人剧本】\n" + personal_script)
+            if personal_script
+            else "没有找到相关的剧本内容。"
+        )
 
     context_parts = []
     for i, result in enumerate(results):

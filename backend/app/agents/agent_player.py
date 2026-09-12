@@ -34,6 +34,7 @@ from app.agents.game_model_paths import (
 )
 from app.agents.reaction import (
     REACTION_SLOW_LOG_SECONDS,
+    HumanSpeechReactionPayload,
     SpeechReaction,
     SpeechReactionPayload,
     build_reaction_analysis_prompt,
@@ -215,6 +216,9 @@ class AgentPlayer:
         # Reactions are typed inference results, not optional business-tool calls.
         # Use the provider-supported format; health probes share this registry
         # choice and the same Pydantic validation contract.
+        self._human_reaction_structured = bind_reaction_output(
+            reaction_model, self.reaction_llm_model, HumanSpeechReactionPayload
+        )
         self._reaction_structured = bind_reaction_output(reaction_model, self.reaction_llm_model)
         self._reaction_system_prompt = build_reaction_system_prompt(
             self.system_prompt, self.personal_script
@@ -374,7 +378,11 @@ submit_final_vote(suspect_name="角色全名", reasoning="1-2句投票理由")
                 parts.append("【怀疑我的人】\n" + "\n".join(suspected_lines))
 
             # 3. 其他玩家发言要点
-            perspectives = agent_state.get("my_player_perspectives", {})
+            perspectives = (
+                {}
+                if game_state.get("observations_managed")
+                else agent_state.get("my_player_perspectives", {})
+            )
             if perspectives:
                 perspective_lines = []
                 for speaker_name, perspective in perspectives.items():
@@ -421,7 +429,9 @@ submit_final_vote(suspect_name="角色全名", reasoning="1-2句投票理由")
 
         # 构建玩家知识上下文（怀疑图谱、被怀疑记录、 其他玩家发言要点）
         knowledge_context = await self._build_knowledge_context(game_state)
-        human_speech_context = game_state.get("human_speech_context", "")
+        human_speech_context = game_state.get(
+            "observations_context", game_state.get("human_speech_context", "")
+        )
 
         # 组合最终消息
         if stage_prompt:
@@ -448,6 +458,7 @@ submit_final_vote(suspect_name="角色全名", reasoning="1-2句投票理由")
             "character_name_map": game_state.get("character_name_map", {}),
             "character_names": game_state.get("character_names", []),
             "public_clues": game_state.get("public_clues", []),
+            "personal_script": getattr(self, "personal_script", ""),
         }
 
         # 设置 db_session 到 contextvars (用于工具访问，不会被序列化)
@@ -513,6 +524,8 @@ submit_final_vote(suspect_name="角色全名", reasoning="1-2句投票理由")
         self,
         speaker_name: str,
         content: str,
+        *,
+        reaction_context: dict | None = None,
     ) -> SpeechReaction:
         """
         对其他玩家的发言做出反应，并结构化返回反应结果
@@ -524,12 +537,20 @@ submit_final_vote(suspect_name="角色全名", reasoning="1-2句投票理由")
         Returns:
             SpeechReaction: 结构化的反应结果
         """
-        if self._reaction_structured is not None:
+        reaction_context = reaction_context or {}
+        is_human = reaction_context.get("is_human", False)
+        structured = self._human_reaction_structured if is_human else self._reaction_structured
+        schema = HumanSpeechReactionPayload if is_human else SpeechReactionPayload
+        if structured is not None:
             started_at = time.perf_counter()
             analysis_prompt = build_reaction_analysis_prompt(
                 self.character_name,
                 speaker_name,
                 content,
+                current_state=reaction_context.get("current_state"),
+                public_clues=reaction_context.get("public_clues"),
+                character_names=reaction_context.get("character_names"),
+                is_human=is_human,
             )
 
             for attempt in range(2):
@@ -540,19 +561,35 @@ submit_final_vote(suspect_name="角色全名", reasoning="1-2句投票理由")
 【格式纠正】上次返回格式不符合要求。suspicion_changes 和
 suspected_by_changes 必须是数组；没有变化时返回空数组。main_perspective 必须是字符串，
 不要返回数组或对象；score 必须是 0 到 1 的绝对怀疑程度。请重新返回完整结构。"""
+                if is_human:
+                    prompt = prompt.replace("main_perspective 必须是字符串，", "")
                 try:
-                    result = await self._reaction_structured.ainvoke(
+                    result = await structured.ainvoke(
                         [
-                            SystemMessage(content=self._reaction_system_prompt),
+                            SystemMessage(
+                                content=build_reaction_system_prompt(
+                                    self.system_prompt, self.personal_script, is_human=True
+                                )
+                                if is_human
+                                else self._reaction_system_prompt
+                            ),
                             HumanMessage(content=prompt),
                         ]
                     )
                     reaction = None
-                    if result and isinstance(result, SpeechReactionPayload):
+                    if result and isinstance(result, schema):
                         reaction = result.to_reaction()
                     elif isinstance(result, dict):
-                        reaction = SpeechReactionPayload.model_validate(result).to_reaction()
+                        reaction = schema.model_validate(result).to_reaction()
                     if reaction is not None:
+                        allowed = set(reaction_context.get("character_names") or [])
+                        targets = set(reaction.my_suspicion_graph) | set(reaction.my_suspected_by)
+                        if (
+                            allowed
+                            and targets
+                            and (targets - allowed or self.character_name in targets)
+                        ):
+                            raise ValueError("反应包含非法角色")
                         elapsed = time.perf_counter() - started_at
                         if elapsed >= REACTION_SLOW_LOG_SECONDS:
                             logger.info(
@@ -564,7 +601,7 @@ suspected_by_changes 必须是数组；没有变化时返回空数组。main_per
                                 attempt + 1,
                             )
                         return reaction
-                except (ValidationError, OutputParserException) as exc:
+                except (ValidationError, OutputParserException, ValueError) as exc:
                     if attempt == 0:
                         continue
                     logger.warning(
