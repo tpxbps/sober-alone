@@ -13,20 +13,9 @@ from langgraph.types import interrupt
 
 from app.core.config import settings
 from app.core.llm_factory import create_llm
-from app.script_editor.outline.contracts import Direction, OutlineCheck
+from app.script_editor.outline.contracts import Direction
 from app.script_editor.outline.runtime import current_runtime
 from app.script_editor.prompts.templates import get_prompt
-
-REQUIRED_COVERAGE = (
-    "background",
-    "case",
-    "relationships",
-    "culprit",
-    "motive",
-    "method",
-    "timeline",
-    "ending",
-)
 
 
 def session_of(state: dict) -> dict:
@@ -47,8 +36,7 @@ def context(state: dict, session: dict) -> str:
         {
             "原始创意": state.get("user_idea", ""),
             "创作参数": {
-                k: state.get(k)
-                for k in ("player_count", "difficulty", "num_clue_rounds", "ending_mode")
+                k: state.get(k) for k in ("player_count", "difficulty", "num_clue_rounds")
             },
             "创作要求": get_prompt("generate_outline", state),
             "有效大纲": state.get("outline", ""),
@@ -104,7 +92,7 @@ async def stream_text(state: dict, session: dict, task: str, segment_id: str, st
         async for chunk in llm(0.85).astream(
             [
                 SystemMessage(
-                    content="你是剧本杀编剧。仅完成本轮写作任务，用中文Markdown输出正文。不要提问、不要输出JSON、不要展示内部推理。已确认的用户决策必须遵守。"
+                    content="你是剧本杀编剧。仅完成本轮写作任务，用中文Markdown输出正文。不要提问、不要输出JSON、不要展示内部推理。已确认的用户决策必须遵守。故事采用单一结局，不按投票结果生成结局分支。"
                 ),
                 HumanMessage(content=context(state, session) + "\n\n本轮任务：" + task),
             ]
@@ -129,7 +117,7 @@ async def stream_text(state: dict, session: dict, task: str, segment_id: str, st
 async def write_segment(state: dict) -> dict:
     session = session_of(state)
     if session.get("status") in {"ready", "needs_revision"}:
-        session.update(repairs=0, check=None, next_action="finalize")
+        session.update(check=None, next_action="review", status="ready")
         return {"outline_session": session, "current_step": "generate_outline"}
     segment_id = f"r{session['revision']}-s{len(session['segments']) + 1}"
     text = await stream_text(state, session, session["next_task"], segment_id, "writing")
@@ -161,7 +149,7 @@ async def direct_outline(state: dict) -> dict:
         Direction,
         "你是大纲共创的调度编辑，只返回结构化结果。每次最多询问一个显著影响案件冲突、人物关系、真相动机或反转的问题。通常3–5问，但创意已明确的内容不重复问，次要细节自行补全。"
         "问题必须有独立引导标题title、问题正文question、2–4个options（id/label/impact），并在question对象上返回recommended_option_id，值为某个选项id。"
-        "未选中的方向不能写进正文。next_task是回答之后要写的200–400字分段任务。"
+        "只讨论故事本身，采用单一结局，不询问或决策投票结果分支。未选中的方向不能写进正文。next_task是回答之后要写的200–400字分段任务。"
         "信息足够时finalize；尚有内容待补全可continue，ai_decisions只记录本轮新确定且需要保留的剧情事实，不重复旧决定，不把未来可选线索清单当成已确认要求。",
         context(state, session) + f"\n允许提问：{can_ask}。已问{session['questions_asked']}题。",
     )
@@ -258,18 +246,17 @@ async def wait_for_answer(state: dict) -> dict:
 
 async def finalize_outline(state: dict) -> dict:
     session = session_of(state)
-    task = (
-        "整理为一份完整可供下一阶段使用的大纲，覆盖标题、背景、案件、角色概要、关系、真凶动机手法、时间线、分轮线索和结局。"
-        "严格匹配人数、线索轮数、单/多结局及已确认方向；补齐未决事项。以 '# 标题' 开始；不要把讨论过程、选项、提问写入最终大纲。"
-    )
-    if session.get("check"):
-        task += (
-            "\n仅修订检查指出的真实问题，保持其它既定剧情不变，不增添新的机关或线索；输出修订后的完整大纲。问题："
-            + json.dumps(session["check"]["issues"], ensure_ascii=False)
+    # Older checkpoints can already contain a complete final outline while a
+    # second quality-repair pass is queued. Keep that completed text on resume.
+    text = session.get("final_outline")
+    if not text:
+        task = (
+            "整理为一份完整可供下一阶段使用的大纲，覆盖标题、背景、案件、角色概要、关系、真凶动机手法、时间线、分轮线索和结局。"
+            "严格匹配人数、线索轮数及已确认方向；补齐未决事项，写成单一完整故事与单一结局，不按投票结果分支。以 '# 标题' 开始；不要把讨论过程、选项、提问写入最终大纲。"
         )
-    text = await stream_text(state, session, task, "final", "finalizing")
+        text = await stream_text(state, session, task, "final", "finalizing")
     title_match = re.search(r"^#\s+(.+)$", text, re.MULTILINE)
-    session.update(status="checking", next_action="check", final_outline=text)
+    session.update(status="ready", next_action="review", final_outline=text, check=None)
     runtime = current_runtime.get()
     if runtime:
         await runtime.update(session, "outline_segment_complete")
@@ -283,53 +270,17 @@ async def finalize_outline(state: dict) -> dict:
     }
 
 
-def check_issues(result: OutlineCheck, state: dict) -> list[str]:
-    text = state.get("outline", "")
-
-    def normalize(value):
-        # Evidence often quotes rendered Markdown, without bold/code delimiters.
-        return re.sub(r"[\s*_`]", "", value)
-
-    normalized = normalize(text)
-    issues = list(result.issues)
-
-    def present(quote):
-        return bool(quote.strip()) and normalize(quote) in normalized
-
-    for key in REQUIRED_COVERAGE:
-        if not present(result.coverage.get(key, "")):
-            issues.append(f"缺少可核实的 {key} 内容")
-    for label, items, count in [
-        ("角色", result.characters, state.get("player_count", 4)),
-        ("线索轮次", result.clue_rounds, state.get("num_clue_rounds", 2)),
-    ]:
-        if len(items) != count or len({i.name for i in items}) != count:
-            issues.append(f"{label}数量应为{count}")
-        if any(not present(i.quote) for i in items):
-            issues.append(f"{label}依据与大纲不一致")
-    if result.ending_mode != state.get("ending_mode", "single"):
-        issues.append("结局模式与创作参数不一致")
-    return list(dict.fromkeys(issues))
-
-
 async def check_outline(state: dict) -> dict:
+    """Compatibility node for persisted checkpoints; never invokes a reviewer."""
     session = session_of(state)
+    text = session.get("final_outline") or state.get("outline", "")
+    session.update(
+        status="ready" if text else "finalizing",
+        next_action="review" if text else "finalize",
+        final_outline=text,
+        check=None,
+    )
     runtime = current_runtime.get()
     if runtime:
-        await runtime.begin(session, "checking")
-    result = await structured(
-        OutlineCheck,
-        "你是独立剧本编辑。检查大纲完整性、因果时间线、人物嫌疑与线索能否支撑真相，以及是否违背用户决定。"
-        "issues只列确实存在、会影响大纲使用的问题，不列已排除的问题，不要求初稿级细节。每项说明最小修正建议。原文依据使用8–30字左右、短而连续的原文片段，不改写、不拼接、不加省略号，不完整时不要编造依据。仅返回结构化检查，不续写正文。",
-        context(state, session),
-    )
-    issues = check_issues(result, state)
-    session["check"] = {"issues": issues, "passed": not issues, "evidence": result.model_dump()}
-    if issues and session["repairs"] < 2:
-        session["repairs"] += 1
-        session.update(next_action="finalize", status="finalizing")
-    else:
-        session.update(next_action="review", status="needs_revision" if issues else "ready")
-    if runtime:
         await runtime.update(session)
-    return {"outline_session": session, "current_step": "generate_outline"}
+    return {"outline_session": session, "outline": text, "current_step": "generate_outline"}

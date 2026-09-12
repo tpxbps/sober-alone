@@ -1,3 +1,4 @@
+import { memo } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -73,7 +74,7 @@ const MARKDOWN_COMPONENTS: Components = {
           ),
         };
 
-export function Markdown({ children, className }: MarkdownProps) {
+export const Markdown = memo(function Markdown({ children, className }: MarkdownProps) {
   return (
     <div className={`markdown-content max-w-none break-words overflow-hidden ${className || ""}`}>
       <ReactMarkdown
@@ -84,4 +85,4 @@ export function Markdown({ children, className }: MarkdownProps) {
       </ReactMarkdown>
     </div>
   );
-}
+});

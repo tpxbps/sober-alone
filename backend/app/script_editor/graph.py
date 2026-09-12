@@ -185,7 +185,7 @@ def build_script_gen_graph(checkpointer=None):
     builder.add_conditional_edges("generate_outline", outline_route, outline_routes)
     builder.add_conditional_edges("outline_director", outline_route, outline_routes)
     builder.add_edge("outline_wait", "generate_outline")
-    builder.add_edge("outline_finalize", "outline_check")
+    builder.add_edge("outline_finalize", "review_outline")
     builder.add_conditional_edges("outline_check", outline_route, outline_routes)
 
     # 大纲审阅后条件路由

@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowDown, Check, History, Loader2, Pause, Play, RotateCcw, Sparkles } from "lucide-react";
+import { ArrowDown, Check, History, Loader2, RotateCcw, Sparkles } from "lucide-react";
 import { Markdown } from "@/components/ui/Markdown";
 import { useEditorStore } from "@/stores/editorStore";
 import type { OutlineQuestion, OutlineSession } from "@/types/outline";
 import { useOutlineSession } from "./useOutlineSession";
 
 const statusLabels: Record<string, string> = {
-  writing: "正在撰写", directing: "正在整理下一处关键选择",
+  writing: "正在撰写", directing: "正在评估大纲后续发展…",
   awaiting_answer: "等待你的选择", finalizing: "正在整理完整大纲",
-  checking: "正在检查大纲", ready: "大纲已整理，等待你审阅",
-  needs_revision: "大纲仍有待修订内容",
+  checking: "正在完成大纲", ready: "大纲已整理，等待你确认",
+  needs_revision: "大纲已整理，等待你确认",
 };
 type Draft = { option?: string; text: string };
 const emptyDraft: Draft = { text: "" };
@@ -68,10 +68,16 @@ export function OutlineWorkspace({ threadId }: { threadId: string | null }) {
   const stopped = Boolean(progress?.control.questions_stopped || session?.questions_stopped);
   const final = currentStep === "review_outline" && ["ready", "needs_revision"].includes(session?.status || "");
   const live = archived ? null : progress?.live;
+  const finalText = live?.segment_id === "final" ? live.text : visible?.final_outline;
+  const hasFinalMessage = live?.segment_id === "final" || Boolean(visible?.final_outline);
+  const waiting = !archived && !paused && !final && !live && !session?.pending_question && !rewriting;
+  const workflowBusy = useEditorStore(s => s.isLoading);
+  const disabled = busy || workflowBusy;
   const text = visible?.final_outline || (archived ? archived.outline : workflow?.outline) || visible?.segments.map(s => s.content).join("\n\n") || "";
   const activeError = error || progress?.error || storeError || "";
   const pending = session?.pending_question;
   const activeQuestion = rewriting || pending;
+  const activeQuestionId = activeQuestion?.id;
   const draftKey = `${session?.revision}:${activeQuestion?.id || ""}:${rewriting ? "rewrite" : "answer"}`;
   const draft = drafts[draftKey] || emptyDraft;
 
@@ -80,7 +86,7 @@ export function OutlineWorkspace({ threadId }: { threadId: string | null }) {
       if (!scroll.current) return;
       if (following.current) {
         const card = scroll.current.querySelector<HTMLElement>("[data-outline-question]");
-        if (card && activeQuestion) {
+        if (card && activeQuestionId) {
           if (shownQuestion.current !== draftKey) {
             scroll.current.scrollTop += card.getBoundingClientRect().top - scroll.current.getBoundingClientRect().top - 16;
             shownQuestion.current = draftKey;
@@ -92,14 +98,11 @@ export function OutlineWorkspace({ threadId }: { threadId: string | null }) {
       } else setHasNew(true);
     });
     return () => cancelAnimationFrame(frame);
-  }, [progress?.seq, activeQuestion, draftKey]);
+  }, [progress?.seq, activeQuestionId, draftKey]);
 
   useEffect(() => { if (threadId) void fetchHistory(); }, [threadId, session?.revision, final, fetchHistory]);
 
-  const startRewrite = async (question: OutlineQuestion) => {
-    if (!paused && !final && !pending && !activeError) {
-      if (!await act({ action: "pause" })) return;
-    }
+  const startRewrite = (question: OutlineQuestion) => {
     setViewVersion(null);
     setTab("chat");
     setRewriting(question);
@@ -144,41 +147,54 @@ export function OutlineWorkspace({ threadId }: { threadId: string | null }) {
               <article className="rounded-2xl rounded-tl-sm border border-border/50 bg-card/40 px-5 py-4"><Markdown>{segment.content}</Markdown></article>
               {visible.decisions.filter(d => (d.segment_index ?? index + 1) === index + 1).map((decision, di) => <div key={di} className="ml-auto max-w-[92%] rounded-xl bg-secondary/40 p-4 text-sm">
                 {decision.question && <p className="mb-2 font-medium">{decision.question.question}</p>}
-                <p className="mb-1 text-xs text-muted-foreground">{decision.source === "ai" ? "AI 补全" : "你的决定"}</p>
+                {decision.source === "user" && <p className="mb-1 text-xs text-muted-foreground">你的决定</p>}
                 <p>{decision.choice}</p>{decision.other_text && <p className="mt-1 whitespace-pre-wrap">{decision.other_text}</p>}
-                {!archived && decision.question && <button disabled={busy} onClick={() => void startRewrite(decision.question!)}
+                {!archived && decision.question && <button disabled={disabled} onClick={() => void startRewrite(decision.question!)}
                   className="mt-3 inline-flex items-center gap-1 text-xs text-primary"><RotateCcw className="h-3 w-3" />从这里修改</button>}
               </div>)}
             </div>)}
-            {live && <article className="rounded-2xl border border-primary/20 bg-card/40 px-5 py-4" aria-label="正在撰写">
+            {live && live.segment_id !== "final" && <article className="rounded-2xl border border-primary/20 bg-card/40 px-5 py-4" aria-label="正在撰写">
               <p className="mb-3 flex items-center gap-2 text-xs text-primary"><Loader2 className={`h-3 w-3 ${paused ? "" : "animate-spin"}`} />
-                {paused ? "未完成草稿 · 继续后重写这一段" : live.segment_id === "final" ? "正在整理完整大纲" : "正在撰写"}</p>
+                {paused ? "未完成草稿 · 恢复后重写这一段" : "正在撰写"}</p>
               <Markdown>{live.text || "…"}</Markdown>
             </article>}
+            {hasFinalMessage && <article key={`final-${visible?.revision}`} data-testid="outline-final-message"
+              className="rounded-2xl border border-primary/20 bg-card/40 px-5 py-4" aria-label="完整大纲">
+              <p className="mb-3 flex items-center gap-2 text-xs text-primary">
+                {live?.segment_id === "final" && <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" />}
+                {live?.segment_id === "final" ? "正在整理完整大纲" : "完整大纲"}</p>
+              <Markdown>{finalText || "…"}</Markdown>
+            </article>}
+            {waiting && !activeError && <div role="status" data-testid="outline-writing-status"
+              className="flex items-center gap-3 rounded-2xl border border-border/40 bg-card/40 px-5 py-4 text-sm text-muted-foreground">
+              <span aria-hidden="true" className="flex gap-1">{[0, 1, 2].map(i => <span key={i}
+                className="h-1.5 w-1.5 rounded-full bg-primary/70 animate-pulse motion-reduce:animate-none" style={{ animationDelay: `${i * 180}ms` }} />)}</span>
+              {session?.status === "directing" ? "正在评估大纲后续发展…" : session?.status === "finalizing" ? "正在整理完整大纲…" : session?.segments.length ? "正在继续撰写…" : "正在撰写开篇…"}
+            </div>}
+            {!archived && paused && !final && <div className="rounded-xl border border-border p-4 text-sm">
+              上次创作尚未完成。<button disabled={disabled} onClick={() => void act({ action: "continue" })} className="ml-2 text-primary">恢复大纲创作</button>
+            </div>}
             {!archived && rewriting && <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm">
               修改此处后，该回答及之后的内容会重写，旧版本仍可查看。
               <button className="ml-3 text-primary" onClick={() => setRewriting(null)}>取消修改</button>
             </div>}
             {!archived && activeQuestion && !stopped && <QuestionCard question={activeQuestion} draft={draft}
               onChange={value => setDrafts(old => ({ ...old, [draftKey]: value }))}
-              onSubmit={() => void submit()} disabled={busy || (paused && !rewriting)} rewrite={Boolean(rewriting)} />}
+              onSubmit={() => void submit()} disabled={disabled || (paused && !rewriting)} rewrite={Boolean(rewriting)} />}
             {!archived && rewriting && stopped && <QuestionCard question={rewriting} draft={draft}
               onChange={value => setDrafts(old => ({ ...old, [draftKey]: value }))}
-              onSubmit={() => void submit()} disabled={busy} rewrite />}
+              onSubmit={() => void submit()} disabled={disabled} rewrite />}
             {!archived && final && <div className="rounded-xl border border-primary/25 p-4 text-sm">
               <p className="font-medium">完整大纲已整理</p><p className="mt-1 text-muted-foreground">查看全文、修改内容，再决定是否进入初稿。</p>
-              <button onClick={() => setTab("outline")} className="mt-3 text-primary">审阅完整大纲 →</button>
+              <button onClick={() => setTab("outline")} className="mt-3 text-primary">查看完整大纲 →</button>
             </div>}
           </> : editing && !archived ? <textarea aria-label="编辑完整大纲" value={editedOutline} onChange={e => setEditedOutline(e.target.value)}
             className="min-h-[55vh] w-full rounded-xl border border-border bg-background p-4 text-sm leading-7 outline-none focus:border-primary" />
             : <article className="rounded-xl border border-border/40 p-5"><Markdown>{live?.segment_id === "final" ? live.text : text || "正文将随创作逐段出现在这里。"}</Markdown>
               {live && live.segment_id !== "final" && <div className="mt-6 border-t border-border/40 pt-4"><p className="mb-2 text-xs text-primary">正在撰写</p><Markdown>{live.text}</Markdown></div>}
             </article>}
-          {!archived && visible?.check && !visible.check.passed && <div role="status" className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm">
-            <p className="font-medium">需修订：请结合以下问题审阅</p><ul className="mt-2 list-disc space-y-1 pl-5">{visible.check.issues.map((issue, i) => <li key={i}>{issue}</li>)}</ul>
-          </div>}
           {!archived && activeError && <div role="alert" className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm">
-            <p>{activeError}</p><button disabled={busy} onClick={() => void act({ action: "retry" })} className="mt-2 text-primary">重试当前步骤</button>
+            <p>{activeError}</p><button disabled={disabled} onClick={() => void act({ action: "retry" })} className="mt-2 text-primary">重试当前步骤</button>
           </div>}
         </div>
       </div>
@@ -186,19 +202,19 @@ export function OutlineWorkspace({ threadId }: { threadId: string | null }) {
         className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-border bg-background px-4 py-2 text-xs shadow-lg"><ArrowDown className="h-3 w-3" />回到最新</button>}
     </div>
     {!archived && <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-border/40 px-4 py-3">
-      <span className="text-xs text-muted-foreground" role="status">{busy ? "正在处理…" : paused ? "创作已暂停" : statusLabels[session?.status || "writing"]}{stopped ? " · 后续由 AI 补全" : ""}</span>
+      <span className="text-xs text-muted-foreground" role="status">{disabled ? "正在处理…" : paused ? "创作已暂停" : statusLabels[session?.status || "writing"]}{stopped && !final ? " · AI将自动完成后续大纲创作" : ""}</span>
       <div className="flex flex-wrap items-center gap-2">
         {final ? <>
-          <button disabled={busy} onClick={() => { if (!editing) { setEditedOutline(text); setTab("outline"); } setEditing(!editing); }}
+          <button disabled={disabled} onClick={() => { if (!editing) { setEditedOutline(text); setTab("outline"); } setEditing(!editing); }}
             className="rounded-lg border border-border px-3 py-2 text-sm">{editing ? "取消编辑" : "编辑全文"}</button>
-          <button disabled={busy} onClick={() => void resume("regenerate")} className="rounded-lg border border-border px-3 py-2 text-sm">重新整理</button>
-          <button disabled={busy || (editing && !editedOutline.trim())} onClick={() => void resume("confirm", editing ? editedOutline : text)}
+          <button disabled={disabled || (editing && !editedOutline.trim())} onClick={() => void resume("confirm", editing ? editedOutline : text)}
             className="inline-flex items-center gap-1 rounded-lg bg-primary px-4 py-2 text-sm text-primary-foreground"><Check className="h-4 w-4" />确认大纲，进入初稿</button>
         </> : <>
-          {!stopped && <button disabled={busy || !threadId} onClick={() => void act({ action: "stop_questions" })}
-            className="rounded-lg border border-border px-3 py-2 text-sm disabled:opacity-40">停止提问，AI 继续完成</button>}
-          <button disabled={busy || !threadId} onClick={() => void act({ action: paused ? "continue" : "pause" })}
-            className="inline-flex items-center gap-1 rounded-lg bg-secondary px-3 py-2 text-sm disabled:opacity-40">{paused ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}{paused ? "继续创作" : "暂停创作"}</button>
+          {!stopped && <div className="flex flex-wrap items-center gap-2">
+            <button disabled={disabled || !threadId} onClick={() => void act({ action: "stop_questions" })}
+              className="rounded-lg border border-border px-3 py-2 text-sm disabled:opacity-40">停止提问</button>
+            <span className="text-xs text-muted-foreground">AI将自动完成后续大纲创作</span>
+          </div>}
         </>}
       </div>
     </footer>}

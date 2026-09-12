@@ -27,7 +27,7 @@ api.interceptors.request.use((config) => {
 
 export const editorApi = {
   outlineAction: async (threadId: string, command: OutlineCommand): Promise<EditorOperationAccepted> => {
-    const response = await api.post(`/script-editor/${threadId}/outline/actions`, command);
+    const response = await api.post(`/script-editor/${threadId}/outline/actions`, command, { timeout: 20000 });
     return response.data;
   },
   claimLegacyOwnership: async (legacyOwnerUuids: string[]): Promise<{
@@ -61,7 +61,7 @@ export const editorApi = {
 
   // Get current workflow state
   getState: async (threadId: string): Promise<WorkflowStateResponse> => {
-    const response = await api.get(`/script-editor/${threadId}/state`);
+    const response = await api.get(`/script-editor/${threadId}/state`, { timeout: 15000 });
     return response.data;
   },
 

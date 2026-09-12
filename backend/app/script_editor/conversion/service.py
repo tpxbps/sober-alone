@@ -255,7 +255,7 @@ async def _run_game_scenes(base_llm, script_id: str, state: ScriptGenState, char
             f"## 剧本标题\n{state.get('script_title', '')}\n\n"
             f"## 角色列表（{state.get('player_count', 4)}人）\n{chars_summary}\n\n"
             f"## 终稿全文\n---\n{state.get('final_draft', '')}\n---\n\n"
-            f"请生成开场、投票和真相揭晓的系统消息。\n结局模式：{state.get('ending_mode', 'single')}。"
+            "请生成开场、投票和真相揭晓的系统消息，采用单一结局。"
         )
         result = await asyncio.wait_for(
             llm.ainvoke(
@@ -671,18 +671,9 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
     if not system_prompts_map:
         system_prompts_map = _generate_fallback_prompts(characters, character_scripts)
 
-    ending_config = None
-    if state.get("ending_mode") == "multiple":
-        culprit_name = scenes_result.ending_culprit_name if scenes_result else ""
-        ending_config = {
-            "mode": "multiple",
-            "culprit_character_id": next(
-                (c["character_id"] for c in characters if c["name"] == culprit_name), ""
-            ),
-            "branches": [b.model_dump() for b in scenes_result.ending_branches]
-            if scenes_result
-            else [],
-        }
+    # Branches are authored only in the structured editor. Preserve any saved
+    # manual configuration when conversion is explicitly retried.
+    ending_config = (state.get("game_data_sections") or {}).get("ending_config")
 
     game_data_sections = {
         "opening": _extract_opening(game_full_process),

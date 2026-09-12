@@ -17,7 +17,6 @@ from app.script_editor.outline import actions, nodes, runtime
 from app.script_editor.outline.contracts import (
     Direction,
     OutlineAction,
-    OutlineCheck,
     OutlineConflict,
     OutlineQuestion,
     new_session,
@@ -36,16 +35,6 @@ QUESTION = {
 }
 
 
-def evidence():
-    return OutlineCheck(
-        characters=[{"name": name, "quote": name} for name in "甲乙丙丁"],
-        clue_rounds=[{"name": name, "quote": name} for name in ("第一轮", "第二轮")],
-        ending_mode="single",
-        coverage=dict.fromkeys(nodes.REQUIRED_COVERAGE, "背景"),
-        issues=[],
-    )
-
-
 @pytest.fixture
 async def env(tmp_path, monkeypatch):
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'app.db'}")
@@ -55,7 +44,7 @@ async def env(tmp_path, monkeypatch):
     for module in (actions, runtime, operation_service):
         monkeypatch.setattr(module, "AsyncSessionLocal", factory)
     calls = []
-    blocker = {"event": None, "fail": False, "checks_fail": False}
+    blocker = {"event": None, "fail": False}
 
     async def stream(state, session, task, segment_id, status):
         calls.append((status, nodes.context(state, session)))
@@ -75,11 +64,7 @@ async def env(tmp_path, monkeypatch):
         )
 
     async def structured(schema, system, content):
-        if schema is OutlineCheck:
-            result = evidence()
-            if blocker["checks_fail"]:
-                result.issues = ["动机与用户要求冲突"]
-            return result
+        assert schema is Direction, "大纲阶段不应调用审阅模型"
         data = json.JSONDecoder().raw_decode(content)[0]
         if len(data["已确认决策"]) >= 2 or "允许提问：False" in content:
             return Direction(action="finalize")
@@ -171,7 +156,7 @@ async def test_multiturn_answers_do_not_replay_opening_and_stop_at_review(env):
     state = await workflow_service.ScriptEditorWorkflowService().get_state(thread)
     assert state["current_step"] == "review_outline"
     assert not state["is_complete"]
-    assert state["state"]["outline_session"]["check"]["passed"]
+    assert state["state"]["outline_session"]["check"] is None
     assert state["state"]["outline"] == FINAL
     assert state["state"]["first_draft"] == ""
     assert len([c for c in calls if c[0] == "writing"]) == 3
@@ -286,18 +271,18 @@ async def test_text_failure_retries_only_failed_segment(env):
 
 
 @pytest.mark.asyncio
-async def test_quality_repair_is_bounded_and_reports_remaining_issues(env):
-    runner, _, _, calls, blocker = env
+async def test_single_consolidation_has_no_review_or_repair_loop(env):
+    runner, _, _, calls, _ = env
     thread, state = await start(env)
-    blocker["checks_fail"] = True
     await actions.queue_action(runner, thread, command("stop_questions", state), "owner")
     await settle(runner)
     live = await workflow_service.ScriptEditorWorkflowService().get_state(thread)
     session = live["state"]["outline_session"]
-    assert session["status"] == "needs_revision"
-    assert session["repairs"] == 2
-    assert not session["check"]["passed"]
-    assert len([c for c in calls if c[0] == "finalizing"]) == 3
+    assert session["status"] == "ready"
+    assert session["check"] is None
+    assert session["final_outline"] == FINAL
+    assert live["current_step"] == "review_outline"
+    assert len([c for c in calls if c[0] == "finalizing"]) == 1
 
 
 def test_context_omits_chat_discarded_branches_and_unselected_options():
@@ -315,16 +300,6 @@ def test_context_omits_chat_discarded_branches_and_unselected_options():
     content = nodes.context(state, session)
     assert "聊天污染" not in content and "废弃正文" not in content
     assert "共同秘密" not in content and "有效正文" in content
-
-
-def test_evidence_counts_and_quotes_cannot_pass_with_missing_content():
-    result = evidence()
-    assert nodes.check_issues(result, {"outline": FINAL}) == []
-    result.characters[0].quote = "不存在的证据"
-    issues = nodes.check_issues(
-        result, {"outline": FINAL, "player_count": 5, "ending_mode": "multiple"}
-    )
-    assert len(issues) == 3
 
 
 @pytest.mark.asyncio
@@ -391,19 +366,6 @@ async def test_question_and_automatic_segment_limits_are_enforced(monkeypatch):
     session["automatic_segments"] = 4
     result = await nodes.direct_outline({"outline_session": session})
     assert result["outline_session"]["next_action"] == "finalize"
-
-
-def test_evidence_accepts_markdown_formatting_but_not_invented_quotes():
-    check = evidence()
-    state = {
-        "outline": FINAL.replace("背景", "**背景**"),
-        "player_count": 4,
-        "num_clue_rounds": 2,
-        "ending_mode": "single",
-    }
-    assert nodes.check_issues(check, state) == []
-    check.coverage["background"] = "完全不存在的背景"
-    assert any("background" in issue for issue in nodes.check_issues(check, state))
 
 
 @pytest.mark.asyncio
@@ -476,3 +438,78 @@ async def test_phase_restore_gets_fresh_version_and_keeps_stop_control(env):
     assert projected["control"]["questions_stopped"]
     assert not projected["control"]["paused"]
     assert not restored["state"]["first_draft"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["checking", "needs_revision", "finalizing"])
+async def test_legacy_final_outline_skips_model_review_and_reconsolidation(env, status):
+    _, _, graph, calls, _ = env
+    session = new_session()
+    session.update(
+        status=status,
+        final_outline=FINAL,
+        next_action="finalize",
+        check={"passed": False, "issues": ["旧审阅"]},
+    )
+    config = {"configurable": {"thread_id": "old-" + status}}
+    await graph.aupdate_state(
+        config, {"outline_session": session, "outline": FINAL}, as_node="outline_director"
+    )
+    await graph.ainvoke(None, config)
+    snapshot = await graph.aget_state(config)
+    assert snapshot.values["outline_session"]["status"] == "ready"
+    assert snapshot.values["outline_session"]["final_outline"] == FINAL
+    assert not calls
+    # An old checkpoint may resume directly into the now-retired check node.
+    await graph.aupdate_state(
+        config, {"outline_session": {**session, "next_action": "check"}}, as_node="outline_director"
+    )
+    await graph.ainvoke(None, config)
+    snapshot = await graph.aget_state(config)
+    assert (
+        workflow_service.ScriptEditorWorkflowService()._live_response("legacy", snapshot)[
+            "current_step"
+        ]
+        == "review_outline"
+    )
+    assert snapshot.values["outline_session"]["check"] is None
+    assert not calls
+
+
+@pytest.mark.asyncio
+async def test_rewrite_cancels_active_writer_without_pause_command(env):
+    runner, _, _, calls, blocker = env
+    thread, state = await start(env)
+    q = state["state"]["outline_session"]["pending_question"]
+    blocker["event"] = asyncio.Event()
+    await actions.queue_action(
+        runner, thread, command("answer", state, question_id=q["id"], option_id="secret"), "owner"
+    )
+    while len(calls) < 2:
+        await asyncio.sleep(0.01)
+    blocker["event"] = None
+    await actions.queue_action(
+        runner,
+        thread,
+        command("rewrite", state, question_id=q["id"], other_text="改写后的决定"),
+        "owner",
+    )
+    await settle(runner)
+    result = await workflow_service.ScriptEditorWorkflowService().get_state(thread)
+    session = result["state"]["outline_session"]
+    assert session["revision"] == 2
+    assert len(session["segments"]) == 2
+    assert session["decisions"][0]["other_text"] == "改写后的决定"
+    assert (await runtime.projection(thread, session))["control"]["paused"] is False
+
+
+@pytest.mark.asyncio
+async def test_new_workflow_ignores_legacy_multiple_ending_request(env):
+    runner = env[0]
+    accepted = await runner.queue_start(
+        StartWorkflowRequest(user_idea="旧客户端", ending_mode="multiple"), "owner"
+    )
+    await settle(runner)
+    result = await workflow_service.ScriptEditorWorkflowService().get_state(accepted["thread_id"])
+    assert result["state"]["ending_mode"] == "single"
+    assert "多结局" not in env[3][0][1]

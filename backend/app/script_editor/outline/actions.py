@@ -74,18 +74,28 @@ async def queue_action(runner, thread_id: str, request: OutlineAction, owner_key
                     EditorOperation.status.in_(("queued", "running")),
                 )
             )
-            if active and request.action not in {"pause", "stop_questions"}:
-                raise OutlineConflict("当前操作尚未结束，请先暂停再修改")
+            if active and request.action not in {"pause", "stop_questions", "rewrite"}:
+                raise OutlineConflict(
+                    "当前操作尚未结束，请稍后重试；修改历史回答请使用“从这里修改”"
+                )
             if request.action == "answer":
                 question = session.get("pending_question") or {}
                 if question.get("id") != request.question_id:
                     raise OutlineConflict("该问题已回答或已失效，请刷新")
                 validate_choice(question, request)
             if request.action == "rewrite":
-                if active:
-                    raise OutlineConflict("请先暂停创作")
                 target = await decision_checkpoint(service, thread_id, request)
                 validate_choice(target.values["outline_session"]["pending_question"], request)
+                if active:
+                    workflow.outline_control = {**control, "paused": True}
+                    workflow.status = "paused"
+                    active.status = "paused"
+                    await db.commit()
+                    task = runner._tasks.get(active.operation_id)
+                    if task:
+                        task.cancel()
+                        await asyncio.gather(task, return_exceptions=True)
+                    active = None
             if request.action == "pause":
                 control["paused"] = True
                 workflow.status = "paused"

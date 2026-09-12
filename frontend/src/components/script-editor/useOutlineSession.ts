@@ -29,8 +29,8 @@ export function useOutlineSession(threadId: string | null) {
     const session = response.state.outline_session;
     if (session) {
       useEditorStore.setState({
-        workflowState: response.state, interruptInfo: response.interrupt,
-        currentStep: response.current_step, scriptTitle: response.state.script_title,
+        workflowState: response.state, interruptInfo: response.interrupt, isStarting: false,
+        currentStep: response.current_step === "init" ? "generate_outline" : response.current_step, scriptTitle: response.state.script_title,
         error: response.outline_progress?.error || null,
       });
     }
@@ -83,12 +83,14 @@ export function useOutlineSession(threadId: string | null) {
         if (axios.isAxiosError(err) && !err.response) await editorApi.outlineAction(threadId, request);
         else throw err;
       }
-      await refresh();
+      // Acceptance is durable; a failed/slow snapshot must not turn it into a
+      // failed command or keep all controls locked. SSE and polling resync it.
+      void refresh().catch(() => {});
       return true;
     } catch (err) {
       const detail = axios.isAxiosError(err) ? err.response?.data?.detail : null;
       setError(typeof detail === "string" ? detail : err instanceof Error ? err.message : "操作未完成，请重试");
-      await refresh().catch(() => {});
+      void refresh().catch(() => {});
       return false;
     } finally {
       requestInFlight.current = false;

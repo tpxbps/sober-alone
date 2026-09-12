@@ -205,7 +205,7 @@ async def fork_from_checkpoint(
                     )
                 )
             if active:
-                raise OutlineConflict("当前创作尚未结束，请先暂停再回退")
+                raise OutlineConflict("当前创作尚未结束，请稍后再回退；修改大纲请使用“从这里修改”")
             target = await service._get_snapshot(service.config(thread_id, request.checkpoint_id))
             session = target.values.get("outline_session") or {}
             if (

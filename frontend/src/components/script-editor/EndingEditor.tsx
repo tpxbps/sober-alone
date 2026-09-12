@@ -24,13 +24,13 @@ export function EndingEditor({ data, onChange }: {
           branches: (Object.keys(ENDING_LABELS) as EndingOutcome[]).map((when) => ({ when, title: ENDING_LABELS[when], text: "" })),
         });
       }}>
-        <option value="single">单结局</option><option value="multiple">多结局 · 根据最终投票选择</option>
+        <option value="single">单结局</option><option value="multiple">多结局</option>
       </select>
     </label>
-    <p className="text-xs text-muted-foreground">所有结局使用相同的案件真相；不同投票结果决定故事后续。平票直接展示对应结局，不再追加讨论或重投。</p>
+    {config && <p className="text-xs text-muted-foreground">为不同投票结果填写故事后续，所有结局共享同一案件真相。</p>}
     {config && <>
-      <label className="block text-xs">用于判定正确指认的真凶
-        <select aria-label="用于判定正确指认的真凶" className={fieldClass} value={config.culprit_character_id} onChange={(e) => onChange({ ...config, culprit_character_id: e.target.value })}>
+      <label className="block text-xs">真凶
+        <select aria-label="真凶" className={fieldClass} value={config.culprit_character_id} onChange={(e) => onChange({ ...config, culprit_character_id: e.target.value })}>
           <option value="">请选择角色</option>
           {data.character_data?.map((c) => <option key={c.character_id} value={c.character_id}>{c.name}</option>)}
         </select>

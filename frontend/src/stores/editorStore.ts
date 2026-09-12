@@ -288,7 +288,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   startWorkflow: async (params) => {
     const pollEpoch = ++_operationPollEpoch;
-    set({ isStarting: true, error: null });
+    set({ isStarting: true, error: null, workflowState: null, interruptInfo: null, currentStep: "generate_outline" });
     try {
       const accepted = await editorApi.startWorkflow(params);
 

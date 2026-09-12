@@ -26,7 +26,7 @@ def init_workflow(state: ScriptGenState) -> dict:
 
     return {
         "script_id": script_id,
-        "current_step": STEP_INIT,
+        "current_step": "generate_outline" if state.get("outline_session") else STEP_INIT,
         "prompts": merged_prompts,
         "player_count": state.get("player_count", 4),
         "difficulty": state.get("difficulty", 1),

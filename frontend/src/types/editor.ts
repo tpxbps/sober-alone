@@ -131,7 +131,7 @@ export interface WorkflowPhase {
 // Display phases
 export const WORKFLOW_PHASES: WorkflowPhase[] = [
   { phase: "idea", label: "构思大纲", desc: "输入故事创意，设定基本参数", isAuto: false },
-  { phase: "outline", label: "大纲共创", desc: "共同决定剧情方向，审阅完整大纲", isAuto: false },
+  { phase: "outline", label: "大纲共创", desc: "共同决定剧情方向，确认完整大纲", isAuto: false },
   { phase: "first_draft", label: "初稿创作", desc: "基于大纲撰写完整剧本初稿并审阅", isAuto: false },
   { phase: "review_report", label: "审稿意见", desc: "确认AI意见与真人补充", isAuto: false },
   { phase: "review_final", label: "终稿确认", desc: "编辑并确认完整终稿", isAuto: false },

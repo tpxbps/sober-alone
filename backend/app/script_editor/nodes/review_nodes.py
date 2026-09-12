@@ -20,7 +20,7 @@ def review_outline(state: ScriptGenState) -> dict:
     user_response = interrupt(
         {
             "step": STEP_REVIEW_OUTLINE,
-            "step_label": "大纲审阅",
+            "step_label": "大纲确认" if state.get("outline_session") else "大纲审阅",
             "generated_content": state.get("outline", ""),
             "prompt_used": state.get("prompts", {}).get("generate_outline", ""),
         }

@@ -65,7 +65,7 @@ class ScriptEditorWorkflowService:
             "player_count": request.player_count,
             "difficulty": request.difficulty,
             "num_clue_rounds": request.num_clue_rounds,
-            "ending_mode": request.ending_mode,
+            "ending_mode": "single",
             "workflow_mode": "create",
             "owner_key_hash": owner_key_hash,
         }

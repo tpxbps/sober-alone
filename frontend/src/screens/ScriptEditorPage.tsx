@@ -10,6 +10,7 @@ import {
   X,
 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { Dialog, DialogTrigger, DialogContent, DialogTitle, DialogDescription, DialogClose } from "@/components/ui/dialog";
 import { OutlineWorkspace } from "@/components/script-editor/OutlineWorkspace";
 import { useEditorStore } from "@/stores/editorStore";
 import { HorizontalTimeline } from "@/components/script-editor/HorizontalTimeline";
@@ -68,8 +69,8 @@ export function ScriptEditorPage({ onBack, editScriptId }: ScriptEditorPageProps
   const ideaLayout = !threadId && !isStarting;
   const assistantDocked = ideaLayout && desktop && !assistantDismissed && !showMobileChat;
   const outlineActive = !viewingCheckpoint && !editScriptId && (
-    (isStarting && !workflowState) ||
-    (getPhaseFromStep(currentStep) === "outline" && Boolean(workflowState?.outline_session))
+    isStarting ||
+    (["init", ""].includes(currentStep) || getPhaseFromStep(currentStep) === "outline") && Boolean(workflowState?.outline_session)
   );
   const [showSettings, setShowSettings] = useState(false);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
@@ -291,38 +292,23 @@ export function ScriptEditorPage({ onBack, editScriptId }: ScriptEditorPageProps
             </p>
           </div>
           {threadId && !isComplete && (
-            <div className="relative">
-              <button
-                onClick={() => setShowDiscardConfirm(!showDiscardConfirm)}
-                className="p-2 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors shrink-0"
-                title="放弃此剧本"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-              {showDiscardConfirm && (
-                <div className="absolute right-0 top-full mt-1 w-56 bg-background border border-border/50 rounded-lg shadow-xl p-3 z-50">
-                  <p className="text-xs text-muted-foreground mb-2">
-                    {workflowState?.workflow_mode === "edit"
-                      ? "确认退出编辑？尚未确认保存的修改将被放弃，原剧本不会被删除。"
-                      : "确认放弃此剧本？已生成的所有资源将被清除。"}
-                  </p>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => setShowDiscardConfirm(false)}
-                      className="flex-1 px-3 py-1.5 text-xs rounded-md bg-secondary hover:bg-secondary/80 transition-colors"
-                    >
-                      取消
-                    </button>
-                    <button
-                      onClick={handleDiscardScript}
-                      className="flex-1 px-3 py-1.5 text-xs rounded-md bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors font-medium"
-                    >
-                      确认放弃
-                    </button>
-                  </div>
+            <Dialog open={showDiscardConfirm} onOpenChange={setShowDiscardConfirm}>
+              <DialogTrigger asChild>
+                <button className="p-2 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors shrink-0" title="放弃此剧本" aria-label="放弃此剧本">
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </DialogTrigger>
+              <DialogContent className="z-[120] sm:max-w-sm" showCloseButton={false}>
+                <DialogTitle>{workflowState?.workflow_mode === "edit" ? "退出编辑" : "放弃此剧本"}</DialogTitle>
+                <DialogDescription>{workflowState?.workflow_mode === "edit"
+                  ? "尚未确认保存的修改将被放弃，原剧本不会被删除。"
+                  : "确认放弃此剧本？已生成的所有资源将被清除。"}</DialogDescription>
+                <div className="flex justify-end gap-2">
+                  <DialogClose asChild><button className="rounded-md bg-secondary px-4 py-2 text-sm">取消</button></DialogClose>
+                  <button onClick={() => { setShowDiscardConfirm(false); void handleDiscardScript(); }} className="rounded-md bg-destructive px-4 py-2 text-sm text-destructive-foreground">确认放弃</button>
                 </div>
-              )}
-            </div>
+              </DialogContent>
+            </Dialog>
           )}
           <button
             aria-label="创作小助手"

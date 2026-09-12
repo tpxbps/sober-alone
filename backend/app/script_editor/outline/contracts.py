@@ -58,23 +58,6 @@ class Direction(BaseModel):
         return self
 
 
-class Evidence(BaseModel):
-    name: str = Field(min_length=1)
-    quote: str = Field(min_length=1, description="从最终大纲逐字摘录的依据")
-
-
-class OutlineCheck(BaseModel):
-    characters: list[Evidence]
-    clue_rounds: list[Evidence]
-    ending_mode: Literal["single", "multiple"]
-    coverage: dict[str, str] = Field(
-        description="背景、案件、关系、真凶、动机、手法、时间线、结局，key 使用 background/case/relationships/culprit/motive/method/timeline/ending，value 为原文依据"
-    )
-    issues: list[str] = Field(
-        default_factory=list, description="矛盾、违背用户决定或缺失的重要事项"
-    )
-
-
 class OutlineAction(BaseModel):
     action: Literal["answer", "pause", "continue", "stop_questions", "rewrite", "retry"]
     request_id: str = Field(min_length=8, max_length=80)

@@ -1,3 +1,4 @@
+import { stressSelection } from "./selectionStress"
 import { expect, test, type Route } from '@playwright/test'
 
 const script = {
@@ -251,7 +252,9 @@ test('大厅 → 选角 → 发言 → 推进 → 投票 → 复盘', async ({ p
   expect(tooltipBox).not.toBeNull()
   expect(tooltipBox!.y).toBeGreaterThanOrEqual(headerBox!.y + headerBox!.height)
 
+  await stressSelection(page, ownTooltip.getByText('广播主持人', { exact: true }), 20)
   await page.keyboard.press('Escape')
+  expect(await page.evaluate(() => getComputedStyle(document.body).userSelect)).not.toBe('none')
   await page.setViewportSize({ width: 390, height: 844 })
   await page.getByRole('button', { name: '查看陆鸣的人物形象', exact: true }).click()
   const mobileGamePreview = page.getByRole('tooltip', { name: '陆鸣的人物预览' })
