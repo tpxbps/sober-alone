@@ -237,8 +237,7 @@ test("操作受理后状态查询失败不会锁住按钮，放弃确认框覆�
 
 
 test("大厅与共创正文连续选择后仍能取消选择、操作按钮和弹层", async ({ page }) => {
-  // Repeated native drag/double-click gestures also render the live WebGL lobby.
-  // Software-rendered CI needs more than the default 30s for the full stress sequence.
+  // Exercise 85 native drag/double-click cycles across the lobby and editor.
   test.slow();
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
