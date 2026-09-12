@@ -207,7 +207,7 @@ export function ScriptEditorPage({ onBack, editScriptId }: ScriptEditorPageProps
     : null;
 
   return (
-    <div className="h-screen bg-background flex flex-col overflow-hidden">
+    <div className="h-screen scene-screen scene-workshop flex flex-col overflow-hidden">
       {/* Header */}
       <header className="shrink-0 border-b border-border/50 bg-background/80 backdrop-blur-xl">
         <div className="max-w-[1320px] w-full mx-auto px-3 py-3 flex items-center gap-3">
@@ -266,7 +266,7 @@ export function ScriptEditorPage({ onBack, editScriptId }: ScriptEditorPageProps
                 </div>
               ) : (
                 <>
-                  <h1 className="text-lg font-bold text-glow truncate">
+                  <h1 className={threadId && scriptTitle ? "text-lg font-serif text-foreground truncate" : "text-lg font-semibold text-foreground truncate"}>
                     {threadId && scriptTitle ? scriptTitle : "剧本创作工坊"}
                   </h1>
                   {threadId && scriptTitle && !isComplete && (() => {
@@ -333,6 +333,7 @@ export function ScriptEditorPage({ onBack, editScriptId }: ScriptEditorPageProps
         <div className="max-w-[1320px] w-full mx-auto px-3">
           <HorizontalTimeline
             currentStep={currentStep || "init"}
+            isWorking={isLoading}
             isComplete={isComplete}
             onNodeClick={handleTimelineNodeClick}
             viewingPhase={viewingPhase}
@@ -399,7 +400,7 @@ export function ScriptEditorPage({ onBack, editScriptId }: ScriptEditorPageProps
         </motion.aside>
       </div>
 
-      {/* Settings Modal — editor mode: only BGM */}
+      {/* Settings for the creation workflow */}
       <AnimatePresence>
         {showSettings && (
           <SettingsModal onClose={() => setShowSettings(false)} mode="editor" />

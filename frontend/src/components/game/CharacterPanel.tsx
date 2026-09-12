@@ -46,7 +46,7 @@ export function CharacterPanel({
 
   return (
     <div
-      className={`flex flex-col gap-3 ${
+      className={`flex w-full min-w-0 flex-col gap-3 ${
         side === "right" ? "items-end" : "items-start"
       }`}
     >
@@ -56,7 +56,7 @@ export function CharacterPanel({
         const human = isHuman(character.character_id);
 
         return (
-          <CharacterPreview key={character.character_id} name={character.name} src={character.portrait_url || character.avatar_url}
+          <CharacterPreview className="w-full min-w-0 max-w-full" key={character.character_id} name={character.name} src={character.portrait_url || character.avatar_url}
             side={side === "left" ? "right" : "left"}
             details={<>
               <h3 className="text-base font-semibold">{character.name}</h3>
@@ -70,21 +70,21 @@ export function CharacterPanel({
               </div>}
             </>}>
           <motion.div
-            initial={{ opacity: 0, x: side === "left" ? -20 : 20 }}
+            initial={false}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: index * 0.1 }}
-            className="relative group w-full"
+            className="relative group w-full min-w-0 max-w-full"
           >
             <button
               type="button"
               disabled={human || !onCharacterClick}
               aria-label={human ? `${character.name}（你）` : `在输入框引用 ${character.name}`}
               onClick={() => onCharacterClick?.(character.character_id)}
-              className="block w-full cursor-pointer text-left disabled:cursor-default"
+              className="block w-full min-w-0 max-w-full cursor-pointer text-left disabled:cursor-default"
             >
             {/* Character Card - Fixed width for all items */}
             <div
-              className={`relative flex items-center gap-3 p-3 rounded-xl transition-all duration-300 w-full
+              className={`character-panel-item relative flex h-[74px] min-w-0 max-w-full items-center gap-3 p-3 rounded-xl transition-all duration-300 w-full
                 ${
                   speaking
                     ? "bg-primary/20 border border-primary/50 breathing"
@@ -131,7 +131,7 @@ export function CharacterPanel({
                 }`}
               >
                 <div
-                  className={`flex items-center gap-1 ${
+                  className={`flex min-w-0 items-center gap-1 ${
                     side === "right" ? "justify-end" : "justify-start"
                   }`}
                 >

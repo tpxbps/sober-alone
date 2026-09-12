@@ -76,6 +76,7 @@ test('大厅 → 选角 → 发言 → 推进 → 投票 → 复盘', async ({ p
         mode: 'local-first-single-user-single-process',
         models: [
           {
+            id: 'deepseek-flash', name: 'DeepSeek Flash',
             provider: 'deepseek',
             provider_name: 'DeepSeek',
             model: 'deepseek-flash',
@@ -213,25 +214,11 @@ test('大厅 → 选角 → 发言 → 推进 → 投票 → 复盘', async ({ p
   await page.goto('/')
   await expect(page.getByText('剧本大厅')).toBeVisible()
   await page.getByText('零点来电').first().click()
-  await page.getByLabel('预览陆鸣的人物形象', { exact: true }).hover()
-  const portraitPreview = page.getByRole('tooltip', { name: '陆鸣的人物预览' })
-  await expect(portraitPreview.getByRole('img')).toHaveAttribute('src', '/duxing_icon.png?original-portrait')
-  await expect(portraitPreview.getByRole('img')).toHaveCSS('object-fit', 'contain')
-  await page.screenshot({ path: 'test-results/portrait-selection.png', fullPage: true })
-  await page.keyboard.press('Escape')
-  await expect(portraitPreview).not.toBeVisible()
-  await page.setViewportSize({ width: 390, height: 844 })
-  await page.getByRole('button', { name: '查看陆鸣的人物形象', exact: true }).click()
-  await expect(portraitPreview).toBeVisible()
-  await expect.poll(async () => {
-    const box = await portraitPreview.boundingBox()
-    return Boolean(box && box.x >= 0 && box.x + box.width <= 390 && box.y >= 0 && box.y + box.height <= 844)
-  }).toBe(true)
-  await page.screenshot({ path: 'test-results/portrait-mobile.png', fullPage: true })
-  await page.keyboard.press('Escape')
-  await page.setViewportSize({ width: 1280, height: 720 })
-  await page.getByText('陆鸣', { exact: true }).click()
-  await page.getByRole('button', { name: '开始游戏' }).click()
+  await page.getByRole('button', { name: '扮演 陆鸣', exact: true }).hover()
+  await expect(page.getByRole('tooltip', { name: '陆鸣的人物预览' })).toHaveCount(0)
+  await expect(page.getByRole('region', { name: '剧本详情 零点来电' })).toBeVisible()
+  await page.getByRole('button', { name: '扮演 陆鸣', exact: true }).click()
+  await page.getByRole('button', { name: '走进故事' }).click()
 
   const quickMentionCard = page.getByRole('button', { name: '在输入框引用 姜芮' })
   await expect(quickMentionCard).toHaveCSS('cursor', 'pointer')

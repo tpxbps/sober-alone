@@ -80,7 +80,7 @@ async function setup(page: Page) {
 }
 async function begin(page: Page) {
   await page.goto("/");
-  await page.getByRole("button", { name: /创作工坊/ }).click();
+  await page.getByRole("button", { name: "创作工坊", exact: true }).click();
   await page.getByPlaceholder(/描述你想要创作的剧本杀故事构想/).fill("雾港灯塔中的旧案");
   await page.getByRole("button", { name: "开始创作" }).click();
   await expect(page.getByTestId("outline-workspace")).toBeVisible();
@@ -169,7 +169,7 @@ test("首段在后台操作结束前流式显示，调度占位与最终正文�
     interrupt: step === "review_outline" ? { step } : null, outline_progress: snapshot() } }));
   try {
     await page.goto("/");
-    await page.getByRole("button", { name: /创作工坊/ }).click();
+    await page.getByRole("button", { name: "创作工坊", exact: true }).click();
     await expect(page.getByLabel("结局模式")).toHaveCount(0);
     await page.getByPlaceholder(/描述你想要创作的剧本杀故事构想/).fill("流式回归");
     await page.getByRole("button", { name: "开始创作" }).click();

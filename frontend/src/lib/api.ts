@@ -110,8 +110,8 @@ export const scriptApi = {
   },
 
   // Get script characters
-  getScriptCharacters: async (scriptId: string): Promise<{ success: boolean; characters: Character[] }> => {
-    const response = await api.get(`/game/scripts/${scriptId}/characters`);
+  getScriptCharacters: async (scriptId: string, signal?: AbortSignal): Promise<{ success: boolean; characters: Character[] }> => {
+    const response = await api.get(`/game/scripts/${scriptId}/characters`, { signal });
     return response.data;
   },
 };

@@ -57,7 +57,7 @@ export function DraftNotebook({
       <motion.button
         onClick={handleOpen}
         className="fixed bottom-6 right-24 z-40 w-14 h-14 rounded-full
-                   bg-primary/90 hover:bg-primary text-foreground
+                   bg-primary/90 hover:bg-primary text-primary-foreground
                    shadow-lg hidden lg:flex items-center justify-center
                    transition-colors"
         whileHover={{ scale: 1.1 }}

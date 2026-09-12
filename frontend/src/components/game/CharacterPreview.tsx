@@ -9,9 +9,9 @@ function Portrait({ src, name }: { src?: string | null; name: string }) {
     : <div className="flex h-full min-h-40 w-full items-center justify-center bg-gradient-to-br from-primary/15 to-accent/15 text-5xl text-primary/60">{name.slice(0, 1)}</div>;
 }
 
-export function CharacterPreview({ name, src, children, details, side = "right" }: {
+export function CharacterPreview({ name, src, children, details, side = "right", className = "" }: {
   name: string; src?: string | null; children: ReactNode; details?: ReactNode;
-  side?: "left" | "right";
+  side?: "left" | "right"; className?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [narrow, setNarrow] = useState(() => window.matchMedia("(max-width: 639px)").matches);
@@ -35,7 +35,7 @@ export function CharacterPreview({ name, src, children, details, side = "right" 
     return () => window.removeEventListener("keydown", close, true);
   }, [open]);
   return <HoverCard.Root open={open} onOpenChange={setOpen} openDelay={180} closeDelay={180}>
-    <div className="relative min-w-0">
+    <div className={"relative min-w-0 " + className}>
       <HoverCard.Trigger asChild>
         <div tabIndex={0} aria-label={`预览${name}的人物形象`} onFocus={() => setOpen(true)}
           onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}

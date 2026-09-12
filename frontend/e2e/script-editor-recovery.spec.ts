@@ -132,7 +132,7 @@ test('创作长任务在刷新和返回大厅后仍恢复到同一工作流', as
   })
 
   await page.goto('/')
-  await page.getByRole('button', { name: /创作工坊/ }).click()
+  await page.getByRole('button', { name: '创作工坊', exact: true }).click()
   await page.getByPlaceholder(/描述你想要创作的剧本杀故事构想/).fill('一座封闭灯塔中的失踪案')
   await page.getByRole('button', { name: '开始创作' }).click()
 
@@ -152,8 +152,8 @@ test('创作长任务在刷新和返回大厅后仍恢复到同一工作流', as
   expect(operationRequests).toBeGreaterThan(1)
 
   await page.getByRole('button', { name: '返回剧本大厅' }).click()
-  await expect(page.getByRole('heading', { name: '剧本大厅' })).toBeVisible()
-  await page.getByRole('button', { name: /创作工坊/ }).click()
+  await expect(page.getByRole('region', { name: '剧本大厅' })).toBeVisible()
+  await page.getByRole('button', { name: '创作工坊', exact: true }).click()
 
   await expect(page.getByText('灯塔管理员失踪，四名访客各自隐瞒了到访时间。')).toBeVisible()
   expect(startRequests).toBe(1)

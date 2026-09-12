@@ -1,10 +1,11 @@
 import { useState, useCallback, useEffect } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useSearchParams } from 'react-router-dom';
 
 import { Homepage } from '@/screens/Homepage';
 import { GamePage } from '@/screens/GamePage';
 import { ScriptEditorPage } from '@/screens/ScriptEditorPage';
+import { useSettingsStore } from '@/stores/settingsStore';
 import { useGameStore } from '@/stores/gameStore';
 import { hasStoredEditorSession } from '@/stores/editorStore';
 import { gameApi } from '@/lib/api';
@@ -19,6 +20,14 @@ function App() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [editScriptId, setEditScriptId] = useState<string | null>(null);
   const [isRestoring, setIsRestoring] = useState(false);
+  const [entering, setEntering] = useState(false);
+  const reducedMotion = useReducedMotion();
+  const lobbyMotionEnabled = useSettingsStore(state => state.lobbyMotionEnabled);
+  useEffect(() => {
+    if (!entering) return;
+    const timer = setTimeout(() => setEntering(false), 350);
+    return () => clearTimeout(timer);
+  }, [entering]);
 
   const { reset, initializeGame } = useGameStore();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -54,9 +63,9 @@ function App() {
 
           if (state.success && state.status !== 'completed') {
             // Session is valid, not finished - restore it
+            if (!await initializeGame(sessionIdToRestore)) throw new Error('Game initialization failed');
             setSessionId(sessionIdToRestore);
             setCurrentScreen('game');
-            await initializeGame(sessionIdToRestore);
           } else {
             // Session invalid or finished - clear it
             localStorage.removeItem(STORAGE_KEY);
@@ -77,8 +86,10 @@ function App() {
 
   // Handle starting a new game from homepage
   const handleStartGame = useCallback((newSessionId: string) => {
+    setEntering(true);
     setSessionId(newSessionId);
     setCurrentScreen('game');
+    window.scrollTo({ top: 0, behavior: 'instant' });
     // Update URL
     setSearchParams({ session: newSessionId });
     // Save to localStorage
@@ -141,8 +152,8 @@ function App() {
             key="home"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
+            exit={{ opacity: 1 }}
+            transition={{ duration: 0 }}
           >
             <Homepage onStartGame={handleStartGame} onOpenEditor={handleOpenEditor} />
           </motion.div>
@@ -151,10 +162,10 @@ function App() {
         {currentScreen === 'game' && sessionId && (
           <motion.div
             key="game"
-            initial={{ opacity: 0 }}
+            initial={false}
             animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
+            exit={{ opacity: 1 }}
+            transition={{ duration: 0 }}
           >
             <GamePage sessionId={sessionId} onExit={handleExitGame} />
           </motion.div>
@@ -172,6 +183,7 @@ function App() {
           </motion.div>
         )}
       </AnimatePresence>
+      {entering && currentScreen === 'game' && <div aria-hidden="true" className={"game-entry-overlay game-entry-arrival" + (reducedMotion || !lobbyMotionEnabled ? " is-quiet" : "")} />}
     </div>
   );
 }

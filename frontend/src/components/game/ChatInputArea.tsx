@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, memo } from "react";
 import { Send, Loader2, ArrowRight, Plus, X, CircleHelp } from "lucide-react";
 import * as Tooltip from "@radix-ui/react-tooltip";
-import * as Switch from "@radix-ui/react-switch";
+import { Switch } from "@/components/ui/switch";
 import { DynamicDot } from "@/components/ui/DynamicDot";
 import type { Character, PublicClue } from "@/types/game";
 import { GameMessageMarkdown } from "@/components/ui/GameMessageMarkdown";
@@ -301,14 +301,7 @@ export const ChatInputArea = memo(function ChatInputArea({
             {stage === "free_discussion" && (
               <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
                 <div className="inline-flex items-center gap-1.5">
-                  <Switch.Root
-                    checked={pauseAutoSpeak}
-                    onCheckedChange={onPauseAutoSpeakChange}
-                    aria-label="让我想想"
-                    className="relative h-5 w-9 shrink-0 rounded-full bg-secondary shadow-inner outline-none transition-colors data-[state=checked]:bg-primary focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                  >
-                    <Switch.Thumb className="block h-4 w-4 translate-x-0.5 rounded-full bg-white shadow-sm transition-transform will-change-transform data-[state=checked]:translate-x-[18px]" />
-                  </Switch.Root>
+                  <Switch compact checked={pauseAutoSpeak} onCheckedChange={onPauseAutoSpeakChange} aria-label="让我想想" />
                   <span>让我想想</span>
                   <Tooltip.Provider delayDuration={200}>
                     <Tooltip.Root>

@@ -1,7 +1,7 @@
 import { CharacterPreview } from "@/components/game/CharacterPreview";
 import { gameApi } from "@/lib/api";
 import { useState, useEffect, useCallback, useRef } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { AnimatePresence } from "framer-motion";
 import { FileEdit, BookOpen } from "lucide-react";
 
 import { useGameStore } from "@/stores/gameStore";
@@ -14,6 +14,7 @@ import { StageTransitionOverlay } from "@/components/game/StageTransitionOverlay
 import { PlayerScriptTooltip } from "@/components/game/PlayerScriptTooltip";
 import { DraftNotebook } from "@/components/game/DraftNotebook";
 import { SettingsModal } from "@/components/SettingsModal";
+import { Dialog, DialogContent, DialogTitle, DialogDescription, DialogClose } from "@/components/ui/dialog";
 import { Markdown } from "@/components/ui/Markdown";
 import type { Character, GameStage, GameRecord } from "@/types/game";
 import { resolveDisplayedSpeakerId } from "@/lib/speakerPresentation";
@@ -163,8 +164,8 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
 
   // Initialize game
   useEffect(() => {
-    if (sessionId) {
-      initializeGame(sessionId);
+    if (sessionId && (useGameStore.getState().sessionId !== sessionId || useGameStore.getState().stage === "loading")) {
+      void initializeGame(sessionId);
     }
 
     return () => {
@@ -353,7 +354,7 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
     playerStates.every((p) => p.has_spoken_this_round);
 
   return (
-    <div className="h-screen flex flex-col bg-background overflow-hidden">
+    <div className="h-screen flex flex-col scene-screen scene-game overflow-hidden">
       {/* Header */}
       <GameHeader
         stage={stage}
@@ -471,7 +472,7 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
                 {humanCharacterScript && (
                   <button
                     onClick={() => setScriptOpen(true)}
-                    className="relative w-8 h-8 rounded-full bg-primary/80 hover:bg-primary
+                    className="relative w-8 h-8 rounded-full bg-primary/80 hover:bg-primary text-primary-foreground
                                flex items-center justify-center transition-colors"
                     title="查看我的剧本"
                     aria-label="查看我的剧本"
@@ -525,60 +526,22 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
         onClose={() => setVotingDismissedRound(voteRoundKey)}
       />
 
-      {/* Script Modal */}
-      {showScriptModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-          onClick={() => setShowScriptModal(false)}>
-          <div className="bg-card rounded-xl p-6 max-w-lg w-full shadow-2xl"
-            onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-bold mb-4">{script?.title}</h3>
-            {script?.description && (
-              <Markdown className="text-sm text-muted-foreground leading-relaxed">
-                {script.description}
-              </Markdown>
-            )}
-            <button
-              onClick={() => setShowScriptModal(false)}
-              className="mt-4 px-4 py-2 rounded-lg bg-primary text-primary-foreground"
-            >
-              关闭
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Speech Reminder Modal */}
-      <AnimatePresence>
-        {showSpeechReminder && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-            onClick={() => setShowSpeechReminder(false)}
-          >
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="bg-card rounded-xl p-6 max-w-sm w-full text-center shadow-2xl"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <h3 className="text-lg font-bold mb-3">发言提醒</h3>
-              <p className="text-sm text-muted-foreground mb-6 leading-relaxed">
-                自由讨论阶段，每位玩家（包括您）至少需要进行一次发言，游戏才可以正常推进。
-              </p>
-              <button
-                onClick={() => setShowSpeechReminder(false)}
-                className="px-6 py-2.5 rounded-xl bg-primary text-primary-foreground font-medium
-                         hover:bg-primary/90 transition-colors"
-              >
-                我知道了
-              </button>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Shared dialog surfaces keep reading, focus and dismissal consistent. */}
+      <Dialog open={showScriptModal} onOpenChange={setShowScriptModal}>
+        <DialogContent>
+          <DialogTitle className="font-serif text-xl">{script?.title}</DialogTitle>
+          <DialogDescription className="sr-only">当前剧本简介</DialogDescription>
+          {script?.description && <Markdown className="text-sm text-muted-foreground leading-relaxed">{script.description}</Markdown>}
+          <DialogClose asChild><button className="justify-self-start px-4 py-2 rounded-lg bg-primary text-primary-foreground">关闭</button></DialogClose>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={showSpeechReminder} onOpenChange={setShowSpeechReminder}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogTitle>发言提醒</DialogTitle>
+          <DialogDescription>自由讨论阶段，每位玩家（包括您）至少需要进行一次发言，游戏才可以正常推进。</DialogDescription>
+          <DialogClose asChild><button className="px-6 py-2.5 rounded-lg bg-primary text-primary-foreground font-medium hover:bg-primary/90">我知道了</button></DialogClose>
+        </DialogContent>
+      </Dialog>
 
       {/* Game Completion Modal - removed: review stage already has end game button */}
 

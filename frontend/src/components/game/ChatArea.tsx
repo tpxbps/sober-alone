@@ -62,7 +62,7 @@ interface ChatAreaProps {
 function getModelDisplayName(modelId: string | undefined | null): string {
   if (!modelId) return "";
   return ["deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"].includes(modelId.toLowerCase())
-    ? "deepSeek-v4.1-flash" : modelId;
+    ? "deepseek-v4.1-flash" : modelId;
 }
 
 export function ChatArea({

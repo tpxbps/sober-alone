@@ -72,7 +72,7 @@ test('未配置主模型时选角安全降级且不会产生页面异常', async
   await page.getByText('陆鸣', { exact: true }).click()
 
   await expect(page.getByText(/暂不可分配 AI 模型/)).toBeVisible()
-  await expect(page.getByRole('button', { name: '开始游戏' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: '走进故事' })).toBeDisabled()
   expect(pageErrors).toEqual([])
 })
 
@@ -159,5 +159,5 @@ test('模型服务偏慢时只提示体验风险且仍可选择并开始游戏',
   await slowOption.click()
 
   await expect(page.getByText('响应较慢')).toBeVisible()
-  await expect(page.getByRole('button', { name: '开始游戏' })).toBeEnabled()
+  await expect(page.getByRole('button', { name: '走进故事' })).toBeEnabled()
 })

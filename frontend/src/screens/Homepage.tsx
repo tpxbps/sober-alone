@@ -1,17 +1,22 @@
-import { useState, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { Github, Settings, RefreshCw, PenTool } from "lucide-react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { AnimatePresence, motion, useAnimationControls, useReducedMotion } from "framer-motion";
+import { flushSync } from "react-dom";
+import { Github, Settings, RefreshCw, PenTool, ArrowRight, BookOpen } from "lucide-react";
 import { scriptApi, systemApi } from "@/lib/api";
 import { ScriptCard } from "@/components/game/ScriptCard";
-import { ScriptDetailModal } from "@/components/game/ScriptDetailModal";
+import { ScriptSetup } from "@/components/lobby/ScriptSetup";
+import { LobbyAtmosphere } from "@/components/lobby/LobbyAtmosphere";
 import { SettingsModal } from "@/components/SettingsModal";
 import { BookIcon } from "@/components/ui/BookIcon";
+import { useSettingsStore } from "@/stores/settingsStore";
 import type { Script } from "@/types/game";
+import "@/components/lobby/lobby.css";
 
 interface HomepageProps {
   onStartGame: (sessionId: string) => void;
   onOpenEditor: (scriptId?: string) => void;
 }
+const difficultyLabels: Record<number, string> = { 1: "简单", 2: "中等", 3: "困难", 4: "极难" };
 
 export function Homepage({ onStartGame, onOpenEditor }: HomepageProps) {
   const [scripts, setScripts] = useState<Script[]>([]);
@@ -19,58 +24,84 @@ export function Homepage({ onStartGame, onOpenEditor }: HomepageProps) {
   const [selectedScript, setSelectedScript] = useState<Script | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
-
-  // Load scripts
-  const loadScripts = async () => {
-    setIsLoading(true);
-    setError(null);
+  const [busy, setBusy] = useState(false);
+  const [transitioning, setTransitioning] = useState(false);
+  const sceneControls = useAnimationControls();
+  const sceneVersion = useRef(0);
+  useEffect(() => () => { sceneVersion.current += 1; }, []);
+  const motionEnabled = useSettingsStore(state => state.lobbyMotionEnabled);
+  const reducedMotion = useReducedMotion();
+  const quiet = !motionEnabled || Boolean(reducedMotion);
+  const version = useRef(0);
+  const setupAnchor = useRef<HTMLDivElement>(null);
+  const previousCard = useRef<{ element: HTMLElement; top: number } | null>(null);
+  const loadScripts = useCallback(async () => {
+    const request = ++version.current;
+    setIsLoading(true); setError(null);
     try {
       const response = await scriptApi.listScripts();
-      setScripts(response.scripts || []);
-    } catch (err) {
-      console.error("Failed to load scripts:", err);
-      setError("加载剧本失败，请稍后重试");
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadScripts();
-    void systemApi.getModelHealth().catch(() => {});
+      if (request !== version.current) return;
+      if (!response.success || !Array.isArray(response.scripts)) throw new Error("Invalid script list");
+      setScripts(response.scripts);
+    } catch { if (request === version.current) setError("加载剧本失败，请稍后重试。"); }
+    finally { if (request === version.current) setIsLoading(false); }
   }, []);
-
-  // Group scripts by difficulty
-  const scriptsByDifficulty = scripts.reduce((acc, script) => {
-    const key = script.difficulty || 1;
-    if (!acc[key]) acc[key] = [];
-    acc[key].push({
-      ...script,
-      estimated_duration: script.estimated_duration ?? 0,
-    });
-    return acc;
-  }, {} as Record<number, Script[]>);
-
-  const difficultyLabels: Record<number, string> = {
-    1: "简单",
-    2: "中等",
-    3: "困难",
-    4: "极难",
+  useEffect(() => {
+    void loadScripts();
+    void systemApi.getModelHealth().catch(() => {});
+    return () => { version.current += 1; };
+  }, [loadScripts]);
+  const switchScene = async (script: Script | null, keyboard = false) => {
+    if (busy) return;
+    const ticket = ++sceneVersion.current;
+    setTransitioning(true);
+    if (!quiet) await sceneControls.start({ opacity: 0, y: 6, transition: { duration: .12 } });
+    if (ticket !== sceneVersion.current) return;
+    flushSync(() => setSelectedScript(script));
+    if (script) {
+      const anchor = setupAnchor.current;
+      const headerHeight = document.querySelector(".lobby-header")?.getBoundingClientRect().height || 80;
+      if (anchor) window.scrollTo({ top: window.scrollY + anchor.getBoundingClientRect().top - headerHeight - 24, behavior: "instant" });
+      anchor?.querySelector<HTMLElement>("h1")?.focus({ preventScroll: true });
+    } else {
+      const previous = previousCard.current;
+      if (previous?.element.isConnected) {
+        window.scrollTo({ top: window.scrollY + previous.element.getBoundingClientRect().top - previous.top, behavior: "instant" });
+        const target = keyboard ? previous.element.querySelector<HTMLElement>("[data-script-open]") : document.getElementById("script-list");
+        target?.focus({ preventScroll: true });
+      }
+    }
+    await sceneControls.start({ opacity: 1, y: 0, transition: { duration: quiet ? 0 : .32, ease: [.22, 1, .36, 1] } });
+    if (ticket === sceneVersion.current) setTransitioning(false);
   };
-
+  const selectScript = (script: Script) => {
+    if (busy) return;
+    const card = document.querySelector<HTMLElement>('[data-script-id="' + CSS.escape(script.script_id) + '"]');
+    if (card) previousCard.current = { element: card, top: card.getBoundingClientRect().top };
+    void switchScene(script);
+  };
+  const returnToList = (keyboard = false) => { void switchScene(null, keyboard); };
+  const groups = scripts.reduce((result, script) => {
+    const difficulty = script.difficulty || 1;
+    (result[difficulty] ||= []).push(script);
+    return result;
+  }, {} as Record<number, Script[]>);
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className={`dream-lobby${quiet ? " is-still" : ""}${busy ? " is-entering" : ""}${transitioning ? " is-transitioning" : ""}`}>
+      <LobbyAtmosphere quiet={quiet} paused={busy || showSettings} />
+      <a inert={busy} className="lobby-skip" href="#script-list">跳到剧本列表</a>
       {/* Header */}
-      <header className="sticky top-0 z-40 border-b border-border/50 bg-background/80 backdrop-blur-xl">
+      <header inert={busy} className="lobby-header sticky top-0 z-40 border-b border-border/50 bg-background/80 backdrop-blur-xl">
         <div className="container mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
             {/* Logo */}
-            <div className="flex items-center gap-3">
+            <div className="flex min-w-0 items-center gap-3">
               <BookIcon size={48} />
               <div>
-                <h1 className="text-xl font-bold text-glow">独醒</h1>
+                <h1 className="text-xl font-serif text-foreground">独醒</h1>
                 <p className="text-xs text-muted-foreground">AI剧本杀</p>
               </div>
+
             </div>
 
             {/* Nav */}
@@ -81,7 +112,7 @@ export function Homepage({ onStartGame, onOpenEditor }: HomepageProps) {
               >
                 <PenTool className="w-4 h-4" />
                 <span className="hidden sm:inline">创作工坊</span>
-                <span className="absolute -top-1.5 -right-1.5 px-1 py-0.5 rounded text-[9px] leading-none bg-violet-500 text-white">
+                <span className="absolute -top-1.5 -right-1.5 px-1 py-0.5 rounded text-[9px] leading-none bg-primary text-primary-foreground">
                   Beta
                 </span>
               </button>
@@ -99,7 +130,7 @@ export function Homepage({ onStartGame, onOpenEditor }: HomepageProps) {
                 onClick={loadScripts}
                 disabled={isLoading}
                 className="p-2 rounded-lg hover:bg-secondary/50 transition-colors"
-                title="刷新剧本"
+                title="刷新剧本" aria-label="刷新剧本"
               >
                 <RefreshCw
                   className={`w-5 h-5 ${isLoading ? "animate-spin" : ""}`}
@@ -108,7 +139,7 @@ export function Homepage({ onStartGame, onOpenEditor }: HomepageProps) {
               <button
                 onClick={() => setShowSettings(true)}
                 className="p-2 rounded-lg hover:bg-secondary/50 transition-colors"
-                title="设置"
+                title="设置" aria-label="设置"
               >
                 <Settings className="w-5 h-5" />
               </button>
@@ -117,141 +148,29 @@ export function Homepage({ onStartGame, onOpenEditor }: HomepageProps) {
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="container mx-auto px-6 py-8 flex-1">
-        {/* Hero Section */}
-        <div className="text-center mb-12">
-          <motion.h2
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="text-3xl md:text-4xl font-bold mb-4"
-          >
-            <span className="text-glow">剧本大厅</span>
-          </motion.h2>
-          <motion.p
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-            className="text-muted-foreground max-w-xl mx-auto"
-          >
-            选择一个剧本，开始你的推理之旅，与AI角色一起揭开真相。
-          </motion.p>
+      <motion.main initial={false} animate={sceneControls} className="lobby-main container mx-auto px-6">
+        <div ref={setupAnchor} className="setup-anchor">
+          {selectedScript && <ScriptSetup key={selectedScript.script_id} script={selectedScript} quiet={quiet} onBack={returnToList} onStartGame={onStartGame} onBusyChange={setBusy} />}
         </div>
+        {!selectedScript && <div className="lobby-heading"><h1>剧本大厅</h1><p>选择一部剧本，开始你的故事</p></div>}
+        <section tabIndex={-1} inert={busy} id="script-list" className="lobby-catalog" aria-label="剧本大厅" aria-busy={isLoading}>
+          {error && <div role="alert" className="lobby-status">{error}<button onClick={loadScripts}>重试</button></div>}
+          {isLoading && !scripts.length && <p className="lobby-status" role="status">加载剧本中…</p>}
+          {Object.entries(groups).sort(([a], [b]) => Number(a) - Number(b)).map(([difficulty, stories]) =>
+            <section key={difficulty} className="lobby-difficulty-group" aria-label={difficultyLabels[Number(difficulty)] || "其他剧本"}>
+              <h2 className="lobby-group-title">{difficultyLabels[Number(difficulty)] || "其他剧本"}<span>{stories.length}</span></h2>
+              <div className="lobby-catalog-grid">{stories.map(script =>
+                <ScriptCard key={script.script_id} script={script} selected={script.script_id === selectedScript?.script_id} quiet={quiet} previewsEnabled={!busy && !showSettings} onClick={() => selectScript(script)} onDeleted={loadScripts} onEdit={() => onOpenEditor(script.script_id)} />
+              )}</div>
+            </section>
+          )}
+          {!isLoading && !error && !scripts.length && <div className="lobby-status"><BookOpen size={28} /><p>暂无剧本</p><button onClick={() => onOpenEditor()}>创作第一个故事</button></div>}
+        </section>
+        <button inert={busy} className="lobby-create-invitation" onClick={() => onOpenEditor()}><PenTool size={22} /><strong>更多故事，只等你落笔</strong><span>开始创作<ArrowRight size={17} /></span></button>
+      </motion.main>
+      <footer inert={busy} className="border-t border-border/30 py-6 text-center text-sm text-muted-foreground">© 2026 独醒 AI剧本杀</footer>
 
-        {/* Error State */}
-        {error && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="text-center py-12"
-          >
-            <p className="text-danger mb-4">{error}</p>
-            <button
-              onClick={loadScripts}
-              className="px-4 py-2 rounded-lg bg-secondary hover:bg-secondary/80 transition-colors"
-            >
-              重试
-            </button>
-          </motion.div>
-        )}
-
-        {/* Loading State */}
-        {isLoading && !error && (
-          <div className="flex items-center justify-center py-20">
-            <div className="text-center">
-              <div className="w-12 h-12 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-              <p className="text-muted-foreground">加载剧本中...</p>
-            </div>
-          </div>
-        )}
-
-        {/* Scripts Grid */}
-        {!isLoading && !error && scripts.length > 0 && (
-          <div className="space-y-12">
-            {Object.entries(scriptsByDifficulty)
-              .sort(([a], [b]) => Number(a) - Number(b))
-              .map(([difficulty, scriptsInGroup], groupIndex) => (
-                <motion.section
-                  key={difficulty}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: groupIndex * 0.1 }}
-                >
-                  <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-primary" />
-                    {difficultyLabels[Number(difficulty)] || "未知难度"}
-                    <span className="text-sm text-muted-foreground font-normal">
-                      ({scriptsInGroup.length})
-                    </span>
-                  </h3>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                    {scriptsInGroup.map((script, index) => (
-                      <motion.div
-                        key={script.script_id}
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: index * 0.05 }}
-                      >
-                        <ScriptCard
-                          script={script}
-                          onClick={() => setSelectedScript(script)}
-                          onDeleted={loadScripts}
-                          onEdit={() => onOpenEditor(script.script_id)}
-                        />
-                      </motion.div>
-                    ))}
-                  </div>
-                </motion.section>
-              ))}
-          </div>
-        )}
-
-        {/* Empty State */}
-        {!isLoading && !error && scripts.length === 0 && (
-          <div className="text-center py-20">
-            <div
-              className="w-20 h-20 rounded-full bg-secondary/30 mx-auto mb-6
-                          flex items-center justify-center"
-            >
-              <BookIcon size={80} />
-            </div>
-            <h3 className="text-xl font-semibold mb-2">暂无剧本</h3>
-            <p className="text-muted-foreground">
-              管理员尚未添加任何剧本，请稍后再来。
-            </p>
-          </div>
-        )}
-      </main>
-
-      {/* Footer */}
-      <footer className="border-t border-border/30 py-6 mt-auto">
-        <div className="container mx-auto px-6 text-center text-sm text-muted-foreground">
-          <div className="flex flex-wrap items-center justify-center gap-1">
-            <p>© 2026 独醒 AI剧本杀 · 众人皆醉我独醒</p>
-          </div>
-        </div>
-      </footer>
-
-      {/* Script Detail Modal */}
-      {selectedScript && (
-        <ScriptDetailModal
-          script={selectedScript}
-          open={!!selectedScript}
-          onClose={() => setSelectedScript(null)}
-          onStartGame={onStartGame}
-        />
-      )}
-
-      {/* Settings Modal */}
-      <AnimatePresence>
-        {showSettings && (
-          <SettingsModal
-            onClose={() => setShowSettings(false)}
-            onOwnershipClaimed={loadScripts}
-          />
-        )}
-      </AnimatePresence>
+      <AnimatePresence>{showSettings && <SettingsModal onClose={() => setShowSettings(false)} onOwnershipClaimed={loadScripts} />}</AnimatePresence>
     </div>
   );
 }

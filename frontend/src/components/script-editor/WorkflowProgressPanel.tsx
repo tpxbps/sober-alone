@@ -101,15 +101,15 @@ function PhaseCard({
   const hasRunning = phase.tasks.some((task) => task.status === "running");
   const techColors: Record<string, string> = {
     Embedding: "bg-blue-500/20 text-blue-400",
-    "Text-to-Image": "bg-purple-500/20 text-purple-400",
-    "Text-to-Speech": "bg-amber-500/20 text-amber-400",
+    "Text-to-Image": "bg-accent/20 text-accent",
+    "Text-to-Speech": "bg-amber-500/20 text-warning",
   };
 
   return (
     <div
       className={`rounded-lg border p-3 ${
         allDone
-          ? "border-green-500/30 bg-green-500/5"
+          ? "border-success/30 bg-success/5"
           : hasRunning
           ? "border-primary/30 bg-primary/5"
           : "border-border/30"
@@ -118,7 +118,7 @@ function PhaseCard({
       <div className="flex items-center justify-between mb-2.5">
         <div className="flex items-center gap-2">
           {allDone ? (
-            <Check className="w-4 h-4 text-green-500" />
+            <Check className="w-4 h-4 text-success" />
           ) : hasRunning ? (
             <Loader2 className="w-4 h-4 text-primary animate-spin" />
           ) : (
@@ -169,12 +169,12 @@ function TaskRow({
   return (
     <div
       className={`flex items-center justify-between py-1.5 px-2.5 rounded ${
-        task.status === "failed" ? "bg-red-500/10" : ""
+        task.status === "failed" ? "bg-destructive/10" : ""
       }`}
     >
       <div className="flex items-center gap-2">
         {task.status === "complete" && (
-          <Check className="w-3.5 h-3.5 text-green-500 shrink-0" />
+          <Check className="w-3.5 h-3.5 text-success shrink-0" />
         )}
         {task.status === "running" && (
           <div className="w-3.5 h-3.5 rounded-full bg-primary/60 animate-pulse shrink-0" />
@@ -183,7 +183,7 @@ function TaskRow({
           <Circle className="w-3.5 h-3.5 text-muted-foreground/30 shrink-0" />
         )}
         {task.status === "failed" && (
-          <X className="w-3.5 h-3.5 text-red-400 shrink-0" />
+          <X className="w-3.5 h-3.5 text-destructive shrink-0" />
         )}
         {task.status === "skipped" && (
           <Circle className="w-3.5 h-3.5 text-muted-foreground/50 shrink-0" />
@@ -193,7 +193,7 @@ function TaskRow({
             task.status === "complete"
               ? "text-muted-foreground"
               : task.status === "failed"
-              ? "text-red-400"
+              ? "text-destructive"
               : ""
           }`}
         >

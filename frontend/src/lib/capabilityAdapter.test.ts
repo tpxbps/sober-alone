@@ -34,6 +34,12 @@ const capabilities: SystemCapabilities = {
 }
 
 describe('capability adapters', () => {
+  it('normalizes the legacy deepSeek V4 display name without changing model IDs', () => {
+    const source = { ...capabilities, models: [{ ...capabilities.models[0], name: 'deepSeek-v4.1-flash' }] }
+    expect(configuredModels(source)[0]).toMatchObject({ id: 'deepseek-flash', name: 'deepseek-v4.1-flash' })
+    expect(source.models[0].name).toBe('deepSeek-v4.1-flash')
+  })
+
   it('exposes only models whose provider key is configured', () => {
     expect(configuredModels(capabilities).map((model) => model.id)).toEqual([
       'deepseek-flash',

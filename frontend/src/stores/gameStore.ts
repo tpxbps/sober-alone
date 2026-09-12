@@ -21,7 +21,7 @@ const appliesToSession = (getState: () => GameState, sessionId: string) =>
 
 interface GameActions {
   // Session management
-  initializeGame: (sessionId: string) => Promise<void>;
+  initializeGame: (sessionId: string) => Promise<boolean>;
   reset: () => void;
   cancelActiveOperations: () => void;
 
@@ -104,20 +104,20 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
   ...initialState,
 
   initializeGame: async (sessionId: string) => {
-    // Full reset to prevent state pollution from previous sessions
     operations.abortAll();
     set({ ...initialState, sessionId, isLoading: true });
     try {
       const state = await gameApi.getGameState(sessionId);
-
-      if (!appliesToSession(get, sessionId)) return;
-      set(adaptGameState(state));
-
-      // Load history
+      if (!appliesToSession(get, sessionId)) return false;
+      if (!state.success) throw new Error("Game state unavailable");
       const historyResponse = await gameApi.getGameHistory(sessionId);
-      if (appliesToSession(get, sessionId)) set({ records: historyResponse.records || [] });
+      if (!appliesToSession(get, sessionId)) return false;
+      if (!historyResponse.success) throw new Error("Game history unavailable");
+      set({ ...adaptGameState(state), records: historyResponse.records || [] });
+      return true;
     } catch (error) {
       console.error('Failed to initialize game:', error);
+      return false;
     } finally {
       if (appliesToSession(get, sessionId)) set({ isLoading: false });
     }

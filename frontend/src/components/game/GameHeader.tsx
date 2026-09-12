@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Settings, LogOut, BookOpen, X } from 'lucide-react';
-import * as Dialog from '@radix-ui/react-dialog';
+import { Settings, LogOut, BookOpen } from 'lucide-react';
+import { Dialog, DialogContent, DialogTitle, DialogDescription, DialogClose } from '@/components/ui/dialog';
 import { STAGE_NAMES, type GameStage } from '@/types/game';
 import { BookIcon } from '@/components/ui/BookIcon';
 
@@ -44,7 +44,7 @@ export function GameHeader({
           <div className="flex items-center gap-2 lg:gap-4 shrink-0">
             <div className="flex items-center gap-1.5 lg:gap-2">
               <BookIcon size={36} />
-              <span className="font-bold text-glow hidden sm:inline">独醒</span>
+              <span className="font-serif hidden sm:inline">独醒</span>
             </div>
 
             <button
@@ -53,7 +53,7 @@ export function GameHeader({
                        bg-secondary/30 hover:bg-secondary/50 transition-colors"
             >
               <BookOpen className="w-3.5 h-3.5 lg:w-4 lg:h-4" />
-              <span className="text-xs lg:text-sm truncate max-w-[80px] lg:max-w-[150px]">{scriptTitle}</span>
+              <span className="font-serif text-xs lg:text-sm truncate max-w-[80px] lg:max-w-[150px]">{scriptTitle}</span>
             </button>
           </div>
 
@@ -96,46 +96,19 @@ export function GameHeader({
       </div>
 
       {/* Exit Confirmation Dialog */}
-      <Dialog.Root open={showExitConfirm} onOpenChange={setShowExitConfirm}>
-        <Dialog.Portal>
-          <Dialog.Overlay className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50" />
-          <Dialog.Content className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2
-                                     w-full max-w-sm rounded-2xl glass-dark border border-border
-                                     shadow-2xl z-50 p-6">
-            <div className="flex items-center justify-between mb-4">
-              <Dialog.Title className="text-lg font-bold">确认退出</Dialog.Title>
-              <Dialog.Close asChild>
-                <button className="p-2 rounded-lg hover:bg-secondary/50 transition-colors">
-                  <X className="w-4 h-4" />
-                </button>
-              </Dialog.Close>
-            </div>
-            <p className="text-sm text-muted-foreground mb-6">
-              确定要退出当前游戏吗？游戏进度不会保存。
-            </p>
-            <div className="flex gap-3">
-              <Dialog.Close asChild>
-                <button
-                  className="flex-1 py-2.5 rounded-xl bg-secondary/50 border border-border/50 font-medium
-                           hover:bg-secondary/70 transition-colors"
-                >
-                  继续游戏
-                </button>
-              </Dialog.Close>
-              <button
-                onClick={() => {
-                  setShowExitConfirm(false);
-                  onExit();
-                }}
-                className="flex-1 py-2.5 rounded-xl bg-danger text-danger-foreground font-medium
-                         hover:bg-danger/90 transition-colors"
-              >
-                确认退出
-              </button>
-            </div>
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
+      <Dialog open={showExitConfirm} onOpenChange={setShowExitConfirm}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogTitle>确认退出</DialogTitle>
+          <DialogDescription>确定要退出当前游戏吗？游戏进度不会保存。</DialogDescription>
+          <div className="flex gap-3">
+            <DialogClose asChild>
+              <button className="flex-1 py-2.5 rounded-lg bg-secondary text-secondary-foreground hover:bg-secondary/80">继续游戏</button>
+            </DialogClose>
+            <button onClick={() => { setShowExitConfirm(false); onExit(); }}
+              className="flex-1 py-2.5 rounded-lg bg-destructive text-destructive-foreground font-medium hover:bg-destructive/90">确认退出</button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </header>
   );
 }

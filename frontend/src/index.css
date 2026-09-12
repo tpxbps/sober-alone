@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "@fontsource/noto-serif-sc/400.css";
 
 @theme inline {
   --radius-sm: calc(var(--radius) - 4px);
@@ -24,6 +25,7 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -33,68 +35,62 @@
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-danger: var(--danger);
+  --color-danger-foreground: var(--danger-foreground);
+  --color-info: var(--info);
 }
 
-/* Dark cyberpunk theme - default dark mode */
+/* Shared ink, ivory and pale-gold theme. */
 :root {
-  --radius: 0.75rem;
-
-  /* Base colors - deep dark background */
-  --background: hsl(227, 33%, 3%);
-  --foreground: hsl(224, 79%, 95%);
-
-  /* Card colors - slightly lighter than background */
-  --card: hsl(225, 30%, 6%);
-  --card-foreground: hsl(224, 79%, 95%);
-
-  /* Popover colors */
-  --popover: hsl(226, 38%, 4%);
-  --popover-foreground: hsl(224, 79%, 95%);
-
-  /* Primary - purple glow */
-  --primary: hsl(253, 99%, 72%);
-  --primary-foreground: hsl(223, 100%, 98%);
-
-  /* Secondary - muted purple */
-  --secondary: hsl(236, 28%, 16%);
-  --secondary-foreground: hsl(224, 33%, 89%);
-
-  /* Muted - for less emphasis */
-  --muted: hsl(225, 22%, 12%);
-  --muted-foreground: hsl(224, 8%, 58%);
-
-  /* Accent - cyan/teal for highlights */
-  --accent: hsl(177, 100%, 27%);
-  --accent-foreground: hsl(223, 100%, 98%);
-
-  /* Destructive - red for warnings */
-  --destructive: hsl(357, 79%, 54%);
-
-  /* Border and input */
-  --border: hsl(224, 16%, 17%);
-  --input: hsl(225, 22%, 12%);
-  --ring: hsl(253, 99%, 72%);
-
-  /* Custom glow colors */
-  --glow: hsl(253, 99%, 72%);
-  --glow-secondary: hsl(177, 100%, 27%);
-
-  /* Status colors */
-  --success: hsl(128, 55%, 43%);
-  --warning: hsl(43, 100%, 44%);
-  --danger: hsl(357, 79%, 54%);
-
-  /* Sidebar */
-  --sidebar: hsl(226, 38%, 4%);
-  --sidebar-foreground: hsl(224, 79%, 95%);
-  --sidebar-primary: hsl(253, 99%, 72%);
-  --sidebar-primary-foreground: hsl(223, 100%, 98%);
-  --sidebar-accent: hsl(236, 28%, 16%);
-  --sidebar-accent-foreground: hsl(224, 33%, 89%);
-  --sidebar-border: hsl(224, 16%, 17%);
-  --sidebar-ring: hsl(253, 99%, 72%);
+  color-scheme: dark;
+  accent-color: var(--primary);
+  --radius: 0.65rem;
+  --background: #0a0f17;
+  --foreground: #ece7df;
+  --card: #121a25;
+  --card-foreground: #ece7df;
+  --popover: #17202b;
+  --popover-foreground: #ece7df;
+  --primary: #d7c7ad;
+  --primary-foreground: #1b1b20;
+  --secondary: #222c39;
+  --secondary-foreground: #d8dce0;
+  --muted: #1a2330;
+  --muted-foreground: #a7afbb;
+  --accent: #a8beca;
+  --accent-foreground: #101923;
+  --destructive: #e58283;
+  --destructive-foreground: #191d24;
+  --border: #34404d;
+  --input: #1a2330;
+  --ring: #d7c7ad;
+  --glow: #d7c7ad;
+  --glow-secondary: #a8beca;
+  --success: #77b89e;
+  --warning: #d8b978;
+  --danger: #e58283;
+  --danger-foreground: #191d24;
+  --info: #a8beca;
+  --sidebar: #101823;
+  --sidebar-foreground: #ece7df;
+  --sidebar-primary: #d7c7ad;
+  --sidebar-primary-foreground: #1b1b20;
+  --sidebar-accent: #222c39;
+  --sidebar-accent-foreground: #d8dce0;
+  --sidebar-border: #34404d;
+  --sidebar-ring: #d7c7ad;
+  --font-display: "Noto Serif SC", "Songti SC", "SimSun", serif;
 }
-
+.font-serif { font-family: var(--font-display); }
+body { font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; }
+.scene-screen { position: relative; isolation: isolate; background: var(--background); }
+.scene-screen::before {
+  content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background-position: center; background-size: cover; opacity: .43;
+}
+.scene-game::before { background-image: url("/lobby/game.webp"); }
+.scene-workshop::before { background-image: url("/lobby/workshop.webp"); opacity: .38; }
+.scene-screen .glass { background: color-mix(in srgb, var(--card) 58%, transparent); }
+.scene-screen .glass-dark { background: color-mix(in srgb, var(--background) 68%, transparent); }
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -108,33 +104,25 @@
 /* Custom utility classes */
 @layer utilities {
   /* Glow effects */
-  .glow {
-    box-shadow: 0 0 20px var(--glow), 0 0 40px hsla(251, 65%, 69%, 0.3);
-  }
+  .glow { box-shadow: 0 0 18px color-mix(in srgb, var(--glow) 15%, transparent); }
 
-  .glow-accent {
-    box-shadow: 0 0 20px var(--glow-secondary), 0 0 40px hsla(178, 100%, 26%, 0.3);
-  }
+  .glow-accent { box-shadow: 0 0 18px color-mix(in srgb, var(--accent) 15%, transparent); }
 
-  .text-glow {
-    text-shadow: 0 0 10px var(--glow), 0 0 20px hsla(251, 65%, 69%, 0.5);
-  }
+  .text-glow { text-shadow: none; }
 
-  .text-glow-accent {
-    text-shadow: 0 0 10px var(--glow-secondary), 0 0 20px hsla(178, 100%, 26%, 0.5);
-  }
+  .text-glow-accent { text-shadow: none; }
 
   /* Glass morphism effect */
   .glass {
-    background: hsla(225, 30%, 6%, 0.6);
+    background: color-mix(in srgb, var(--card) 70%, transparent);
     backdrop-filter: blur(12px);
-    border: 1px solid hsla(225, 18%, 25%, 0.4);
+    border: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
   }
 
   .glass-dark {
-    background: hsla(227, 33%, 3%, 0.8);
+    background: color-mix(in srgb, var(--background) 88%, transparent);
     backdrop-filter: blur(16px);
-    border: 1px solid hsla(224, 16%, 17%, 0.5);
+    border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
   }
 
   /* Animated border gradient */
@@ -163,10 +151,10 @@
 
   @keyframes breathing {
     0%, 100% {
-      box-shadow: 0 0 5px var(--glow), 0 0 10px hsla(251, 65%, 69%, 0.3);
+      box-shadow: 0 0 5px color-mix(in srgb, var(--glow) 24%, transparent), 0 0 10px color-mix(in srgb, var(--primary) 13.5%, transparent);
     }
     50% {
-      box-shadow: 0 0 15px var(--glow), 0 0 30px hsla(251, 65%, 69%, 0.5);
+      box-shadow: 0 0 15px color-mix(in srgb, var(--glow) 30%, transparent), 0 0 30px color-mix(in srgb, var(--primary) 22.5%, transparent);
     }
   }
 
@@ -178,11 +166,11 @@
   @keyframes breathingProminent {
     0%, 100% {
       transform: scale(1);
-      box-shadow: 0 0 8px var(--glow), 0 0 16px hsla(251, 65%, 69%, 0.4);
+      box-shadow: 0 0 8px color-mix(in srgb, var(--glow) 25%, transparent), 0 0 16px color-mix(in srgb, var(--primary) 18%, transparent);
     }
     50% {
       transform: scale(1.2);
-      box-shadow: 0 0 25px var(--glow), 0 0 50px hsla(253, 99%, 72%, 0.6), 0 0 80px hsla(251, 65%, 69%, 0.3);
+      box-shadow: 0 0 25px color-mix(in srgb, var(--glow) 25%, transparent), 0 0 50px color-mix(in srgb, var(--primary) 27%, transparent), 0 0 80px color-mix(in srgb, var(--primary) 13.5%, transparent);
     }
   }
 
@@ -225,7 +213,7 @@
   /* Scrollbar styling */
   .scrollbar-thin {
     scrollbar-width: thin;
-    scrollbar-color: hsl(225, 18%, 25%) hsl(224, 17%, 7%);
+    scrollbar-color: var(--border) var(--background);
   }
 
   .scrollbar-thin::-webkit-scrollbar {
@@ -234,41 +222,41 @@
   }
 
   .scrollbar-thin::-webkit-scrollbar-track {
-    background: hsl(224, 17%, 7%);
+    background: var(--background);
     border-radius: 3px;
   }
 
   .scrollbar-thin::-webkit-scrollbar-thumb {
-    background: hsl(225, 18%, 25%);
+    background: var(--border);
     border-radius: 3px;
   }
 
   .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-    background: hsl(225, 17%, 36%);
+    background: var(--muted-foreground);
   }
 
-  /* Sparkles — calm breathing + fixed tilt + purple↔cyan color drift */
+  /* Sparkles — calm breathing + fixed tilt + gold and silver color drift */
   .sparkles-fancy {
     transform: rotate(-12deg);
     animation: sparklesBreathe 4s ease-in-out infinite, sparklesColor 6s ease-in-out infinite;
-    filter: drop-shadow(0 0 4px hsla(254, 100%, 75%, 0.6));
+    filter: drop-shadow(0 0 4px color-mix(in srgb, var(--primary) 27%, transparent));
   }
 
   @keyframes sparklesBreathe {
     0%, 100% {
       transform: rotate(-12deg) scale(1);
-      filter: drop-shadow(0 0 4px hsla(252, 100%, 76%, 0.5));
+      filter: drop-shadow(0 0 4px color-mix(in srgb, var(--primary) 22.5%, transparent));
     }
     50% {
       transform: rotate(-12deg) scale(1.08);
-      filter: drop-shadow(0 0 10px hsla(200, 100%, 50%, 0.65))
-              drop-shadow(0 0 22px hsla(184, 100%, 32%, 0.25));
+      filter: drop-shadow(0 0 10px color-mix(in srgb, var(--accent) 29.25%, transparent))
+              drop-shadow(0 0 22px color-mix(in srgb, var(--accent) 11.25%, transparent));
     }
   }
 
   @keyframes sparklesColor {
-    0%, 100% { color: hsl(257, 100%, 76%); }
-    50%      { color: hsl(184, 100%, 42%); }
+    0%, 100% { color: var(--primary); }
+    50%      { color: var(--accent); }
   }
 
   /* Dragon icon — gentle sway + breathe */
@@ -304,7 +292,7 @@
 
 /* Custom selection color */
 ::selection {
-  background: hsla(253, 99%, 72%, 0.4);
+  background: color-mix(in srgb, var(--primary) 18%, transparent);
   color: var(--foreground);
 }
 
@@ -316,7 +304,7 @@
 
 /* Smooth scrolling */
 html {
-  scroll-behavior: smooth;
+  scroll-behavior: auto;
 }
 
 /* Hide scrollbar but keep functionality */
@@ -348,7 +336,7 @@ html {
   margin-top: 0.125rem;
 }
 
-/* Speaker icon playing animation - blue-purple flowing glow */
+/* Speaker icon playing animation - theme-colored flowing glow */
 .speaker-playing {
   animation: speakerGlow 1.5s ease-in-out infinite;
   position: relative;
@@ -357,27 +345,27 @@ html {
 @keyframes speakerGlow {
   0% {
     box-shadow:
-      0 0 6px hsla(242, 85%, 68%, 0.8),
-      0 0 12px hsla(254, 57%, 58%, 0.4);
-    filter: hue-rotate(0deg);
+      0 0 6px color-mix(in srgb, var(--primary) 32%, transparent),
+      0 0 12px color-mix(in srgb, var(--primary) 18%, transparent);
+    filter: none;
   }
   33% {
     box-shadow:
-      0 0 10px hsla(266, 99%, 70%, 0.9),
-      0 0 20px hsla(241, 72%, 67%, 0.5);
-    filter: hue-rotate(20deg);
+      0 0 10px color-mix(in srgb, var(--primary) 32%, transparent),
+      0 0 20px color-mix(in srgb, var(--primary) 22.5%, transparent);
+    filter: none;
   }
   66% {
     box-shadow:
-      0 0 8px hsla(276, 92%, 72%, 0.85),
-      0 0 16px hsla(257, 75%, 60%, 0.45);
-    filter: hue-rotate(-10deg);
+      0 0 8px color-mix(in srgb, var(--primary) 32%, transparent),
+      0 0 16px color-mix(in srgb, var(--primary) 20.25%, transparent);
+    filter: none;
   }
   100% {
     box-shadow:
-      0 0 6px hsla(242, 85%, 68%, 0.8),
-      0 0 12px hsla(254, 57%, 58%, 0.4);
-    filter: hue-rotate(0deg);
+      0 0 6px color-mix(in srgb, var(--primary) 32%, transparent),
+      0 0 12px color-mix(in srgb, var(--primary) 18%, transparent);
+    filter: none;
   }
 }
 
@@ -456,3 +444,13 @@ html {
     cursor: not-allowed;
   }
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .icon-dragon, .sparkles-fancy, .breathing, .breathing-prominent, .speaker-playing { animation: none !important; }
+}
+
+.scene-workshop .bg-background { background-color: color-mix(in srgb, var(--background) 86%, transparent); }
+
+
+
+.scene-workshop .markdown-content h1 { font-family:var(--font-display); font-weight:400; }

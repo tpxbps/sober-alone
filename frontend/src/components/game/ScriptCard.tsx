@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
+import { StoryCover } from "@/components/lobby/StoryCover";
 import {
   Users,
   Clock,
@@ -10,19 +11,21 @@ import {
 } from "lucide-react";
 import { ScriptRating } from "./ScriptRating";
 import type { Script } from "@/types/game";
-import { DIFFICULTY_COLORS } from "@/types/game";
 import { editorApi } from "@/lib/editorApi";
+import { getScriptDisplayTags } from "@/lib/scriptDisplay";
 
 interface ScriptCardProps {
   script: Script;
   onClick: () => void;
   onDeleted?: () => void;
   onEdit?: () => void;
+  quiet?: boolean;
+  selected?: boolean;
+  previewsEnabled?: boolean;
 }
 
-export function ScriptCard({ script, onClick, onDeleted, onEdit }: ScriptCardProps) {
-  const difficultyInfo =
-    DIFFICULTY_COLORS[script.difficulty] || DIFFICULTY_COLORS[1];
+export function ScriptCard({ script, onClick, onDeleted, onEdit, quiet = false, selected = false, previewsEnabled = true }: ScriptCardProps) {
+  const displayTags = getScriptDisplayTags(script);
 
   const [showMenu, setShowMenu] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -59,42 +62,19 @@ export function ScriptCard({ script, onClick, onDeleted, onEdit }: ScriptCardPro
 
   return (
     <motion.div
-      whileHover={{ y: -8, scale: 1.02 }}
-      whileTap={{ scale: 0.98 }}
+      whileTap={quiet ? undefined : { scale: 0.995 }}
+      data-script-id={script.script_id}
+      data-selected={selected || undefined}
       transition={{ type: "spring", stiffness: 500, damping: 30 }}
       onClick={onClick}
-      className="relative group cursor-pointer rounded-xl overflow-hidden border border-border/50
-                 bg-gradient-to-br from-card to-card/80 hover:border-primary/50
-                 transition-colors duration-150"
+      className="lobby-card relative group cursor-pointer overflow-hidden border border-border/50"
     >
       {/* Cover Image */}
       <div className="relative h-48 overflow-hidden">
-        {script.cover_image_url ? (
-          <img
-            src={script.cover_image_url}
-            alt={script.title}
-            loading="lazy"
-            decoding="async"
-            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
-          />
-        ) : (
-          <div className="w-full h-full bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">
-            <span className="text-4xl text-primary/50 font-bold">
-              {script.title[0]}
-            </span>
-          </div>
-        )}
+        <StoryCover src={script.cover_image_url} alt={script.title} loading="lazy" className="card-cover-media w-full h-full object-cover" />
 
         {/* Overlay gradient */}
-        <div className="absolute inset-0 bg-gradient-to-t from-background/90 via-background/20 to-transparent" />
-        {/* Difficulty badge */}
-        <div
-          className={`absolute top-3 right-3 px-2 py-1 rounded-full text-xs font-medium
-                        ${difficultyInfo.bg} ${difficultyInfo.text} border border-current/20`}
-        >
-          {difficultyInfo.label}
-        </div>
-
+        <div className="absolute inset-0 bg-gradient-to-t from-background/30 via-transparent to-transparent" />
         {/* Local single-user script menu */}
         {script.can_manage && (
           <div ref={menuRef} className="absolute top-3 left-3 z-10">
@@ -138,43 +118,32 @@ export function ScriptCard({ script, onClick, onDeleted, onEdit }: ScriptCardPro
           </div>
         )}
 
-        {/* Title on image */}
-        <div className="absolute bottom-3 left-3 right-3">
-          <h3 className="text-lg font-bold text-foreground text-glow truncate">
-            {script.title}
-          </h3>
-        </div>
       </div>
 
       {/* Info section */}
-      <div className="p-4 space-y-3">
+      <div className="card-info p-4 space-y-3">
+        <h3 className="card-title"><button data-script-open type="button" aria-label={"打开剧本 " + script.title} onClick={event => { event.stopPropagation(); onClick(); }}>{script.title}</button></h3>
         {/* Tags */}
-        {(script.tags || script.is_ai_generated) && (
+        {displayTags.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
-            {script.is_ai_generated && (
-              <span className="px-2 py-0.5 text-xs rounded-full bg-primary/15 text-primary flex items-center gap-1 font-medium">
-                <Sparkles className="w-3 h-3" />
-                创作工坊
-              </span>
-            )}
-            {script.tags &&
-              script.tags
-                .split(",")
-                .filter(
-                  (tag) =>
-                    tag.trim() !== "AI创作" &&
-                    tag.trim() !== "AI辅助" &&
-                    tag.trim() !== "用户创作"
-                )
-                .slice(0, 3)
-                .map((tag, index) => (
+            {displayTags.slice(0, 3).map((tag, index) =>
+              tag === "创作工坊" ? (
+                <span
+                  key={tag}
+                  className="px-2 py-0.5 text-xs rounded-full bg-primary/15 text-primary flex items-center gap-1 font-medium"
+                >
+                  <Sparkles className="w-3 h-3" />
+                  创作工坊
+                </span>
+              ) : (
                   <span
-                    key={index}
+                    key={`${tag}-${index}`}
                     className="px-2 py-0.5 text-xs rounded-full bg-secondary/50 text-secondary-foreground"
                   >
-                    {tag.trim()}
+                    {tag}
                   </span>
-                ))}
+              ),
+            )}
           </div>
         )}
 
@@ -188,18 +157,13 @@ export function ScriptCard({ script, onClick, onDeleted, onEdit }: ScriptCardPro
             <Clock className="w-3.5 h-3.5" />
             <span>{script.estimated_duration}分钟</span>
           </div>
-          <ScriptRating script={script} />
+          <ScriptRating script={script} disabled={!previewsEnabled || showMenu || showDeleteConfirm} />
         </div>
 
         {/* Overview */}
-        <p className="text-sm text-muted-foreground line-clamp-2">
+        <p className="card-overview text-sm text-muted-foreground line-clamp-2">
           {script.overview || script.description}
         </p>
-      </div>
-
-      {/* Hover glow effect */}
-      <div className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none">
-        <div className="absolute inset-0 rounded-xl glow" />
       </div>
 
       {/* Delete confirmation modal */}

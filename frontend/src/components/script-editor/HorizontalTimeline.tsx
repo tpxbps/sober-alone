@@ -1,9 +1,11 @@
-import { Check, Loader2 } from "lucide-react";
+import { useEffect, useRef } from "react";
+import { Check, CircleDot, Loader2 } from "lucide-react";
 import { WORKFLOW_PHASES, getPhaseFromStep } from "@/types/editor";
 
 interface HorizontalTimelineProps {
   currentStep: string;
   isComplete?: boolean;
+  isWorking?: boolean;
   onNodeClick?: (phaseIndex: number) => void;
   viewingPhase?: string | null;
   workflowMode?: "create" | "edit";
@@ -12,6 +14,7 @@ interface HorizontalTimelineProps {
 export function HorizontalTimeline({
   currentStep,
   isComplete = false,
+  isWorking = false,
   onNodeClick,
   viewingPhase,
   workflowMode = "create",
@@ -20,9 +23,26 @@ export function HorizontalTimeline({
   const phaseOrder = phases.map((phase) => phase.phase);
   const currentPhase = getPhaseFromStep(currentStep);
   const currentIndex = phaseOrder.indexOf(currentPhase);
+  const strip = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const element = strip.current;
+    if (!element) return;
+    const revealActive = () => {
+      const active = element.querySelector<HTMLElement>("[data-phase-active]");
+      if (!active) return;
+      const viewport = element.getBoundingClientRect(), item = active.getBoundingClientRect();
+      if (item.left < viewport.left || item.right > viewport.right) {
+        element.scrollTo({ left: element.scrollLeft + item.left + item.width / 2 - viewport.left - viewport.width / 2, behavior: "instant" });
+      }
+    };
+    revealActive();
+    const resize = new ResizeObserver(revealActive);
+    resize.observe(element);
+    return () => resize.disconnect();
+  }, [currentPhase, viewingPhase]);
 
   return (
-    <div className="flex items-center gap-1 overflow-x-auto py-3 px-1 scrollbar-thin">
+    <div ref={strip} data-workflow-timeline className="flex items-center gap-1 overflow-x-auto py-3 px-1 scrollbar-thin">
       {phases.map((phase, index) => {
         const isCompleted = currentIndex > index;
         const isCurrent = currentIndex === index;
@@ -37,7 +57,11 @@ export function HorizontalTimeline({
         return (
           <div key={phase.phase} className="flex items-center shrink-0">
             {/* Step card */}
-            <div
+            <button
+              type="button"
+              disabled={!isClickable}
+              aria-current={isCurrent ? "step" : undefined}
+              data-phase-active={(viewingPhase ? isViewing : isCurrent) || undefined}
               onClick={() =>
                 isClickable && onNodeClick?.(WORKFLOW_PHASES.indexOf(phase))
               }
@@ -48,26 +72,26 @@ export function HorizontalTimeline({
                   isViewing
                     ? "border-primary bg-primary/20 ring-1 ring-primary/30"
                     : isPhaseDone
-                    ? "border-green-500/30 bg-green-500/5"
+                    ? "border-success/30 bg-success/5"
                     : isCurrent
                     ? "border-primary bg-primary/10"
-                    : "border-border/30 bg-card/50 opacity-50"
+                    : "border-border/50 bg-card/50"
                 }
               `}
             >
               {/* Title row */}
               <div className="flex items-center gap-1.5">
                 {isPhaseDone ? (
-                  <Check className="w-3.5 h-3.5 text-green-500 shrink-0" />
+                  <Check className="w-3.5 h-3.5 text-success shrink-0" />
                 ) : isCurrent ? (
-                  <Loader2 className="w-3.5 h-3.5 text-primary animate-spin shrink-0" />
+                  isWorking ? <Loader2 className="w-3.5 h-3.5 text-primary animate-spin motion-reduce:animate-none shrink-0" /> : <CircleDot className="w-3.5 h-3.5 text-primary shrink-0" />
                 ) : (
                   <div className="w-3.5 h-3.5 rounded-full border border-border/50 shrink-0" />
                 )}
                 <span
                   className={`text-xs font-medium truncate ${
                     isPhaseDone
-                      ? "text-green-500"
+                      ? "text-success"
                       : isCurrent
                       ? "text-primary"
                       : "text-muted-foreground"
@@ -79,8 +103,8 @@ export function HorizontalTimeline({
                   <span
                     className={`text-[9px] px-1 py-0 rounded shrink-0 ${
                       isCurrent || isPhaseDone
-                        ? "text-primary/40 bg-primary/5"
-                        : "text-muted-foreground/50 bg-secondary/30"
+                        ? "text-primary bg-primary/10"
+                        : "text-muted-foreground bg-secondary/50"
                     }`}
                   >
                     自动
@@ -92,13 +116,13 @@ export function HorizontalTimeline({
               <p className="text-[10px] text-muted-foreground mt-0.5 leading-tight line-clamp-2">
                 {phase.desc}
               </p>
-            </div>
+            </button>
 
             {/* Arrow connector */}
             {index < phases.length - 1 && (
               <div
                 className={`mx-1 w-4 h-px ${
-                  isPhaseDone ? "bg-green-500/40" : "bg-border/30"
+                  isPhaseDone ? "bg-success/40" : "bg-border/30"
                 }`}
               />
             )}

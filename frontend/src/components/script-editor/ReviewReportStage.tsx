@@ -15,7 +15,7 @@ export function ReviewReportStage({ interruptInfo, workflowState, isLoading, onC
   const [showDraft, setShowDraft] = useState(false);
   const prompt = useRef("");
   return <div className="h-full flex flex-col">
-    {error && <p role="alert" className="p-3 text-sm text-red-400">{error}</p>}
+    {error && <p role="alert" className="p-3 text-sm text-destructive">{error}</p>}
     <PromptSection promptUsed={interruptInfo.prompt_used} isLoading={isLoading} hideRegenerate
       editedPromptRef={prompt} onRegenerate={(value) => onRegenerate(draft.human, value)} />
     <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">

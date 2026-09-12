@@ -12,7 +12,7 @@ export function ReviewFinalStage({ interruptInfo, workflowState, isLoading, onCo
   const [editing, setEditing] = useState(false);
   const human = workflowState?.human_review ?? "";
   return <div className="h-full flex flex-col">
-    {error && <p role="alert" className="p-3 text-sm text-red-400">{error}</p>}
+    {error && <p role="alert" className="p-3 text-sm text-destructive">{error}</p>}
     <div className="p-4 border-b border-border flex justify-between items-center">
       <h3 className="font-medium">终稿</h3>
       <button disabled={isLoading} onClick={() => setEditing(!editing)} className="text-sm text-primary">{editing ? "预览" : "编辑终稿"}</button>

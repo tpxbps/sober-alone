@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { motion } from "framer-motion";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
 import {
   ChevronDown,
   ClipboardCopy,
@@ -25,7 +26,6 @@ interface SettingsModalProps {
   onClose: () => void;
   /** Controls which sections are visible:
    *  'full' and 'game' show optional TTS settings.
-   *  'editor' hides game-only audio settings.
    */
   mode?: SettingsMode;
   onOwnershipClaimed?: () => void | Promise<void>;
@@ -36,7 +36,12 @@ export function SettingsModal({
   mode = "full",
   onOwnershipClaimed,
 }: SettingsModalProps) {
-  const { ttsEnabled, setTtsEnabled } = useSettingsStore();
+  const {
+    lobbyMotionEnabled,
+    setLobbyMotionEnabled,
+    ttsEnabled,
+    setTtsEnabled,
+  } = useSettingsStore();
   const [ttsCapability, setTtsCapability] = useState({
     enabled: false,
     reason: "正在检查语音能力…",
@@ -116,22 +121,15 @@ export function SettingsModal({
 
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      onClick={onClose}
-    >
-      <motion.div
-        initial={{ opacity: 0, scale: 0.9, y: 20 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.9, y: 20 }}
-        className="bg-card rounded-xl p-6 min-w-[360px] max-w-[420px] max-h-[80vh] overflow-y-auto shadow-2xl border border-border"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3 className="text-lg font-bold mb-5">设置</h3>
+    <Dialog open onOpenChange={open => { if (!open) onClose(); }}>
+      <DialogContent className="block w-[calc(100%-2rem)] max-w-[420px] sm:max-w-[420px]" showCloseButton={false}>
+        <DialogTitle className="text-lg font-semibold mb-5">设置</DialogTitle>
+        <DialogDescription className="sr-only">调整声音、动态效果与创作记录。</DialogDescription>
 
+        {mode === "full" && <div className="flex items-center justify-between mb-5">
+          <span className="text-sm font-medium">大厅动态效果</span>
+          <Switch aria-label="大厅动态效果" checked={lobbyMotionEnabled} onCheckedChange={setLobbyMotionEnabled} />
+        </div>}
         {/* TTS Toggle — hidden in editor mode */}
         {mode !== "editor" && (
           <>
@@ -157,19 +155,7 @@ export function SettingsModal({
                   </span>
                 </div>
               </div>
-              <button
-                onClick={() => setTtsEnabled(!ttsEnabled)}
-                disabled={!ttsCapability.enabled}
-                className={`w-11 h-6 rounded-full transition-colors relative ${
-                  ttsEnabled ? "bg-primary" : "bg-secondary"
-                } disabled:opacity-50 disabled:cursor-not-allowed`}
-              >
-                <div
-                  className={`w-5 h-5 rounded-full bg-white shadow absolute top-0.5 transition-transform ${
-                    ttsEnabled ? "translate-x-5" : "translate-x-0.5"
-                  }`}
-                />
-              </button>
+              <Switch aria-label="语音播报" checked={ttsEnabled} onCheckedChange={setTtsEnabled} disabled={!ttsCapability.enabled} />
             </div>
           </>
         )}
@@ -266,12 +252,12 @@ export function SettingsModal({
               )}
 
               {claimMessage && (
-                <p role="status" className="mt-2 text-xs leading-relaxed text-emerald-400">
+                <p role="status" className="mt-2 text-xs leading-relaxed text-success">
                   {claimMessage}
                 </p>
               )}
               {claimError && (
-                <p role="alert" className="mt-2 text-xs leading-relaxed text-red-400">
+                <p role="alert" className="mt-2 text-xs leading-relaxed text-destructive">
                   {claimError}
                 </p>
               )}
@@ -286,7 +272,7 @@ export function SettingsModal({
         >
           关闭
         </button>
-      </motion.div>
-    </motion.div>
+      </DialogContent>
+    </Dialog>
   );
 }
