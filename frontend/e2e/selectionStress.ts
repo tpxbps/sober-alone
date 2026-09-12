@@ -1,6 +1,8 @@
 import { expect, type Locator, type Page } from "@playwright/test";
 
 export async function stressSelection(page: Page, text: Locator, cycles = 35) {
+  // A swapped CJK font changes the text bounds used by native pointer gestures.
+  await page.evaluate(() => document.fonts.ready.then(() => undefined));
   await text.scrollIntoViewIfNeeded();
   const rect = (await text.boundingBox())!;
   const x = rect.x + 4, y = rect.y + Math.min(10, rect.height / 2);

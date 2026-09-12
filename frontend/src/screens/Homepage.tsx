@@ -98,7 +98,7 @@ export function Homepage({ onStartGame, onOpenEditor }: HomepageProps) {
             <div className="flex min-w-0 items-center gap-3">
               <BookIcon size={48} />
               <div>
-                <h1 className="text-xl font-serif text-foreground">独醒</h1>
+                <h1 className="text-xl font-serif text-foreground" onDragStart={event => event.preventDefault()}>独醒</h1>
                 <p className="text-xs text-muted-foreground">AI剧本杀</p>
               </div>
 
