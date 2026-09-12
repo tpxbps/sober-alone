@@ -7,8 +7,6 @@ export function IdeaStage({
   setPlayerCount,
   difficulty,
   setDifficulty,
-  endingMode,
-  setEndingMode,
   numClueRounds,
   setNumClueRounds,
   error,
@@ -22,8 +20,6 @@ export function IdeaStage({
   setPlayerCount: (value: number) => void;
   difficulty: number;
   setDifficulty: (value: number) => void;
-  endingMode: "single" | "multiple";
-  setEndingMode: (value: "single" | "multiple") => void;
   numClueRounds: number;
   setNumClueRounds: (value: number) => void;
   error: string | null;
@@ -33,7 +29,6 @@ export function IdeaStage({
     player_count: number;
     difficulty: number;
     num_clue_rounds: number;
-    ending_mode?: "single" | "multiple";
   }) => void;
   moleActive: boolean;
 }) {
@@ -103,12 +98,6 @@ export function IdeaStage({
             </select>
           </div>
         </div>
-        <label className="block text-xs font-medium mt-4">结局模式
-          <select aria-label="结局模式" value={endingMode} onChange={(e) => setEndingMode(e.target.value as "single" | "multiple")} className="mt-1 w-full rounded-lg border border-border/50 bg-card px-3 py-2 text-sm">
-            <option value="single">单结局</option><option value="multiple">多结局 · 根据最终投票选择</option>
-          </select>
-        </label>
-        <p className="mt-2 text-xs text-muted-foreground">多结局可分别描写正确指认、错误指认、平票和无有效票后的故事走向，案件真相保持一致。</p>
         <p className="text-xs text-muted-foreground/60 mt-3">
           预估游戏时长：
           {estimateDuration(playerCount, difficulty, numClueRounds)}
@@ -129,7 +118,6 @@ export function IdeaStage({
               player_count: playerCount,
               difficulty,
               num_clue_rounds: numClueRounds,
-              ending_mode: endingMode,
             })
           }
           label="开始创作"

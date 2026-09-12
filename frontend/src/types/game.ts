@@ -208,6 +208,7 @@ export interface GameStateResponse {
     occupation?: string;
     profile?: string;
     avatar_url?: string;
+    portrait_url?: string;
     is_human?: boolean;
     character_script?: string;
     character_script_summary?: string;

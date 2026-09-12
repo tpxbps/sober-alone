@@ -1,4 +1,5 @@
 import axios from 'axios';
+import type { OutlineCommand, OutlineDelta, OutlineProgress } from '@/types/outline';
 import type {
   WorkflowStateResponse,
   ResumeWorkflowResponse,
@@ -25,6 +26,10 @@ api.interceptors.request.use((config) => {
 });
 
 export const editorApi = {
+  outlineAction: async (threadId: string, command: OutlineCommand): Promise<EditorOperationAccepted> => {
+    const response = await api.post(`/script-editor/${threadId}/outline/actions`, command, { timeout: 20000 });
+    return response.data;
+  },
   claimLegacyOwnership: async (legacyOwnerUuids: string[]): Promise<{
     success: boolean;
     claimed_count: number;
@@ -56,7 +61,7 @@ export const editorApi = {
 
   // Get current workflow state
   getState: async (threadId: string): Promise<WorkflowStateResponse> => {
-    const response = await api.get(`/script-editor/${threadId}/state`);
+    const response = await api.get(`/script-editor/${threadId}/state`, { timeout: 15000 });
     return response.data;
   },
 
@@ -85,6 +90,7 @@ export const editorApi = {
   ): Promise<EditorOperationResponse> => {
     const response = await api.get(
       `/script-editor/${threadId}/operations/${operationId}`,
+      { timeout: 15000 },
     );
     return response.data;
   },
@@ -174,6 +180,7 @@ export const editorApi = {
     onAssetProgress: (data: AssetProgress | null) => void,
     onDone: () => void,
     onSafetyProgress?: (progress: { completed: number; total: number }) => void,
+    onOutline?: (type: string, data: OutlineProgress | OutlineDelta) => void,
   ): (() => void) => {
     const url = `${RAW_API_BASE}/script-editor/${threadId}/progress-stream`;
     const controller = new AbortController();
@@ -197,7 +204,8 @@ export const editorApi = {
             const line = event.split('\n').find((item) => item.startsWith('data: '));
             if (!line) continue;
             const parsed = JSON.parse(line.slice(6));
-            if (parsed.type === 'convert_progress') onConvertProgress(parsed.data ?? null);
+            if (parsed.type?.startsWith('outline_')) onOutline?.(parsed.type, parsed.data);
+            else if (parsed.type === 'convert_progress') onConvertProgress(parsed.data ?? null);
             else if (parsed.type === 'safety_progress') onSafetyProgress?.(parsed.data);
             else if (parsed.type === 'asset_progress') onAssetProgress(parsed.data ?? null);
             else if (parsed.type === 'done') {
@@ -206,6 +214,7 @@ export const editorApi = {
             }
           }
         }
+        if (!controller.signal.aborted) onDone();
       } catch (error) {
         if (!(error instanceof DOMException && error.name === 'AbortError')) onDone();
       }

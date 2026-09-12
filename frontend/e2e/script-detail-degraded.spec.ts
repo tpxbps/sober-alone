@@ -30,7 +30,7 @@ test('未配置主模型时选角安全降级且不会产生页面异常', async
   const pageErrors: Error[] = []
   page.on('pageerror', (error) => pageErrors.push(error))
 
-  await page.route(/https?:\/\/(?!127\.0\.0\.1:4173).*$/i, (route) =>
+  await page.route((url) => !["127.0.0.1", "localhost"].includes(url.hostname), (route) =>
     route.abort('blockedbyclient'),
   )
   await page.route('**/api/v1/**', async (route) => {
@@ -77,7 +77,7 @@ test('未配置主模型时选角安全降级且不会产生页面异常', async
 })
 
 test('模型服务偏慢时只提示体验风险且仍可选择并开始游戏', async ({ page }) => {
-  await page.route(/https?:\/\/(?!127\.0\.0\.1:4173).*$/i, (route) =>
+  await page.route((url) => !["127.0.0.1", "localhost"].includes(url.hostname), (route) =>
     route.abort('blockedbyclient'),
   )
   await page.route('**/api/v1/**', async (route) => {

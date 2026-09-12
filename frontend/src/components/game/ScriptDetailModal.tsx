@@ -1,3 +1,4 @@
+import { CharacterPreview } from "./CharacterPreview";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
@@ -510,6 +511,7 @@ export function ScriptDetailModal({
                                 }`}
                             >
                               <div className="flex items-start gap-4">
+                                <CharacterPreview name={char.name} src={char.portrait_url || char.avatar_url}>
                                 {/* Avatar */}
                                 <div
                                   className="w-24 h-24 rounded-full bg-gradient-to-br from-primary/30 to-accent/30
@@ -527,6 +529,8 @@ export function ScriptDetailModal({
                                     char.name[0]
                                   )}
                                 </div>
+
+                                </CharacterPreview>
 
                                 {/* Info */}
                                 <div className="flex-1 min-w-0">

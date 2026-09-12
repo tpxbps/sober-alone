@@ -1,3 +1,4 @@
+import { stressSelection } from "./selectionStress"
 import { expect, test, type Route } from '@playwright/test'
 
 const script = {
@@ -17,6 +18,8 @@ const characters = [
   {
     character_id: 'human',
     name: '陆鸣',
+    avatar_url: '/duxing_icon.png',
+    portrait_url: '/duxing_icon.png?original-portrait',
     profile: '广播主持人',
     character_script: '你的个人剧本',
     character_script_summary: '**你是谁**：你是广播主持人陆鸣。',
@@ -45,9 +48,18 @@ test('大厅 → 选角 → 发言 → 推进 → 投票 → 复盘', async ({ p
     HTMLMediaElement.prototype.play = async () => undefined
   })
 
-  await page.route(/https?:\/\/(?!127\.0\.0\.1:4173).*$/i, (route) =>
+  await page.route((url) => !["127.0.0.1", "localhost"].includes(url.hostname), (route) =>
     route.abort('blockedbyclient'),
   )
+
+  // Keep this route-isolated flow independent of any local server's audio files.
+  const wav = Buffer.alloc(44 + 8000 * 2 * 20)
+  wav.write('RIFF', 0); wav.writeUInt32LE(wav.length - 8, 4); wav.write('WAVEfmt ', 8)
+  wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22)
+  wav.writeUInt32LE(8000, 24); wav.writeUInt32LE(16000, 28)
+  wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34)
+  wav.write('data', 36); wav.writeUInt32LE(wav.length - 44, 40)
+  await page.route('**/audio/**', route => route.fulfill({ contentType: 'audio/wav', body: wav }))
 
   await page.route('**/api/v1/**', async (route) => {
     const path = new URL(route.request().url()).pathname
@@ -201,6 +213,23 @@ test('大厅 → 选角 → 发言 → 推进 → 投票 → 复盘', async ({ p
   await page.goto('/')
   await expect(page.getByText('剧本大厅')).toBeVisible()
   await page.getByText('零点来电').first().click()
+  await page.getByLabel('预览陆鸣的人物形象', { exact: true }).hover()
+  const portraitPreview = page.getByRole('tooltip', { name: '陆鸣的人物预览' })
+  await expect(portraitPreview.getByRole('img')).toHaveAttribute('src', '/duxing_icon.png?original-portrait')
+  await expect(portraitPreview.getByRole('img')).toHaveCSS('object-fit', 'contain')
+  await page.screenshot({ path: 'test-results/portrait-selection.png', fullPage: true })
+  await page.keyboard.press('Escape')
+  await expect(portraitPreview).not.toBeVisible()
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.getByRole('button', { name: '查看陆鸣的人物形象', exact: true }).click()
+  await expect(portraitPreview).toBeVisible()
+  await expect.poll(async () => {
+    const box = await portraitPreview.boundingBox()
+    return Boolean(box && box.x >= 0 && box.x + box.width <= 390 && box.y >= 0 && box.y + box.height <= 844)
+  }).toBe(true)
+  await page.screenshot({ path: 'test-results/portrait-mobile.png', fullPage: true })
+  await page.keyboard.press('Escape')
+  await page.setViewportSize({ width: 1280, height: 720 })
   await page.getByText('陆鸣', { exact: true }).click()
   await page.getByRole('button', { name: '开始游戏' }).click()
 
@@ -210,6 +239,12 @@ test('大厅 → 选角 → 发言 → 推进 → 投票 → 复盘', async ({ p
   await ownCharacterCard.hover()
   const ownTooltip = page.getByRole('tooltip').filter({ hasText: '广播主持人' })
   await expect(ownTooltip).toBeVisible()
+  const [portraitBox, profileBox] = await Promise.all([
+    ownTooltip.getByRole('img').boundingBox(),
+    ownTooltip.getByText('广播主持人', { exact: true }).boundingBox(),
+  ])
+  expect(portraitBox!.x + portraitBox!.width).toBeLessThanOrEqual(profileBox!.x)
+  await page.screenshot({ path: 'test-results/portrait-game.png', fullPage: true })
   const [headerBox, tooltipBox] = await Promise.all([
     page.locator('header').boundingBox(),
     ownTooltip.boundingBox(),
@@ -218,6 +253,21 @@ test('大厅 → 选角 → 发言 → 推进 → 投票 → 复盘', async ({ p
   expect(tooltipBox).not.toBeNull()
   expect(tooltipBox!.y).toBeGreaterThanOrEqual(headerBox!.y + headerBox!.height)
 
+  await stressSelection(page, ownTooltip.getByText('广播主持人', { exact: true }), 20)
+  await page.keyboard.press('Escape')
+  expect(await page.evaluate(() => getComputedStyle(document.body).userSelect)).not.toBe('none')
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.getByRole('button', { name: '查看陆鸣的人物形象', exact: true }).click()
+  const mobileGamePreview = page.getByRole('tooltip', { name: '陆鸣的人物预览' })
+  await expect(mobileGamePreview.getByRole('img')).toHaveCSS('object-fit', 'contain')
+  await expect(mobileGamePreview.getByText('广播主持人', { exact: true })).toBeVisible()
+  await expect.poll(async () => {
+    const box = await mobileGamePreview.boundingBox()
+    return Boolean(box && box.x >= 0 && box.x + box.width <= 390 && box.y >= 0 && box.y + box.height <= 844)
+  }).toBe(true)
+  await page.screenshot({ path: 'test-results/portrait-game-mobile.png', fullPage: true })
+  await page.keyboard.press('Escape')
+  await page.setViewportSize({ width: 1280, height: 720 })
   await page.getByRole('button', { name: '查看我的剧本' }).last().click({ force: true })
   const scriptHeading = page.getByRole('heading', { name: '陆鸣的剧本' })
   await expect(scriptHeading).toBeVisible()

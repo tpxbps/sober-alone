@@ -5,6 +5,14 @@ Default Prompts — 各工作流步骤的默认提示词
 
 from app.game.content_quality import GAMEPLAY_CONTRACT
 
+# Runtime supports optional hand-authored branches; story generation does not
+# advertise that capability or ask the author to configure it up front.
+CREATION_CONTRACT = GAMEPLAY_CONTRACT.replace(
+    "可选择单结局，或按最终单次投票的正确指认、\n"
+    "错误指认、平票、无有效票四种结果展示不同后续结局；案件真相不变，不依赖隐藏行动或AI临场判定。",
+    "创作采用单一结局，所有投票结果都揭晓相同真相和后续故事；不编写投票结果对应的结局分支。",
+)
+
 DEFAULT_PROMPTS: dict[str, str] = {
     "generate_outline": """\
 你是一位资深剧本杀编剧，擅长设计引人入胜的剧本杀游戏。
@@ -148,5 +156,5 @@ DEFAULT_PROMPTS: dict[str, str] = {
 
 
 DEFAULT_PROMPTS = {
-    key: GAMEPLAY_CONTRACT + "\n\n" + value for key, value in DEFAULT_PROMPTS.items()
+    key: CREATION_CONTRACT + "\n\n" + value for key, value in DEFAULT_PROMPTS.items()
 }

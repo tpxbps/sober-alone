@@ -137,11 +137,11 @@ test('创作长任务在刷新和返回大厅后仍恢复到同一工作流', as
   await page.getByRole('button', { name: '开始创作' }).click()
 
   await expect(page).toHaveURL(/editor=resume/)
-  await expect(page.getByText('正在构思剧本大纲...')).toBeVisible()
+  await expect(page.getByTestId('outline-workspace').or(page.getByText('正在构思剧本大纲...'))).toBeVisible()
   await expect(page.getByText(/流程中断/)).toHaveCount(0)
 
   await page.reload()
-  await expect(page.getByText('正在构思剧本大纲...')).toBeVisible()
+  await expect(page.getByTestId('outline-workspace').or(page.getByText('正在构思剧本大纲...'))).toBeVisible()
   await expect(page.getByText(/流程中断/)).toHaveCount(0)
 
   allowComplete = true

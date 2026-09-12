@@ -37,6 +37,7 @@ class GameStatePresenter:
                 "occupation": character.get("occupation"),
                 "profile": character.get("profile"),
                 "avatar_url": character.get("avatar_url"),
+                "portrait_url": character.get("portrait_url"),
                 "voice_id": character.get("voice_id"),
                 "is_human": character.get("character_id") == human_character_id,
                 "character_script": (

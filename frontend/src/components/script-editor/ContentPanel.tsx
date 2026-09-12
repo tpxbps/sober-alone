@@ -180,7 +180,6 @@ function ContentPanelBody({
   const [playerCount, setPlayerCount] = useState(4);
   const [difficulty, setDifficulty] = useState(1);
   const [numClueRounds, setNumClueRounds] = useState(2);
-  const [endingMode, setEndingMode] = useState<"single" | "multiple">("single");
 
   // Global mole game (decoupled from buttons)
   const [showMoleGame, setShowMoleGame] = useState(false);
@@ -207,7 +206,6 @@ function ContentPanelBody({
       if (workflowState.player_count)
         setPlayerCount(workflowState.player_count);
       if (workflowState.difficulty) setDifficulty(workflowState.difficulty);
-      setEndingMode(workflowState.ending_mode || "single");
       if (workflowState.num_clue_rounds)
         setNumClueRounds(workflowState.num_clue_rounds);
     }
@@ -285,8 +283,6 @@ function ContentPanelBody({
           setPlayerCount={setPlayerCount}
           difficulty={difficulty}
           setDifficulty={setDifficulty}
-          endingMode={endingMode}
-          setEndingMode={setEndingMode}
           numClueRounds={numClueRounds}
           setNumClueRounds={setNumClueRounds}
           error={error}

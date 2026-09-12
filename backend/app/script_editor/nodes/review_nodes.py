@@ -20,7 +20,7 @@ def review_outline(state: ScriptGenState) -> dict:
     user_response = interrupt(
         {
             "step": STEP_REVIEW_OUTLINE,
-            "step_label": "大纲审阅",
+            "step_label": "大纲确认" if state.get("outline_session") else "大纲审阅",
             "generated_content": state.get("outline", ""),
             "prompt_used": state.get("prompts", {}).get("generate_outline", ""),
         }
@@ -29,11 +29,14 @@ def review_outline(state: ScriptGenState) -> dict:
     action = user_response.get("action", "confirm")
     content = user_response.get("content", state.get("outline", ""))
 
-    return {
+    result = {
         "outline": content,
         "current_step": STEP_REVIEW_OUTLINE,
         "_review_action": action,  # 用于路由判断
     }
+    if state.get("outline_session"):
+        result["outline_session"] = {**state["outline_session"], "final_outline": content}
+    return result
 
 
 def review_first_draft(state: ScriptGenState) -> dict:

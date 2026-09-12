@@ -135,8 +135,8 @@ test('评分同行展示，轻量说明及悬浮文字点击均打开对应剧�
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 })
 
-test('手机轻触评分直接打开剧本详情', async ({ browser }) => {
-  const context = await browser.newContext({ viewport: {width:390, height:844}, hasTouch:true, baseURL:'http://127.0.0.1:4173' })
+test('手机轻触评分直接打开剧本详情', async ({ browser, baseURL }) => {
+  const context = await browser.newContext({ viewport: {width:390, height:844}, hasTouch:true, baseURL })
   const page = await context.newPage()
   await ratingFixture(page)
   await page.getByRole('button', { name: 'AI评分: 78，打开剧本详情' }).tap()

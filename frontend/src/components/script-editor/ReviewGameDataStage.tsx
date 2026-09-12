@@ -82,7 +82,7 @@ export function ReviewGameDataStage({
   }
 
   // Flatten game_flow into sequential messages
-  const flowMessages: { label: string; path: string[] }[] = [];
+  const flowMessages: { label: string; path: string[]; truthReveal?: boolean }[] = [];
   const gameFlow = editedGameData.game_flow || [];
   for (let i = 0; i < gameFlow.length; i++) {
     const stage = gameFlow[i] as Record<string, unknown>;
@@ -91,6 +91,7 @@ export function ReviewGameDataStage({
       flowMessages.push({
         label: (stage.stage_title as string) || type,
         path: ["game_flow", String(i), "system_notice"],
+        truthReveal: type === "review",
       });
     } else if (type === "vote") {
       const children = (stage.children as Record<string, unknown>[]) || [];
@@ -247,8 +248,6 @@ export function ReviewGameDataStage({
           </div>
         </CollapsibleSection>
 
-        <EndingEditor data={editedGameData} onChange={(value) => updateField(["ending_config"], value)} />
-
         <CollapsibleSection
           title="结构化公开线索"
           expanded={expandedSections.clues ?? true}
@@ -331,6 +330,7 @@ export function ReviewGameDataStage({
                   onChange={(e) => updateField(msg.path, e.target.value)}
                   className="w-full h-50 text-xs bg-transparent border border-border/30 rounded-md p-2 resize-none focus:outline-none focus:border-primary/50 scrollbar-thin"
                 />
+                {msg.truthReveal && <div className="mt-3"><EndingEditor data={editedGameData} onChange={(value) => updateField(["ending_config"], value)} /></div>}
               </div>
             ))}
             {editedGameData.free_speech_limits?.map((limit, index) => (

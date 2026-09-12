@@ -26,6 +26,10 @@ class OutlineResult(BaseModel):
 
 async def generate_outline(state: ScriptGenState) -> dict:
     """根据用户创意生成结构化大纲（含标题）"""
+    if (state.get("outline_session") or {}).get("protocol_version") == 2:
+        from app.script_editor.outline.nodes import write_segment
+
+        return await write_segment(state)
     system_prompt = get_prompt("generate_outline", state)
     user_content = f"我的剧本创意：\n\n{state.get('user_idea', '')}"
 

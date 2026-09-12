@@ -1,3 +1,4 @@
+import { CharacterPreview } from "@/components/game/CharacterPreview";
 import { gameApi } from "@/lib/api";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -418,8 +419,11 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
                   const isHuman = humanCharacterId === char.character_id;
 
                   return (
+                    <CharacterPreview key={char.character_id} name={char.name} src={char.portrait_url || char.avatar_url}
+                      details={<><h3 className="font-semibold">{char.name}</h3>
+                        <p className="mt-2 text-sm text-muted-foreground">{char.profile || "暂无人物简介"}</p>
+                        <p className="mt-3 text-xs text-primary">{isSpeaking ? "正在发言" : "等待发言"}</p></>}>
                     <button
-                      key={char.character_id}
                       type="button"
                       disabled={isHuman}
                       onClick={() => handleCharacterMention(char.character_id)}
@@ -446,6 +450,7 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
                         </div>
                       )}
                     </button>
+                    </CharacterPreview>
                   );
                 })}
               </div>

@@ -89,6 +89,7 @@ def test_script_editor_route_split_preserves_public_paths_and_methods():
     paths = app.openapi()["paths"]
     expected = {
         "/api/v1/script-editor/start": {"post"},
+        "/api/v1/script-editor/{thread_id}/outline/actions": {"post"},
         "/api/v1/script-editor/{thread_id}/state": {"get"},
         "/api/v1/script-editor/{thread_id}/resume": {"post"},
         "/api/v1/script-editor/{thread_id}/operations/{operation_id}": {"get"},

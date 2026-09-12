@@ -9,7 +9,11 @@ class StartWorkflowRequest(BaseModel):
     player_count: int = 4
     difficulty: int = 1
     num_clue_rounds: int = 2
-    ending_mode: Literal["single", "multiple"] = "single"
+    ending_mode: Literal["single", "multiple"] = Field(
+        default="single",
+        deprecated=True,
+        description="兼容旧客户端；新建创作固定使用单结局，多结局在结构化数据阶段手动配置。",
+    )
     prompts: dict | None = None
 
 

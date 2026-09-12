@@ -447,3 +447,12 @@ html {
   25% { transform: translateX(-4px) rotate(-1deg); }
   75% { transform: translateX(4px) rotate(1deg); }
 }
+
+@layer base {
+  :where(button, a[href], select, summary, input[type="button"], input[type="submit"], input[type="reset"], input[type="checkbox"], input[type="radio"], [role="button"], [role="radio"], [role="tab"], [role="option"], [role="switch"]):not(:disabled):not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
+  :where(button, select, input, [role="button"], [role="radio"], [role="tab"], [role="option"], [role="switch"]):is(:disabled, [aria-disabled="true"]) {
+    cursor: not-allowed;
+  }
+}

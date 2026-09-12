@@ -8,7 +8,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from app.script_editor.prompts.defaults import DEFAULT_PROMPTS
+from app.game.content_quality import GAMEPLAY_CONTRACT
+from app.script_editor.prompts.defaults import CREATION_CONTRACT, DEFAULT_PROMPTS
 
 DIFFICULTY_LABELS = {
     1: "简单",
@@ -40,6 +41,10 @@ def get_prompt(step: str, state: Mapping[str, Any]) -> str:
     prompts = state.get("prompts", {})
     template = prompts.get(step, DEFAULT_PROMPTS.get(step, ""))
 
+    # Normalize the known capability prefix stored in older checkpoints, while
+    # preserving the author's custom requirements.
+    template = template.replace(GAMEPLAY_CONTRACT, CREATION_CONTRACT)
+
     # 格式化模板变量
     try:
         prompt = template.format(
@@ -51,13 +56,9 @@ def get_prompt(step: str, state: Mapping[str, Any]) -> str:
         )
     except KeyError:
         prompt = template
-    mode = state.get("ending_mode", "single")
-    description = (
-        "多结局：为最终投票正确、错误、平票、无有效票分别设计后续结局，明确用于判定的真凶；案件事实不随投票改变，不安排重投或追加讨论。"
-        if mode == "multiple"
-        else "单结局：所有投票结果揭晓相同真相，不生成结局分支。"
+    return (
+        prompt + "\n故事采用单一结局，完整揭晓案件真相及同一段后续故事；不按投票结果编写多个结局。"
     )
-    return prompt + "\n【本剧本结局模式】" + description
 
 
 def get_default_prompts() -> dict[str, str]:
