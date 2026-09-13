@@ -53,7 +53,12 @@ export function ScriptSetup({ script, quiet, onBack, onStartGame, onBusyChange }
                     <label id={`model-label-${char.character_id}`}>AI 扮演模型</label>
                     {setup.models.length ? <Select.Root value={modelId} onValueChange={value => setup.selectModel(char.character_id, value)} disabled={busy}>
                       <Select.Trigger className="setup-model-trigger" aria-label={`${char.name}的 AI 模型`}><Select.Value placeholder="选择模型" /><Select.Icon><ChevronDown size={14} /></Select.Icon></Select.Trigger>
-                      <Select.Portal><Select.Content className="setup-model-menu" position="popper" sideOffset={5} collisionPadding={12}><Select.Viewport>
+                      <Select.Portal><Select.Content className="setup-model-menu" position="popper" sideOffset={5} collisionPadding={12} onCloseAutoFocus={event => {
+                        // Radix restores focus after unmount. A newer navigation may
+                        // already have focused another control during that interval.
+                        const focused = document.activeElement;
+                        if (focused instanceof HTMLElement && focused !== document.body && focused !== document.documentElement && !(event.target instanceof HTMLElement && event.target.contains(focused))) event.preventDefault();
+                      }}><Select.Viewport>
                         {setup.models.map(model => <Select.Item aria-label={model.name} key={model.id} value={model.id} className="setup-model-option"><Select.ItemText>{model.name}</Select.ItemText><span>{setup.health[model.id]?.status === "normal" ? "" : setup.health[model.id]?.status === "slow" ? "响应较慢" : setup.health[model.id]?.status === "timeout" ? "测速超时" : setup.health[model.id]?.status === "unavailable" ? "当前不可用" : ""}</span><Select.ItemIndicator><Check size={13} /></Select.ItemIndicator></Select.Item>)}
                       </Select.Viewport></Select.Content></Select.Portal>
                     </Select.Root> : <p role="status" className="setup-model-warning">暂不可分配 AI 模型：{setup.modelReason}</p>}

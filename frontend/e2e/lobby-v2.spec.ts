@@ -319,6 +319,12 @@ test("详情评分细则与模型异常提示保持可读，键盘返回恢复�
   await expect(page.getByRole("option",{name:"deepseek-flash",exact:true})).toHaveText("deepseek-flash");
   await expect(page.getByRole("option",{name:"hy3",exact:true})).toContainText("响应较慢");
   await page.keyboard.press("Escape");
+  await expect(page.getByRole("listbox")).toHaveCount(0);
+  await expect(page.getByRole("combobox").first()).toBeFocused();
+  await page.getByRole("combobox").first().click();
+  await expect(page.getByRole("listbox")).toBeVisible();
+  await page.keyboard.press("Escape");
+  // A subsequent focus move must win over the menu's deferred restoration.
   await page.getByRole("button",{name:"返回列表"}).focus();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("button",{name:"打开剧本 雾中来信"})).toBeFocused();
