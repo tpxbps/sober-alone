@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { AnimatePresence, motion, useAnimationControls, useReducedMotion } from "framer-motion";
+import { AnimatePresence, useReducedMotion } from "framer-motion";
 import { flushSync } from "react-dom";
 import { Github, Settings, RefreshCw, PenTool, ArrowRight, BookOpen } from "lucide-react";
 import { scriptApi, systemApi } from "@/lib/api";
@@ -11,6 +11,7 @@ import { BookIcon } from "@/components/ui/BookIcon";
 import { useSettingsStore } from "@/stores/settingsStore";
 import type { Script } from "@/types/game";
 import "@/components/lobby/lobby.css";
+import { transitionScene } from "@/lib/sceneTransition";
 
 interface HomepageProps {
   onStartGame: (sessionId: string) => void;
@@ -26,7 +27,6 @@ export function Homepage({ onStartGame, onOpenEditor }: HomepageProps) {
   const [showSettings, setShowSettings] = useState(false);
   const [busy, setBusy] = useState(false);
   const [transitioning, setTransitioning] = useState(false);
-  const sceneControls = useAnimationControls();
   const sceneVersion = useRef(0);
   useEffect(() => () => { sceneVersion.current += 1; }, []);
   const motionEnabled = useSettingsStore(state => state.lobbyMotionEnabled);
@@ -55,23 +55,23 @@ export function Homepage({ onStartGame, onOpenEditor }: HomepageProps) {
     if (busy) return;
     const ticket = ++sceneVersion.current;
     setTransitioning(true);
-    if (!quiet) await sceneControls.start({ opacity: 0, y: 6, transition: { duration: .12 } });
-    if (ticket !== sceneVersion.current) return;
-    flushSync(() => setSelectedScript(script));
-    if (script) {
-      const anchor = setupAnchor.current;
-      const headerHeight = document.querySelector(".lobby-header")?.getBoundingClientRect().height || 80;
-      if (anchor) window.scrollTo({ top: window.scrollY + anchor.getBoundingClientRect().top - headerHeight - 24, behavior: "instant" });
-      anchor?.querySelector<HTMLElement>("h1")?.focus({ preventScroll: true });
-    } else {
-      const previous = previousCard.current;
-      if (previous?.element.isConnected) {
-        window.scrollTo({ top: window.scrollY + previous.element.getBoundingClientRect().top - previous.top, behavior: "instant" });
-        const target = keyboard ? previous.element.querySelector<HTMLElement>("[data-script-open]") : document.getElementById("script-list");
-        target?.focus({ preventScroll: true });
+    await transitionScene(() => {
+      if (ticket !== sceneVersion.current) return;
+      flushSync(() => setSelectedScript(script));
+      if (script) {
+        const anchor = setupAnchor.current;
+        const headerHeight = document.querySelector(".lobby-header")?.getBoundingClientRect().height || 80;
+        if (anchor) window.scrollTo({ top: window.scrollY + anchor.getBoundingClientRect().top - headerHeight - 24, behavior: "instant" });
+        anchor?.querySelector<HTMLElement>("h1")?.focus({ preventScroll: true });
+      } else {
+        const previous = previousCard.current;
+        if (previous?.element.isConnected) {
+          window.scrollTo({ top: window.scrollY + previous.element.getBoundingClientRect().top - previous.top, behavior: "instant" });
+          const target = keyboard ? previous.element.querySelector<HTMLElement>("[data-script-open]") : document.getElementById("script-list");
+          target?.focus({ preventScroll: true });
+        }
       }
-    }
-    await sceneControls.start({ opacity: 1, y: 0, transition: { duration: quiet ? 0 : .32, ease: [.22, 1, .36, 1] } });
+    }, quiet);
     if (ticket === sceneVersion.current) setTransitioning(false);
   };
   const selectScript = (script: Script) => {
@@ -98,7 +98,7 @@ export function Homepage({ onStartGame, onOpenEditor }: HomepageProps) {
             <div className="flex min-w-0 items-center gap-3">
               <BookIcon size={48} />
               <div>
-                <h1 className="text-xl font-serif text-foreground" onDragStart={event => event.preventDefault()}>独醒</h1>
+                <h1 className="text-xl font-serif text-foreground">独醒</h1>
                 <p className="text-xs text-muted-foreground">AI剧本杀</p>
               </div>
 
@@ -148,7 +148,7 @@ export function Homepage({ onStartGame, onOpenEditor }: HomepageProps) {
         </div>
       </header>
 
-      <motion.main initial={false} animate={sceneControls} className="lobby-main container mx-auto px-6">
+      <main className="lobby-main container mx-auto px-6">
         <div ref={setupAnchor} className="setup-anchor">
           {selectedScript && <ScriptSetup key={selectedScript.script_id} script={selectedScript} quiet={quiet} onBack={returnToList} onStartGame={onStartGame} onBusyChange={setBusy} />}
         </div>
@@ -167,7 +167,7 @@ export function Homepage({ onStartGame, onOpenEditor }: HomepageProps) {
           {!isLoading && !error && !scripts.length && <div className="lobby-status"><BookOpen size={28} /><p>暂无剧本</p><button onClick={() => onOpenEditor()}>创作第一个故事</button></div>}
         </section>
         <button inert={busy} className="lobby-create-invitation" onClick={() => onOpenEditor()}><PenTool size={22} /><strong>更多故事，只等你落笔</strong><span>开始创作<ArrowRight size={17} /></span></button>
-      </motion.main>
+      </main>
       <footer inert={busy} className="border-t border-border/30 py-6 text-center text-sm text-muted-foreground">© 2026 独醒 AI剧本杀</footer>
 
       <AnimatePresence>{showSettings && <SettingsModal onClose={() => setShowSettings(false)} onOwnershipClaimed={loadScripts} />}</AnimatePresence>

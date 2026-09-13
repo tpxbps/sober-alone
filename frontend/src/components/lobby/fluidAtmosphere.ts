@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { FluidSimulation } from "three-fluid-fx";
+import { FrameBudget } from "./frameBudget";
 
 const vertexShader = `
 varying vec2 vUv;
@@ -73,6 +74,7 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
   const covers = new Map<HTMLImageElement, Cover>();
   const textures = new Map<string, THREE.Texture>();
   let disposed = false, frame = 0, dirty = true, width = innerWidth, height = innerHeight;
+  const frameBudget = new FrameBudget();
   let lastTime = performance.now(), nextAmbient = lastTime + 1500, ambientUntil = 0;
   let ambientX = .5, ambientY = .5, ambientBegan = 0, ambientDuration = 1, broadAmbient = false;
   let pendingSplat: { x: number; y: number; dx: number; dy: number } | null = null;
@@ -109,7 +111,6 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
   loadImage("/lobby/theatre.webp", texture => {
     background.material.uniforms.map.value = texture;
     background.material.uniforms.imageSize.value.set((texture.image as HTMLImageElement).width, (texture.image as HTMLImageElement).height);
-    root.dataset.renderer = "webgl";
   });
   function syncCovers() {
     const images = new Set(root.querySelectorAll<HTMLImageElement>(".card-cover-media"));
@@ -129,7 +130,7 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
         if (!image.isConnected || covers.get(image) !== cover) return;
         mesh.material.uniforms.map.value = texture;
         mesh.material.uniforms.imageSize.value.set((texture.image as HTMLImageElement).width, (texture.image as HTMLImageElement).height);
-        image.dataset.gpu = "ready"; dirty = true;
+        dirty = true;
       });
     });
   }
@@ -172,7 +173,7 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
   window.addEventListener("scroll", markDirty, { passive: true });
   window.addEventListener("resize", resize);
   root.addEventListener("load", markDirty, true);
-  const visibility = () => { lastTime = performance.now(); if (!document.hidden && !frame) frame = requestAnimationFrame(draw); };
+  const visibility = () => { lastTime = performance.now(); frameBudget.reset(); if (!document.hidden && !frame) frame = requestAnimationFrame(draw); };
   document.addEventListener("visibilitychange", visibility);
   resize();
   function draw(now: number) {
@@ -180,7 +181,12 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
     if (disposed || document.hidden) return;
     frame = requestAnimationFrame(draw);
     const delta = Math.min((now - lastTime) / 1000, .035); lastTime = now;
-    if (paused()) return;
+    if (paused()) { frameBudget.reset(); return; }
+    if (frameBudget.exceeded(now)) {
+      cleanup();
+      root.dataset.renderer = "fallback";
+      return;
+    }
     const transitioning = root.classList.contains("is-transitioning");
     const surfaceOpacity = content ? Number(getComputedStyle(content).opacity) : 1;
     if (dirty || transitioning) { syncCovers(); covers.forEach(cover => { cover.bounds = cover.image.getBoundingClientRect(); }); dirty = false; }
@@ -226,6 +232,14 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
       cover.mesh.scale.set(rect.width, rect.height, 1);
     });
     renderer.setRenderTarget(null); renderer.render(scene, camera);
+    // Keep the DOM backdrop and covers visible until a textured frame exists.
+    // Texture download completion alone does not mean pixels have been drawn.
+    if (background.material.uniforms.map.value) {
+      root.dataset.renderer = "webgl";
+      covers.forEach(cover => {
+        if (cover.mesh.visible) cover.image.dataset.gpu = "ready";
+      });
+    }
   }
   frame = requestAnimationFrame(draw);
   function cleanup() {

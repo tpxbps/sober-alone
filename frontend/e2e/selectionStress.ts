@@ -9,12 +9,12 @@ export async function stressSelection(page: Page, text: Locator, cycles = 35) {
   const end = Math.min(rect.x + rect.width - 4, x + 140);
   for (let i = 0; i < cycles; i++) {
     await test.step(`Select and clear text, cycle ${i + 1}`, async () => {
-    await page.mouse.move(x, y);
-    await page.mouse.down();
-    await page.mouse.move(end, y, { steps: 2 });
-    await page.mouse.up();
-    await page.mouse.dblclick(x + 15, y);
-    await page.mouse.click(rect.x + rect.width + 5, y);
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+      await page.mouse.move(end, y, { steps: 2 });
+      await page.mouse.up();
+      await page.mouse.dblclick(x + 15, y);
+      await page.mouse.click(rect.x + rect.width + 5, y);
     });
   }
   const state = await page.evaluate(() => ({

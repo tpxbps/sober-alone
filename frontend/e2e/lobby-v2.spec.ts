@@ -45,6 +45,48 @@ async function fixture(page: Page, options: { failCreate?: boolean; failInit?: b
   return seen;
 }
 test.use({reducedMotion:"reduce",video:"on"});
+test.describe("页面切换画面连续性", () => {
+  test.use({reducedMotion:"no-preference"});
+  for (const native of [true, false]) {
+    test(native ? "快照叠入保持旧画面，背景节点跨页面保留" : "不支持快照时直接切换，内容与背景不淡空", async ({page}, info) => {
+      if (!native) await page.addInitScript(() => Object.defineProperty(document, "startViewTransition", {value:undefined}));
+      await fixture(page);
+      await expect.poll(() => page.locator(".app-backdrops img").evaluateAll(images => images.every(image => (image as HTMLImageElement).complete && (image as HTMLImageElement).naturalWidth > 0))).toBe(true);
+      await page.evaluate(() => {
+        const backdrop = document.querySelector(".app-backdrops");
+        const frames: Array<{content:number; background:number; retained:boolean}> = [];
+        const state = window as unknown as {sceneFrames:typeof frames; sampling:boolean};
+        state.sceneFrames = frames; state.sampling = true;
+        const sample = () => {
+          const surfaces = document.querySelectorAll(".app-screen > div, .lobby-main");
+          const content = surfaces.length ? Math.min(...Array.from(surfaces, el => Number(getComputedStyle(el).opacity))) : 0;
+          const background = Array.from(document.querySelectorAll(".app-backdrops img"), el => Number(getComputedStyle(el).opacity)).reduce((a,b) => a+b, 0);
+          frames.push({content, background, retained:backdrop === document.querySelector(".app-backdrops")});
+          if (state.sampling) requestAnimationFrame(sample);
+        }; requestAnimationFrame(sample);
+      });
+      await page.getByRole("button", {name:"打开剧本 雾中来信"}).click();
+      await expect(page.locator(".setup-metadata h1")).toHaveText("雾中来信");
+      await expect(page.locator(".game-entry-overlay")).toHaveCount(0);
+      await page.getByRole("button", {name:"返回列表"}).click();
+      await expect(page.locator(".script-setup")).toHaveCount(0);
+      await page.getByRole("button", {name:"创作工坊", exact:true}).click();
+      await expect(page.getByRole("button", {name:"返回剧本大厅"})).toBeVisible();
+      await page.screenshot({path:info.outputPath("workshop-transition.png")});
+      await page.getByRole("button", {name:"返回剧本大厅"}).click();
+      await expect(page.getByRole("button", {name:"打开剧本 雾中来信"})).toBeVisible();
+      await expect(page.locator(".app-backdrops .backdrop-home")).toHaveCSS("opacity", "0.32");
+      const frames = await page.evaluate(() => {
+        const state = window as unknown as {sceneFrames:Array<{content:number; background:number; retained:boolean}>;sampling:boolean};
+        state.sampling = false;
+        return state.sceneFrames;
+      });
+      expect(frames.length).toBeGreaterThan(10);
+      expect(frames.every(frame => frame.content === 1 && frame.background >= .3 && frame.retained)).toBe(true);
+      await info.attach("navigation-frame-samples", {body:JSON.stringify(frames),contentType:"application/json"});
+    });
+  }
+});
 test("初始全量分组、键盘选本、返回原卡片与快速换本取消旧角色", async ({page}) => {
   const seen = await fixture(page,{deferCharacters:true});
   await expect(page.locator(".script-setup")).toHaveCount(0);
@@ -121,25 +163,39 @@ test.describe("动态显现",()=>{
   test.use({reducedMotion:"no-preference",viewport:{width:1280,height:800}});
   test("单画布、即时坐标、跨卡片显现和 WebGL 回退",async({page},info)=>{
     await fixture(page);
-    await expect(page.locator(".dream-lobby")).toHaveAttribute("data-renderer","webgl");
+    await expect(page.locator(".dream-lobby")).toHaveAttribute("data-renderer",/webgl|fallback/);
     await expect(page.locator(".lobby-atmosphere")).toHaveCount(1);
-    await expect(page.locator(".card-cover-media[data-gpu='ready']")).toHaveCount(2);
+    await expect.poll(()=>page.evaluate(()=>document.querySelector('.dream-lobby')?.getAttribute('data-renderer')==='fallback' || document.querySelectorAll(".card-cover-media[data-gpu='ready']").length===2)).toBe(true);
     const title=page.getByRole("button",{name:"打开剧本 雾中来信"});
     const rect=(await title.boundingBox())!;
     await page.mouse.move(rect.x+20,rect.y+10);
-    await expect(page.locator(".lobby-atmosphere")).toHaveAttribute("data-pointer",(rect.x+20)+","+(rect.y+10));
+    const source=await page.evaluate(()=>({renderer:document.querySelector('.dream-lobby')?.getAttribute('data-renderer'),pointer:document.querySelector('.lobby-atmosphere')?.getAttribute('data-pointer')}));
+    if(source.renderer==='webgl') expect(source.pointer).toBe((rect.x+20)+","+(rect.y+10));
     await expect(page.locator(".card-overview").first()).toHaveCSS("filter","none");
     await page.screenshot({path:info.outputPath("fluid-revealed.png")});
     for (const [x,y] of [[850,500],[400,290],[750,170],[300,600],[900,400]]) await page.mouse.move(x,y,{steps:10});
     await page.screenshot({path:info.outputPath("fluid-trail.png")});
     await page.mouse.move(1000,90);
-    await expect(page.locator(".card-overview").first()).toHaveCSS("filter","blur(0.65px)");
+    await expect.poll(()=>page.evaluate(()=>getComputedStyle(document.querySelector('.card-overview')!).filter===(document.querySelector('.dream-lobby')?.getAttribute('data-renderer')==='fallback'?'none':'blur(0.65px)'))).toBe(true);
     await page.waitForTimeout(5500); // Include an autonomous current in the acceptance recording.
     await page.screenshot({path:info.outputPath("fluid-ambient.png")});
     await page.locator("canvas").evaluate((canvas:HTMLCanvasElement)=>canvas.getContext("webgl2")?.getExtension("WEBGL_lose_context")?.loseContext());
     await expect(page.locator(".dream-lobby")).toHaveAttribute("data-renderer","fallback");
     await expect(page.locator(".card-overview").first()).toHaveCSS("filter","none");
     await expect(page.locator(".card-cover-media").first()).not.toHaveAttribute("data-gpu","ready");
+  });
+  test("持续低帧率时退出流体绘制，保持卡片可读且可以选本",async({page})=>{
+    // A slow frame scheduler models a device that can present only about 8fps.
+    await page.addInitScript(()=>{
+      window.requestAnimationFrame=callback=>window.setTimeout(()=>callback(performance.now()),120);
+      window.cancelAnimationFrame=window.clearTimeout.bind(window);
+    });
+    await fixture(page);
+    await expect(page.locator('.dream-lobby')).toHaveAttribute('data-renderer','fallback',{timeout:12000});
+    await expect(page.locator('.card-overview').first()).toHaveCSS('filter','none');
+    await expect(page.locator('.card-cover-media[data-gpu="ready"]')).toHaveCount(0);
+    await page.getByRole('button',{name:'打开剧本 雾中来信'}).click();
+    await expect(page.getByRole('button',{name:'扮演 陆鸣',exact:true})).toBeVisible();
   });
 });
 
@@ -253,7 +309,7 @@ test("详情评分细则与模型异常提示保持可读，键盘返回恢复�
   await expect(page.locator(".lobby-heading")).toBeVisible();
   await page.getByRole("button",{name:"打开剧本 雾中来信"}).click();
   await expect(page.locator(".lobby-heading")).toHaveCount(0);
-  await expect(page.locator(".setup-cover img")).toHaveCSS("object-fit","contain");
+  await expect(page.locator(".setup-cover-art")).toHaveCSS("object-fit","cover");
   const score=page.getByRole("button",{name:"AI评分: 78，查看评分细则",exact:true});
   await score.hover();
   await expect(page.locator("[data-rating-explanation]")).toContainText("逻辑完整性");

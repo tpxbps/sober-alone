@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { useReducedMotion } from 'framer-motion';
+import { flushSync } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 
 import { Homepage } from '@/screens/Homepage';
@@ -9,6 +10,8 @@ import { useSettingsStore } from '@/stores/settingsStore';
 import { useGameStore } from '@/stores/gameStore';
 import { hasStoredEditorSession } from '@/stores/editorStore';
 import { gameApi } from '@/lib/api';
+import { SceneBackdrop } from '@/components/lobby/SceneBackdrop';
+import { transitionScene } from '@/lib/sceneTransition';
 
 type AppScreen = 'home' | 'game' | 'editor';
 
@@ -23,6 +26,7 @@ function App() {
   const [entering, setEntering] = useState(false);
   const reducedMotion = useReducedMotion();
   const lobbyMotionEnabled = useSettingsStore(state => state.lobbyMotionEnabled);
+  const quiet = Boolean(reducedMotion) || !lobbyMotionEnabled;
   useEffect(() => {
     if (!entering) return;
     const timer = setTimeout(() => setEntering(false), 350);
@@ -98,17 +102,23 @@ function App() {
 
   // Handle opening script editor
   const handleOpenEditor = useCallback((scriptId?: string) => {
-    setEditScriptId(scriptId || null);
-    setCurrentScreen('editor');
-    setSearchParams({ editor: scriptId ? `edit:${scriptId}` : 'resume' });
-  }, [setSearchParams]);
+    void transitionScene(() => {
+      flushSync(() => {
+        setEditScriptId(scriptId || null);
+        setCurrentScreen('editor');
+        setSearchParams({ editor: scriptId ? `edit:${scriptId}` : 'resume' });
+      });
+      window.scrollTo({ top: 0, behavior: 'instant' });
+    }, quiet);
+  }, [setSearchParams, quiet]);
 
   // Handle exiting editor back to home
   const handleExitEditor = useCallback(() => {
-    setEditScriptId(null);
-    setCurrentScreen('home');
-    setSearchParams({});
-  }, [setSearchParams]);
+    void transitionScene(() => {
+      flushSync(() => { setEditScriptId(null); setCurrentScreen('home'); setSearchParams({}); });
+      window.scrollTo({ top: 0, behavior: 'instant' });
+    }, quiet);
+  }, [setSearchParams, quiet]);
 
   // Handle exiting game
   const handleExitGame = useCallback(() => {
@@ -118,11 +128,13 @@ function App() {
     store.cancelActiveOperations();
 
     // 2. Reset store state
-    reset();
-    setSessionId(null);
-    setCurrentScreen('home');
-    setSearchParams({});
-    localStorage.removeItem(STORAGE_KEY);
+    void transitionScene(() => {
+      flushSync(() => {
+        reset(); setSessionId(null); setCurrentScreen('home'); setSearchParams({});
+        localStorage.removeItem(STORAGE_KEY);
+      });
+      window.scrollTo({ top: 0, behavior: 'instant' });
+    }, quiet);
 
     // 3. Fire-and-forget: notify backend to clean up resources
     if (currentSessionId) {
@@ -130,7 +142,7 @@ function App() {
         // Silently ignore - backend cleanup is best-effort
       });
     }
-  }, [sessionId, reset, setSearchParams]);
+  }, [sessionId, reset, setSearchParams, quiet]);
 
   // Show loading state while restoring
   if (isRestoring) {
@@ -145,44 +157,27 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <AnimatePresence mode="wait">
+    <div className="app-shell min-h-screen text-foreground" data-quiet={quiet || undefined}>
+      <SceneBackdrop screen={currentScreen} />
+      <div className="app-screen">
         {currentScreen === 'home' && (
-          <motion.div
-            key="home"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 1 }}
-            transition={{ duration: 0 }}
-          >
+          <div key="home">
             <Homepage onStartGame={handleStartGame} onOpenEditor={handleOpenEditor} />
-          </motion.div>
+          </div>
         )}
 
         {currentScreen === 'game' && sessionId && (
-          <motion.div
-            key="game"
-            initial={false}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 1 }}
-            transition={{ duration: 0 }}
-          >
+          <div key="game">
             <GamePage sessionId={sessionId} onExit={handleExitGame} />
-          </motion.div>
+          </div>
         )}
 
         {currentScreen === 'editor' && (
-          <motion.div
-            key="editor"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
-          >
+          <div key="editor">
             <ScriptEditorPage onBack={handleExitEditor} editScriptId={editScriptId} />
-          </motion.div>
+          </div>
         )}
-      </AnimatePresence>
+      </div>
       {entering && currentScreen === 'game' && <div aria-hidden="true" className={"game-entry-overlay game-entry-arrival" + (reducedMotion || !lobbyMotionEnabled ? " is-quiet" : "")} />}
     </div>
   );

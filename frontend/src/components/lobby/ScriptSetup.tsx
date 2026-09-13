@@ -20,7 +20,6 @@ export function ScriptSetup({ script, quiet, onBack, onStartGame, onBusyChange }
       <button className="setup-back" onClick={event => onBack(event.detail === 0)} disabled={busy}><ArrowLeft size={16} />返回列表</button>
       <div className="setup-grid">
         <div className="setup-story">
-          <div className="setup-cover" aria-hidden="true"><StoryCover src={script.cover_image_url} /></div>
           <div className="setup-metadata">
           <h1 tabIndex={-1} className="setup-title">{script.title}</h1>
           <div className="setup-tags">{getScriptDisplayTags(script).map(tag => <span key={tag}>{tag}</span>)}</div>
@@ -28,6 +27,9 @@ export function ScriptSetup({ script, quiet, onBack, onStartGame, onBusyChange }
           <p className="setup-overview">{script.overview || script.description}</p>
           {script.description && script.description !== script.overview && <details className="setup-full-description"><summary>完整简介</summary><p>{script.description}</p></details>}
           <div className="setup-rating"><ScriptRating script={script} context="detail" disabled={busy} /></div>
+          </div>
+          <div className="setup-cover" aria-hidden="true">
+            <div className="setup-portal"><StoryCover className="setup-cover-veil" src={script.cover_image_url} /><StoryCover className="setup-cover-art" src={script.cover_image_url} loading="eager" /></div>
           </div>
         </div>
         <div className="setup-casting">

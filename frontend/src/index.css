@@ -82,13 +82,21 @@
 }
 .font-serif { font-family: var(--font-display); }
 body { font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; }
-.scene-screen { position: relative; isolation: isolate; background: var(--background); }
-.scene-screen::before {
-  content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
-  background-position: center; background-size: cover; opacity: .43;
-}
-.scene-game::before { background-image: url("/lobby/game.webp"); }
-.scene-workshop::before { background-image: url("/lobby/workshop.webp"); opacity: .38; }
+.app-shell { position:relative; isolation:isolate; background:var(--background); }
+.app-shell[data-quiet] .app-backdrops img { transition:none; }
+.app-screen { position:relative; z-index:1; }
+.app-backdrops { position:fixed; inset:0; z-index:0; pointer-events:none; background:var(--background); }
+.app-backdrops img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; opacity:0; transition:opacity .8s ease; }
+.app-backdrops[data-scene="home"] .backdrop-home { opacity:.32; }
+.app-backdrops[data-scene="game"] .backdrop-game { opacity:.43; }
+.app-backdrops[data-scene="editor"] .backdrop-editor { opacity:.38; }
+.scene-screen { position:relative; isolation:isolate; background:transparent; }
+::view-transition-group(root) { animation-duration:.6s; }
+::view-transition-old(root) { animation:none; opacity:1; mix-blend-mode:normal; }
+::view-transition-new(root) { animation:scene-resolve .6s cubic-bezier(.22,1,.36,1) both; mix-blend-mode:normal; }
+::view-transition { pointer-events:none; }
+@keyframes scene-resolve { from { opacity:0; filter:blur(3px); } to { opacity:1; filter:blur(0); } }
+@media(prefers-reduced-motion:reduce) { .app-backdrops img { transition:none; } }
 .scene-screen .glass { background: color-mix(in srgb, var(--card) 58%, transparent); }
 .scene-screen .glass-dark { background: color-mix(in srgb, var(--background) 68%, transparent); }
 @layer base {
