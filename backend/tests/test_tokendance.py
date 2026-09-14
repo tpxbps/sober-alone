@@ -71,6 +71,15 @@ def test_model_aliases():
     assert gateway_model("doubao-seed-2-0-mini-260215") == "seed-2.0-mini"
 
 
+def test_legacy_voice_gender_survives_without_character_metadata():
+    from app.script_editor.conversion.service import STEP_FEMALE_VOICES, STEP_MALE_VOICES
+    from app.services.voices import MINIMAX_VOICES, resolve_minimax_voice
+
+    genders = {voice: gender for voice, _, gender in MINIMAX_VOICES}
+    for voices, expected in ((STEP_FEMALE_VOICES, "女"), (STEP_MALE_VOICES, "男")):
+        assert all(genders[resolve_minimax_voice(voice)] == expected for voice in voices)
+
+
 def test_embeddings_sort_and_reject_incomplete_batches(monkeypatch, gateway):
     from app.rag import embeddings
 

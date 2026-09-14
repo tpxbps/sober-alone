@@ -38,6 +38,15 @@ LEGACY_VOICES = {
     "youyanvsheng": "female-chengshu",
     "wenroushunv": "Chinese (Mandarin)_Gentle_Senior",
     "wenrounvsheng": "Chinese (Mandarin)_Gentle_Senior",
+    "elegantgentle-female": "Chinese (Mandarin)_Gentle_Senior",
+    "livelybreezy-female": "Chinese (Mandarin)_Warm_Bestie",
+    "jingdiannvsheng": "female-chengshu",
+    "tianmeinvsheng": "female-tianmei",
+    "linjiajiejie": "Chinese (Mandarin)_Warm_Bestie",
+    "qinqienvsheng": "Chinese (Mandarin)_Gentle_Senior",
+    "jilingshaonv": "female-shaonv",
+    "ruanmengnvsheng": "female-tianmei",
+    "linjiameimei": "female-shaonv",
 }
 
 
