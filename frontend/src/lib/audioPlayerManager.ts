@@ -26,6 +26,8 @@ class AudioPlayerManager {
   private streamingChunks: Uint8Array[] = [];
   private appendQueue: Uint8Array[] = [];
   private isAppending = false;
+  private bufferedPlayback = false;
+  private streamEnded = false;
 
   // ========== Blob 缓存 ==========
   private blobCache: Map<number, string> = new Map();
@@ -202,10 +204,12 @@ class AudioPlayerManager {
     this.streamingChunks = [];
     this.appendQueue = [];
     this.isAppending = false;
+    this.streamEnded = false;
 
     // 检查 MediaSource 是否支持 MP3
-    if (!MediaSource.isTypeSupported('audio/mpeg')) {
-      throw new Error('Browser does not support MediaSource audio/mpeg');
+    this.bufferedPlayback = typeof MediaSource === 'undefined' || !MediaSource.isTypeSupported('audio/mpeg');
+    if (this.bufferedPlayback) {
+      return;
     }
 
     this.mediaSource = new MediaSource();
@@ -238,6 +242,7 @@ class AudioPlayerManager {
   }
 
   async appendChunk(base64Audio: string): Promise<void> {
+    if (this.mode !== 'streaming' || this.streamEnded) return;
     const bytes = base64ToUint8Array(base64Audio);
     this.streamingChunks.push(bytes);
 
@@ -259,14 +264,20 @@ class AudioPlayerManager {
   }
 
   private processAppendQueue() {
-    if (this.isAppending || this.appendQueue.length === 0 || !this.sourceBuffer) return;
+    if (this.isAppending || !this.sourceBuffer) return;
+    if (this.appendQueue.length === 0) {
+      this.finishMediaStream();
+      return;
+    }
 
     this.isAppending = true;
     const chunk = this.appendQueue.shift()!;
+    const buffer = this.sourceBuffer;
 
     const doAppend = () => {
       try {
-        this.sourceBuffer!.appendBuffer(chunk.buffer as ArrayBuffer);
+        if (this.sourceBuffer !== buffer) return;
+        buffer.appendBuffer(chunk.buffer as ArrayBuffer);
       } catch {
         this.isAppending = false;
         return;
@@ -275,7 +286,7 @@ class AudioPlayerManager {
 
     if (this.sourceBuffer.updating) {
       const handler = () => {
-        this.sourceBuffer!.removeEventListener('updateend', handler);
+        buffer.removeEventListener('updateend', handler);
         doAppend();
       };
       this.sourceBuffer.addEventListener('updateend', handler);
@@ -284,27 +295,35 @@ class AudioPlayerManager {
     }
 
     const endHandler = () => {
-      this.sourceBuffer!.removeEventListener('updateend', endHandler);
+      buffer.removeEventListener('updateend', endHandler);
+      if (this.sourceBuffer !== buffer) return;
       this.isAppending = false;
       this.processAppendQueue(); // 处理队列中下一个
     };
     this.sourceBuffer.addEventListener('updateend', endHandler);
   }
 
-  endStream(recordId: number): string | null {
-    if (this.mediaSource && this.mediaSource.readyState === 'open') {
+  private finishMediaStream() {
+    if (this.streamEnded && !this.isAppending && !this.appendQueue.length && !this.sourceBuffer?.updating && this.mediaSource?.readyState === 'open') {
       try {
         this.mediaSource.endOfStream();
       } catch {
         // ignore
       }
     }
+  }
+
+  endStream(recordId: number): string | null {
+    if (this.streamEnded) return this.getCachedUrl(recordId);
+    this.streamEnded = true;
+    this.finishMediaStream();
 
     // 缓存
     if (this.streamingChunks.length > 0) {
       const blob = new Blob(this.streamingChunks as BlobPart[], { type: 'audio/mpeg' });
       const blobUrl = URL.createObjectURL(blob);
       this.blobCache.set(recordId, blobUrl);
+      if (this.bufferedPlayback) void this.play(blobUrl);
       return blobUrl;
     }
     return null;

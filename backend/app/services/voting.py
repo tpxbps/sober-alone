@@ -9,6 +9,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.inference import InferenceRecoveryError, raise_for_inference_recovery
 from app.db.models import GameRecord, GameSession, PlayerState
 
 ControllerGetter = Callable[[str], Any | None]
@@ -151,7 +152,10 @@ class VotingService:
                 "message": f"投票成功！你已投票给「{suspect_name}」",
             }
 
+        except InferenceRecoveryError:
+            raise
         except Exception as e:
+            raise_for_inference_recovery(e)
             await self.db.rollback()
             return {"success": False, "error": f"投票失败：{str(e)}"}
 
@@ -220,7 +224,10 @@ class VotingService:
             else:
                 return {"success": False, "message": "AI未能完成投票"}
 
+        except InferenceRecoveryError:
+            raise
         except Exception as e:
+            raise_for_inference_recovery(e)
             return {"success": False, "message": str(e)}
 
     async def get_results(self, session_id: str) -> dict[str, Any]:
@@ -248,7 +255,10 @@ class VotingService:
 
             return VotingService.summarize(game_session.votes)
 
-        except Exception:
+        except InferenceRecoveryError:
+            raise
+        except Exception as exc:
+            raise_for_inference_recovery(exc)
             return {}
 
     async def record_abstain(self, flow_controller, character_id: str, db_session):
@@ -298,7 +308,10 @@ class VotingService:
             )
             db_session.add(record)
             await db_session.commit()
-        except Exception:
+        except InferenceRecoveryError:
+            raise
+        except Exception as exc:
+            raise_for_inference_recovery(exc)
             await db_session.rollback()
 
     async def finalize(self, session_id: str) -> dict[str, Any]:
@@ -371,7 +384,10 @@ class VotingService:
                         )
                         await vote_session.commit()
                         return result
+                    except InferenceRecoveryError:
+                        raise
                     except Exception as e:
+                        raise_for_inference_recovery(e)
                         await vote_session.rollback()
                         return {"success": False, "message": str(e)}
 
@@ -387,6 +403,8 @@ class VotingService:
 
             # 顺序处理失败（弃票）
             for (char_id, info), result in zip(ai_agents, results):
+                if isinstance(result, InferenceRecoveryError):
+                    raise result
                 if isinstance(result, Exception):
                     await self.record_abstain(flow_controller, char_id, self.db)
                 elif isinstance(result, dict) and not result.get("success"):

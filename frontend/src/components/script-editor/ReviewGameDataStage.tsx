@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { AlertTriangle, ArrowDown, ArrowUp, ChevronDown, ChevronUp, CircleHelp, Pencil, Plus, Trash2 } from "lucide-react";
 import * as Tooltip from "@radix-ui/react-tooltip";
@@ -10,7 +10,7 @@ import type {
 } from "@/types/editor";
 import { LoadingButton } from "./EditorControls";
 import { getButtonLoadingMessage } from "./editorMessages";
-import { STEP_VOICE_GROUPS, STEP_VOICE_OPTIONS } from "@/lib/stepVoices";
+import { STEP_VOICE_GROUPS } from "@/lib/stepVoices";
 import { EndingEditor } from "./EndingEditor";
 import { Markdown } from "@/components/ui/Markdown";
 
@@ -37,6 +37,18 @@ export function ReviewGameDataStage({
   workflowState: EditorWorkflowState | null;
   moleActive: boolean;
 }) {
+  const [voiceGroups, setVoiceGroups] = useState(STEP_VOICE_GROUPS);
+  const voiceOptions = voiceGroups.flatMap(group => group.voices);
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch('/api/v1/system/voices', { signal: controller.signal })
+      .then(response => response.ok ? response.json() : null)
+      .then((result: { provider: string; voices: { id: string; label: string; gender: string }[] } | null) => {
+        if (result?.provider !== 'minimax' || !result.voices.length) return;
+        setVoiceGroups(['男', '女'].map(gender => ({ label: `${gender}声`, voices: result.voices.filter(voice => voice.gender === gender) })));
+      }).catch(() => {});
+    return () => controller.abort();
+  }, []);
   const [expandedSections, setExpandedSections] = useState<
     Record<string, boolean>
   >({
@@ -518,10 +530,10 @@ export function ReviewGameDataStage({
                           >
                             <p className="font-medium">游戏实时 TTS 音色</p>
                             <p className="mt-1 text-muted-foreground">
-                              Voice ID 决定该角色在游戏发言时使用的 step-tts-mini 音色。建议按角色性别、年龄和气质选择；当前支持以下音色：
+                              Voice ID 决定该角色在游戏发言时使用的实时语音音色。建议按角色性别、年龄和气质选择；当前支持以下音色：
                             </p>
                             <div className="mt-3 space-y-3">
-                              {STEP_VOICE_GROUPS.map((group) => (
+                              {voiceGroups.map((group) => (
                                 <div key={group.label}>
                                   <p className="mb-1 font-medium text-primary">
                                     {group.label}
@@ -553,7 +565,7 @@ export function ReviewGameDataStage({
                     className="w-full text-xs bg-transparent border border-border/30 rounded-md p-2 focus:outline-none focus:border-primary/50"
                   />
                   <datalist id={`step-voice-options-${idx}`}>
-                    {STEP_VOICE_OPTIONS.map((voice) => (
+                    {voiceOptions.map((voice) => (
                       <option key={voice.id} value={voice.id}>
                         {voice.label}
                       </option>

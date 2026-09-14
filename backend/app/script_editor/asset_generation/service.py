@@ -164,7 +164,7 @@ async def _generate_assets(state: ScriptGenState) -> dict:
     phase_jobs = []
     vector_task_ids = {f"vector_{c.get('character_id', str(i))}" for i, c in enumerate(characters)}
     selected_vectors = vector_task_ids if selected is None else vector_task_ids & selected
-    if settings.ZHIPUAI_API_KEY and selected_vectors:
+    if settings.get_api_key("zhipuai") and selected_vectors:
         phase_jobs.append(_run_vectorize(script_id, state, characters, selected_vectors))
     else:
         for task_id in selected_vectors:
@@ -175,7 +175,7 @@ async def _generate_assets(state: ScriptGenState) -> dict:
         *[f"avatar_{c.get('character_id', str(i))}" for i, c in enumerate(characters)],
     ]
     selected_images = set(image_task_ids) if selected is None else set(image_task_ids) & selected
-    if settings.DOUBAO_API_KEY and selected_images:
+    if settings.get_api_key("bytedance") and selected_images:
         phase_jobs.append(_run_images(script_id, state, characters, selected_images, edit_mode))
     else:
         for task_id in selected_images:
@@ -191,7 +191,7 @@ async def _generate_assets(state: ScriptGenState) -> dict:
     for task_id in selected_tts & empty_character_tts:
         _update_task_status(script_id, task_id, "skipped", "角色个人剧本为空")
     selected_tts -= empty_character_tts
-    if settings.MIMO_API_KEY and selected_tts:
+    if settings.get_api_key("mimo") and selected_tts:
         phase_jobs.append(
             _run_tts(
                 script_id,

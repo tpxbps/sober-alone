@@ -148,7 +148,17 @@ async def _save_generated_script(state: ScriptGenState) -> dict:
 
                 char_script = character_scripts.get(name, "") or cd.get("character_script", "")
 
-                voice_id = cd.get("step_voice_id", "") or character_voice_ids.get(char_id, "")
+                voice_id = (
+                    cd.get("step_voice_id", "")
+                    or cd.get("tts_voice_id", "")
+                    or character_voice_ids.get(char_id, "")
+                )
+                voice_provider = "stepfun"
+                if settings.INFERENCE_BACKEND == "tokendance":
+                    from app.services.voices import resolve_minimax_voice
+
+                    voice_id = resolve_minimax_voice(voice_id, {**c, **cd})
+                    voice_provider = "minimax"
 
                 values = (
                     name,
@@ -182,6 +192,11 @@ async def _save_generated_script(state: ScriptGenState) -> dict:
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                         (script_id, char_id, *values[:9], avatar, avatar, values[9]),
                     )
+
+                await db.execute(
+                    "UPDATE characters SET voice_provider = ? WHERE character_id = ?",
+                    (voice_provider, char_id),
+                )
 
             from app.game.endings import normalize_endings
 

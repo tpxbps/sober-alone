@@ -35,7 +35,11 @@ class ChromaRetriever:
         self.client = chromadb.PersistentClient(
             path=self.persist_dir, settings=ChromaSettings(anonymized_telemetry=False)
         )
-        self.zhipu_client = ZhipuAI(api_key=settings.ZHIPUAI_API_KEY)
+        self.zhipu_client = (
+            ZhipuAI(api_key=settings.ZHIPUAI_API_KEY)
+            if settings.INFERENCE_BACKEND != "tokendance"
+            else None
+        )
         self.embedding_model = "embedding-3"
 
     def _get_collection_name(self, script_id: str) -> str:
@@ -61,6 +65,10 @@ class ChromaRetriever:
         Returns:
             List[List[float]]: 嵌入向量列表
         """
+        if settings.INFERENCE_BACKEND == "tokendance":
+            from app.rag.embeddings import embed
+
+            return embed(texts)
         response = self.zhipu_client.embeddings.create(
             model=self.embedding_model, input=texts, dimensions=1024
         )
@@ -83,6 +91,9 @@ class ChromaRetriever:
             collection = await asyncio.to_thread(
                 self.client.get_collection, self._get_collection_name(script_id)
             )
+            from app.rag.embeddings import validate_collection
+
+            validate_collection(collection)
             data = await asyncio.to_thread(
                 collection.get,
                 where={"$and": [{"character_id": character_id}, {"content_digest": digest}]},
@@ -132,6 +143,9 @@ class ChromaRetriever:
 
         try:
             collection = await asyncio.to_thread(self.client.get_collection, collection_name)
+            from app.rag.embeddings import validate_collection
+
+            validate_collection(collection)
         except Exception as e:
             logger.debug(
                 "Chroma collection unavailable: %s (%s)", collection_name, type(e).__name__

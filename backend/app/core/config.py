@@ -17,6 +17,11 @@ class Settings(BaseSettings):
     API_V1_PREFIX: str = "/api/v1"
     PROJECT_NAME: str = "Sober Alone"
     ALLOW_LEGACY_OWNER_CLAIM: bool = False
+    INFERENCE_BACKEND: str = "direct"
+    TOKENDANCE_API_KEY: str | None = None
+    TOKENDANCE_BASE_URL: str = "https://tokendance.space/gateway"
+    TOKENDANCE_APP_URL: str = ""
+    TOKENDANCE_REQUIRE_SCOPE: bool = False
 
     # Database
     DATABASE_URL: str = _sqlite_url(LOCAL_DATA_DIR / "game_data.db")
@@ -91,6 +96,10 @@ class Settings(BaseSettings):
 
     def get_api_key(self, provider: str) -> str | None:
         """获取指定提供商的API Key"""
+        if self.INFERENCE_BACKEND == "tokendance":
+            from app.core.inference import gateway_available
+
+            return "scoped-credential" if gateway_available() else None
         key_mapping = {
             "zhipuai": self.ZHIPUAI_API_KEY,
             "deepseek": self.DEEPSEEK_API_KEY,
@@ -104,6 +113,8 @@ class Settings(BaseSettings):
 
     def get_base_url(self, provider: str) -> str | None:
         """获取指定提供商的API Base URL"""
+        if self.INFERENCE_BACKEND == "tokendance":
+            return self.TOKENDANCE_BASE_URL.rstrip("/") + "/v1"
         url_mapping = {
             "zhipuai": self.ZHIPUAI_API_BASE_URL,
             "deepseek": self.DEEPSEEK_API_BASE_URL,

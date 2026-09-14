@@ -9,6 +9,7 @@ from pathlib import Path
 from openai import AsyncOpenAI
 
 from app.core.config import settings
+from app.core.inference import InferenceRecoveryError, raise_for_inference_recovery
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,14 @@ IMAGE_ROOT = settings.image_dir / "scripts"
 
 
 def _get_doubao_client() -> AsyncOpenAI:
+    if settings.INFERENCE_BACKEND == "tokendance":
+        from app.core.inference import gateway_async_client, gateway_url
+
+        return AsyncOpenAI(
+            api_key="scoped-at-dispatch",
+            base_url=gateway_url("ark/v3"),
+            http_client=gateway_async_client(timeout=180),
+        )
     return AsyncOpenAI(
         base_url=settings.DOUBAO_API_BASE_URL,
         api_key=settings.DOUBAO_API_KEY,
@@ -107,7 +116,7 @@ async def _generate_image(
     Returns:
         是否成功
     """
-    if not settings.DOUBAO_API_KEY:
+    if not settings.get_api_key("bytedance"):
         logger.warning("DOUBAO_API_KEY not configured, skipping image generation")
         return False
 
@@ -116,11 +125,17 @@ async def _generate_image(
 
         client = _get_doubao_client()
         response = await client.images.generate(
-            model="doubao-seedream-4-0-250828",
+            model="seedream-5.0-lite"
+            if settings.INFERENCE_BACKEND == "tokendance"
+            else "doubao-seedream-4-0-250828",
             prompt=prompt,
-            size=size,  # type: ignore[arg-type]
+            size=("2560x1536" if size == "1280x768" else "2048x2048")
+            if settings.INFERENCE_BACKEND == "tokendance"
+            else size,  # type: ignore[arg-type]
             response_format="url",
-            extra_body={"watermark": True},
+            extra_body={"watermark": False, "output_format": "png"}
+            if settings.INFERENCE_BACKEND == "tokendance"
+            else {"watermark": True},
         )
 
         if not response.data:
@@ -143,6 +158,9 @@ async def _generate_image(
         logger.info(f"Image saved: {save_path} ({save_path.stat().st_size} bytes)")
         return True
 
+    except InferenceRecoveryError:
+        raise
     except Exception as e:
+        raise_for_inference_recovery(e)
         logger.error(f"Image generation error: {e}", exc_info=True)
         return False

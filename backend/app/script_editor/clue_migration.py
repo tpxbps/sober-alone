@@ -99,7 +99,7 @@ async def _convert(script: Script, source: list[dict]) -> tuple[list[dict], dict
         max_retries=2,
         disable_thinking=True,
     )
-    converter = llm.with_structured_output(ConvertedClues)
+    converter = llm.with_structured_output(ConvertedClues, method="function_calling")
     prompt = (
         "把下面每一轮旧系统线索拆成 overview 和若干独立线索项。"
         "必须逐轮处理，stage 原样保留；只能拆分、摘取和概括原文，禁止增加、删除、"
@@ -125,7 +125,7 @@ async def _convert(script: Script, source: list[dict]) -> tuple[list[dict], dict
         game_full_process=script.game_full_process or [],
     )
 
-    auditor = llm.with_structured_output(ConversionAudit)
+    auditor = llm.with_structured_output(ConversionAudit, method="function_calling")
     audit_prompt = (
         "逐轮对比原文与结构化结果。只有所有事实均被覆盖、没有新增事实、轮次和讨论提示"
         "均正确时 passed 才能为 true。\n原文：\n"
@@ -242,7 +242,7 @@ def backup_database(database_path: Path) -> Path:
 
 
 async def regenerate_clue_tts(script_ids: list[str] | None = None) -> None:
-    if not settings.MIMO_API_KEY:
+    if not settings.get_api_key("mimo"):
         raise RuntimeError("MIMO_API_KEY 未配置")
     async with AsyncSessionLocal() as db:
         query = select(Script).order_by(Script.created_at, Script.script_id)

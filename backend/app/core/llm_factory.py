@@ -62,6 +62,35 @@ def create_llm(
     model_lower = spec.id
     provider = spec.provider
 
+    if settings.INFERENCE_BACKEND == "tokendance":
+        from app.core.inference import (
+            gateway_async_client,
+            gateway_client,
+            gateway_model,
+            gateway_url,
+        )
+
+        extra = None
+        if disable_thinking:
+            if provider == "deepseek":
+                extra = {"thinking": {"type": "disabled"}}
+            elif spec.disable_thinking_extra == "qwen":
+                extra = {"enable_thinking": False}
+            elif spec.disable_thinking_extra == "glm_low":
+                extra = {"reasoning_effort": "low"}
+        return ChatOpenAI(
+            model=gateway_model(model_lower),
+            api_key=SecretStr("scoped-at-dispatch"),
+            base_url=gateway_url("v1"),
+            temperature=temperature,
+            timeout=timeout or 90,
+            max_retries=max_retries if max_retries is not None else 2,
+            extra_body=extra,
+            http_client=gateway_client(timeout=timeout or 90),
+            http_async_client=gateway_async_client(timeout=timeout or 90),
+            stream_usage=True,
+        )
+
     resolved_key = api_key or settings.get_api_key(provider)
     if not resolved_key:
         raise ValueError(f"未配置 {provider} 的 API Key")
@@ -178,6 +207,14 @@ def create_chat_model_for_agent(
 
 def create_summary_llm() -> BaseChatModel:
     """Create the summary model, falling back to the configured primary model."""
+    if settings.INFERENCE_BACKEND == "tokendance":
+        return create_llm(
+            model="step-3.5-flash",
+            temperature=0.3,
+            timeout=90,
+            max_retries=2,
+            disable_thinking=True,
+        )
     api_key = settings.get_api_key("stepfun")
     base_url = settings.get_base_url("stepfun")
     if not api_key or not base_url:

@@ -11,6 +11,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.inference import InferenceRecoveryError, raise_for_inference_recovery
 from app.db.models import GameStage
 
 logger = logging.getLogger(__name__)
@@ -199,7 +200,10 @@ class GameSpeechService:
                     elif chunk_type == "error":
                         agent_error = True
                         logger.error(f"Agent error for {character_id}: {chunk.get('message', '')}")
+        except InferenceRecoveryError:
+            raise
         except Exception as e:
+            raise_for_inference_recovery(e)
             agent_error = True
             logger.error(f"AI speech stream error: {e}")
 
@@ -228,7 +232,10 @@ class GameSpeechService:
                     "next_speaker_name": result.get("next_speaker_name"),
                     "stage_complete": result.get("stage_complete", False),
                 }
+            except InferenceRecoveryError:
+                raise
             except Exception as e:
+                raise_for_inference_recovery(e)
                 logger.error(f"process_speech failed after agent error: {e}")
                 next_speaker_info = {
                     "error": str(e),
@@ -247,7 +254,10 @@ class GameSpeechService:
                     "next_speaker_name": result.get("next_speaker_name"),
                     "stage_complete": result.get("stage_complete", False),
                 }
+            except InferenceRecoveryError:
+                raise
             except Exception as e:
+                raise_for_inference_recovery(e)
                 next_speaker_info = {
                     "error": str(e),
                 }

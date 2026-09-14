@@ -7,6 +7,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from app.core.config import settings
 from app.game.clues import derive_game_process, normalize_clue_stages, render_clue_markdown
 from app.script_editor.conversion.contracts import (
     CharacterDiscoveryResult,
@@ -33,6 +34,17 @@ from app.script_editor.conversion.prompts import (
 from app.script_editor.state import STEP_CONVERT, ScriptGenState
 
 logger = logging.getLogger(__name__)
+
+
+def _character_prompt(name: str) -> str:
+    prompt = CHARACTER_SYSTEM.format(char_name=name)
+    if settings.INFERENCE_BACKEND == "tokendance":
+        from app.services.voices import MINIMAX_VOICES
+
+        prompt = prompt.split("### step_voice_id")[0]
+        prompt += "\n### tts_voice_id\n结合性别、年龄、职业与性格，从以下音色选择一项：\n"
+        prompt += "\n".join(f"{i}: {label}（{gender}）" for i, label, gender in MINIMAX_VOICES)
+    return prompt
 
 
 def _get_structured_llm():
@@ -106,6 +118,10 @@ def _fallback_step_voice(gender: str) -> str:
 
 def _validate_step_voice(voice_id: str, gender: str) -> str:
     """Validate LLM-returned step_voice_id; fallback if invalid."""
+    if settings.INFERENCE_BACKEND == "tokendance":
+        from app.services.voices import resolve_minimax_voice
+
+        return resolve_minimax_voice(voice_id, {"gender": gender})
     if voice_id and voice_id in ALL_STEP_VOICES:
         # Cross-check: male voices for male chars, female voices for female chars
         g = (gender or "").strip()
@@ -455,7 +471,7 @@ async def _run_character(
         result = await asyncio.wait_for(
             llm.ainvoke(
                 [
-                    SystemMessage(content=CHARACTER_SYSTEM.format(char_name=char_name)),
+                    SystemMessage(content=_character_prompt(char_name)),
                     HumanMessage(content=user_msg),
                 ]
             ),
@@ -665,7 +681,9 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
             )
             char_mimo_voices[name] = mimo_voice
             char_results.append(char_result)
-            step_voice = _validate_step_voice(char_result.step_voice_id, char_result.gender)
+            step_voice = _validate_step_voice(
+                char_result.tts_voice_id or char_result.step_voice_id, char_result.gender
+            )
             logger.info(
                 f"char '{name}' OK: script={len(char_result.character_script)}chars, "
                 f"mimo_voice={mimo_voice}, step_voice={step_voice}"
@@ -717,7 +735,7 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
         if r:
             character_scripts[name] = r.character_script
             system_prompts_map[name] = r.system_prompt
-            step_voice = _validate_step_voice(r.step_voice_id, r.gender)
+            step_voice = _validate_step_voice(r.tts_voice_id or r.step_voice_id, r.gender)
             character_data.append(
                 {
                     "character_id": c["character_id"],
@@ -734,6 +752,10 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
                         name, _assign_mimo_voice(c.get("gender", ""))
                     ),
                     "step_voice_id": step_voice,
+                    "tts_voice_id": step_voice,
+                    "voice_provider": "minimax"
+                    if settings.INFERENCE_BACKEND == "tokendance"
+                    else "stepfun",
                 }
             )
             c["profile"] = r.profile

@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents import get_agent_manager, remove_agent_manager
+from app.core.inference import InferenceRecoveryError, raise_for_inference_recovery
 from app.db.models import GameRecord, GameSession, GameStage, GameStatus, PlayerState
 from app.game import GameFlowController
 from app.game.resource_revision import resource_namespace
@@ -187,7 +188,10 @@ class GameService:
             )
             start_result = await flow_controller.start_game(self.db)
             _flow_controllers.put(session_id, flow_controller)
-        except Exception:
+        except InferenceRecoveryError:
+            raise
+        except Exception as exc:
+            raise_for_inference_recovery(exc)
             logger.exception("Failed to initialize game session %s", session_id)
             await self.db.rollback()
             remove_agent_manager(session_id)
@@ -197,7 +201,10 @@ class GameService:
                 if persisted_session:
                     await self.db.delete(persisted_session)
                     await self.db.commit()
-            except Exception:
+            except InferenceRecoveryError:
+                raise
+            except Exception as exc:
+                raise_for_inference_recovery(exc)
                 await self.db.rollback()
                 logger.exception("Failed to clean incomplete game session %s", session_id)
             return {
@@ -475,7 +482,10 @@ class GameService:
                 "current_speaker_id": flow_controller.session.current_speaker,
                 "speech_queue": flow_controller.session.speech_queue or [],
             }
+        except InferenceRecoveryError:
+            raise
         except Exception as e:
+            raise_for_inference_recovery(e)
             await self.db.rollback()
             return {"success": False, "error": str(e)}
 

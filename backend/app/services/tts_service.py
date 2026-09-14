@@ -3,6 +3,7 @@ TTSService - TTS 语音合成服务
 提供静态音频合成（mimo-v2.5-tts）和按需合成（step-tts-mini）
 """
 
+import base64
 import logging
 import struct
 from pathlib import Path
@@ -10,6 +11,7 @@ from pathlib import Path
 import httpx
 
 from app.core.config import settings
+from app.core.inference import InferenceRecoveryError, raise_for_inference_recovery
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +144,10 @@ def get_wav_duration(wav_path: Path) -> float | None:
             if byte_rate <= 0:
                 return None
             return data_size / byte_rate
-    except Exception:
+    except InferenceRecoveryError:
+        raise
+    except Exception as exc:
+        raise_for_inference_recovery(exc)
         return None
 
 
@@ -183,12 +188,12 @@ class TTSService:
             logger.debug("synthesize_static: empty text, skipping")
             return None
 
-        api_key = settings.MIMO_API_KEY
+        api_key = settings.get_api_key("mimo")
         if not api_key:
             logger.warning("MIMO_API_KEY not configured, skipping TTS")
             return None
 
-        base_url = settings.MIMO_API_BASE_URL or "https://api.xiaomimimo.com/v1"
+        base_url = settings.get_base_url("mimo") or "https://api.xiaomimimo.com/v1"
 
         chunks = split_text_for_tts(text, MIMO_MAX_CHARS)
 
@@ -222,6 +227,19 @@ class TTSService:
         Returns:
             mp3 音频字节，失败返回 None
         """
+        if settings.INFERENCE_BACKEND == "tokendance":
+            from app.services.minimax_tts import MiniMaxTTSSession
+
+            session = MiniMaxTTSSession()
+            try:
+                await session.connect(voice_id)
+                await session.send_text(text)
+                parts = [
+                    base64.b64decode(chunk["audio"]) async for chunk in session.receive_audio()
+                ]
+                return b"".join(parts) or None
+            finally:
+                await session.close()
         api_key = settings.STEPFUN_API_KEY
         if not api_key:
             logger.warning("STEPFUN_API_KEY not configured, skipping TTS")
@@ -369,7 +387,14 @@ async def _mimo_single_call(
     # 长文本生成耗时更久，按字符数动态调整超时
     timeout = max(60, min(300, len(text) // 5))
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        from app.core.inference import gateway_async_client
+
+        factory = (
+            gateway_async_client
+            if settings.INFERENCE_BACKEND == "tokendance"
+            else httpx.AsyncClient
+        )
+        async with factory(timeout=timeout) as client:
             response = await client.post(
                 f"{base_url}/chat/completions",
                 headers={
@@ -415,7 +440,10 @@ async def _mimo_single_call(
     except httpx.HTTPStatusError as e:
         logger.error(f"MiMo TTS HTTP error: {e.response.status_code} - {e.response.text}")
         return None
+    except InferenceRecoveryError:
+        raise
     except Exception as e:
+        raise_for_inference_recovery(e)
         logger.error(f"MiMo TTS error: {e}")
         return None
 
@@ -445,6 +473,9 @@ async def _step_single_call(text: str, voice_id: str, base_url: str, api_key: st
     except httpx.HTTPStatusError as e:
         logger.error(f"StepFun TTS HTTP error: {e.response.status_code} - {e.response.text}")
         return None
+    except InferenceRecoveryError:
+        raise
     except Exception as e:
+        raise_for_inference_recovery(e)
         logger.error(f"StepFun TTS error: {e}")
         return None

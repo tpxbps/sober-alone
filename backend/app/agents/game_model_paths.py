@@ -13,6 +13,7 @@ from langchain.messages import AIMessageChunk
 from app.agents.reaction import REACTION_MODEL_TIMEOUT_SECONDS, SpeechReactionPayload
 from app.agents.state import GameAgentState
 from app.agents.tools import get_tools
+from app.core.config import settings
 from app.core.llm_factory import create_llm
 from app.core.model_registry import get_model_spec
 
@@ -40,9 +41,10 @@ def create_game_model(
 
 
 def bind_reaction_output(model, model_id: str, schema=SpeechReactionPayload):
-    return model.with_structured_output(
-        schema, method=get_model_spec(model_id).reaction_output_method
-    )
+    spec = get_model_spec(model_id)
+    if settings.INFERENCE_BACKEND == "tokendance" and spec.provider == "deepseek":
+        return model.with_structured_output(schema, method="function_calling")
+    return model.with_structured_output(schema, method=spec.reaction_output_method)
 
 
 def build_role_agent(
