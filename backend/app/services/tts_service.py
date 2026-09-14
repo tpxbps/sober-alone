@@ -436,8 +436,8 @@ async def _mimo_request(
         messages.append({"role": "user", "content": "请自然地朗读以下内容，语速适中，语气自然。"})
     messages.append({"role": "assistant", "content": text})
 
-    # 长文本生成耗时更久，按字符数动态调整超时
-    timeout = max(60, min(300, len(text) // 5))
+    # Even the final, shorter chunk can queue before audio generation starts.
+    timeout = max(120, min(300, len(text) // 5))
     try:
         from app.core.inference import gateway_async_client
 
@@ -498,7 +498,7 @@ async def _mimo_request(
         raise
     except Exception as e:
         raise_for_inference_recovery(e)
-        logger.error(f"MiMo TTS error: {e}")
+        logger.error("MiMo TTS error: %s", type(e).__name__)
         return None
 
 
