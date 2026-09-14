@@ -238,3 +238,44 @@ async def test_gateway_deepseek_uses_supported_function_calling(gateway):
     binding = structured.steps[0]
     assert "tools" in binding.kwargs
     assert "response_format" not in binding.kwargs
+
+
+@pytest.mark.asyncio
+async def test_agent_does_not_retry_or_convert_recovery_to_speech(gateway):
+    from langchain_core.messages import HumanMessage
+    from langchain_openai import ChatOpenAI
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    from app.agents.game_model_paths import build_role_agent
+    from app.core.inference import raise_for_inference_recovery
+
+    calls = []
+
+    def fail(request):
+        calls.append(request)
+        return httpx.Response(402, headers={"TokenDance-Recovery-Action": "api_key_quota"})
+
+    async with gateway_async_client(transport=httpx.MockTransport(fail)) as http:
+        model = ChatOpenAI(
+            model="step-3.5-flash",
+            api_key="placeholder",
+            max_retries=0,
+            base_url="https://tokendance.space/gateway/v1",
+            http_async_client=http,
+        )
+        agent = build_role_agent(
+            model,
+            model,
+            system_prompt="test",
+            rag_enabled=False,
+            checkpointer=InMemorySaver(),
+            middleware=[],
+        )
+        with inference_scope(InferenceScope("test", lambda: "test-key")):
+            with pytest.raises(Exception) as caught:
+                await agent.ainvoke(
+                    {"messages": [HumanMessage("test")]}, {"configurable": {"thread_id": "test"}}
+                )
+            with pytest.raises(InferenceRecoveryError):
+                raise_for_inference_recovery(caught.value)
+    assert len(calls) == 1

@@ -38,6 +38,48 @@ def raise_for_inference_recovery(error: BaseException) -> None:
             pending.extend(current.exceptions)
 
 
+def retryable_gateway_error(error: Exception) -> bool:
+    """Retry transport failures once; account recovery must reach the caller."""
+    from openai import APIConnectionError, APIStatusError
+
+    try:
+        raise_for_inference_recovery(error)
+    except InferenceRecoveryError:
+        return False
+    return isinstance(error, (APIConnectionError, httpx.TransportError)) or (
+        isinstance(error, APIStatusError)
+        and (error.status_code in {408, 429} or error.status_code >= 500)
+    )
+
+
+def model_retry_middleware():
+    from langchain.agents.middleware import ModelRetryMiddleware
+
+    if settings.INFERENCE_BACKEND == "tokendance":
+        return ModelRetryMiddleware(
+            max_retries=1,
+            retry_on=retryable_gateway_error,
+            on_failure="error",
+            backoff_factor=2.0,
+            initial_delay=1.0,
+        )
+    return ModelRetryMiddleware(max_retries=3, backoff_factor=2.0, initial_delay=1.0)
+
+
+def tool_retry_middleware():
+    from langchain.agents.middleware import ToolRetryMiddleware
+
+    if settings.INFERENCE_BACKEND == "tokendance":
+        return ToolRetryMiddleware(
+            max_retries=1,
+            retry_on=retryable_gateway_error,
+            on_failure="error",
+            backoff_factor=2.0,
+            initial_delay=1.0,
+        )
+    return ToolRetryMiddleware(max_retries=3, backoff_factor=2.0, initial_delay=1.0)
+
+
 @dataclass(frozen=True)
 class InferenceScope:
     reference: str

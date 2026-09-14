@@ -11,7 +11,6 @@ from typing import Any
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import (
-    ModelRetryMiddleware,
     SummarizationMiddleware,
 )
 from langchain.messages import AIMessageChunk
@@ -20,6 +19,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.config import get_config, get_stream_writer
 
+from app.core.inference import model_retry_middleware, raise_for_inference_recovery
 from app.core.llm_factory import (
     create_chat_model_for_agent,
     create_summary_llm,
@@ -285,11 +285,7 @@ def _get_chat_agent(model: str):
             model=llm,  # type: ignore[arg-type]
             tools=CHAT_TOOLS,
             middleware=[
-                ModelRetryMiddleware(
-                    max_retries=3,
-                    backoff_factor=2.0,
-                    initial_delay=1.0,
-                ),
+                model_retry_middleware(),
                 SummarizationMiddleware(
                     model=create_summary_llm(),
                     trigger=("tokens", 200000),
@@ -318,6 +314,7 @@ async def stream_chat_response(
     try:
         agent = _get_chat_agent(model)
     except Exception as e:
+        raise_for_inference_recovery(e)
         yield f"data: {json.dumps({'type': 'error', 'message': f'Agent 初始化失败: {str(e)}'}, ensure_ascii=False)}\n\n"
         return
 
@@ -398,6 +395,7 @@ async def stream_chat_response(
 
         yield 'data: {"type": "done"}\n\n'
     except Exception as e:
+        raise_for_inference_recovery(e)
         logger.error(f"Chat streaming error: {e}", exc_info=True)
         error_data = json.dumps({"type": "error", "message": str(e)}, ensure_ascii=False)
         yield f"data: {error_data}\n\n"

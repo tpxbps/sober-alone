@@ -3,17 +3,14 @@
 from typing import Any, Literal
 
 from langchain.agents import create_agent
-from langchain.agents.middleware import (
-    ModelRetryMiddleware,
-    SummarizationMiddleware,
-    ToolRetryMiddleware,
-)
+from langchain.agents.middleware import SummarizationMiddleware
 from langchain.messages import AIMessageChunk
 
 from app.agents.reaction import REACTION_MODEL_TIMEOUT_SECONDS, SpeechReactionPayload
 from app.agents.state import GameAgentState
 from app.agents.tools import get_tools
 from app.core.config import settings
+from app.core.inference import model_retry_middleware, tool_retry_middleware
 from app.core.llm_factory import create_llm
 from app.core.model_registry import get_model_spec
 
@@ -65,8 +62,8 @@ def build_role_agent(
                 trigger=("tokens", SUMMARY_TRIGGER_TOKENS),
                 keep=("messages", 20),
             ),
-            ModelRetryMiddleware(max_retries=3, backoff_factor=2.0, initial_delay=1.0),
-            ToolRetryMiddleware(max_retries=3, backoff_factor=2.0, initial_delay=1.0),
+            model_retry_middleware(),
+            tool_retry_middleware(),
             *middleware,
         ],
         checkpointer=checkpointer,

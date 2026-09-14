@@ -84,7 +84,9 @@ def create_llm(
             base_url=gateway_url("v1"),
             temperature=temperature,
             timeout=timeout or 90,
-            max_retries=max_retries if max_retries is not None else 2,
+            # SDK retries wrap recovery errors as network failures. Agent retry
+            # middleware owns the bounded transport retry and preserves recovery.
+            max_retries=0,
             extra_body=extra,
             http_client=gateway_client(timeout=timeout or 90),
             http_async_client=gateway_async_client(timeout=timeout or 90),
