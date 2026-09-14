@@ -332,6 +332,12 @@ class EditorOperationRunner:
         except asyncio.CancelledError:
             raise
         except Exception as error:
+            try:
+                await ScriptEditorWorkflowService().persist_asset_progress(thread_id)
+            except Exception as progress_error:
+                logger.warning(
+                    "Cannot persist interrupted asset progress: %s", type(progress_error).__name__
+                )
             logger.exception("Editor operation %s failed", operation_id)
             if runtime and runtime.session:
                 await emit_final(runtime, None, str(error))

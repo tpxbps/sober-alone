@@ -52,6 +52,17 @@ class ScriptEditorWorkflowService:
             return [state async for state in self.graph.aget_state_history(config)]
         return list(self.graph.get_state_history(config))
 
+    async def persist_asset_progress(self, thread_id: str) -> None:
+        """Preserve partial assets when generation exits with an account error."""
+        from app.script_editor.asset_generation.progress import get_asset_progress
+
+        config = self.config(thread_id)
+        snapshot = await self._get_snapshot(config)
+        script_id = snapshot.values.get("script_id")
+        progress = get_asset_progress(script_id) if script_id else None
+        if progress:
+            await self._update_state(config, {"asset_progress": progress})
+
     async def start(
         self,
         request: StartWorkflowRequest,

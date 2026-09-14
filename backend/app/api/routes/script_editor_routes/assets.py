@@ -120,14 +120,16 @@ async def retry_asset_task(
                 return {"success": True, "message": "任务已完成", "task_status": status}
             if status != "failed":
                 raise HTTPException(status_code=409, detail="该资源当前不可重试，请刷新进度")
-            await retry_single_asset(
-                script_id, task_id, cast(ScriptGenState, state_snapshot.values)
-            )
-            progress = get_asset_progress(script_id)
-            await graph.aupdate_state(
-                ScriptEditorWorkflowService.config(thread_id),
-                {"asset_progress": progress or {}},
-            )
+            try:
+                await retry_single_asset(
+                    script_id, task_id, cast(ScriptGenState, state_snapshot.values)
+                )
+            finally:
+                progress = get_asset_progress(script_id)
+                await graph.aupdate_state(
+                    ScriptEditorWorkflowService.config(thread_id),
+                    {"asset_progress": progress or {}},
+                )
             return {
                 "success": True,
                 "message": f"任务 {task_id} 重试完成",

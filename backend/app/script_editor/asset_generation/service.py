@@ -6,7 +6,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.core.config import settings
-from app.core.inference import gather_inference, raise_for_inference_recovery
+from app.core.inference import (
+    InferenceRecoveryError,
+    gather_inference,
+    raise_for_inference_recovery,
+)
 from app.game.endings import ending_audio_tasks
 from app.script_editor.asset_generation.progress import (
     _init_asset_progress,
@@ -210,7 +214,20 @@ async def _generate_assets(state: ScriptGenState) -> dict:
         for task_id in selected_tts:
             _update_task_status(script_id, task_id, "skipped", "未配置 MIMO_API_KEY")
 
-    results = await gather_inference(*phase_jobs, return_exceptions=True)
+    recovery = None
+    try:
+        results = await gather_inference(*phase_jobs, return_exceptions=True)
+    except InferenceRecoveryError as error:
+        recovery = error
+        results = []
+        # The batch has stopped. Keep completed work and make interrupted tasks
+        # retryable after the account is recovered, including cancelled siblings.
+        for phase in (get_asset_progress(script_id) or {}).get("phases", []):
+            for task in phase.get("tasks", []):
+                if task.get("status") not in {"complete", "skipped"}:
+                    _update_task_status(
+                        script_id, task["id"], "failed", "模型账户需要处理，恢复后可重试"
+                    )
 
     # 收集结果
     for r in results:
@@ -268,6 +285,8 @@ async def _generate_assets(state: ScriptGenState) -> dict:
         raise_for_inference_recovery(e)
         logger.error(f"Failed to update asset URLs: {e}")
 
+    if recovery is not None:
+        raise recovery
     return updates
 
 
@@ -674,7 +693,11 @@ async def _retry_single_asset(script_id: str, task_id: str, state: ScriptGenStat
         return result
 
     except Exception as e:
-        raise_for_inference_recovery(e)
+        try:
+            raise_for_inference_recovery(e)
+        except InferenceRecoveryError:
+            _update_task_status(script_id, task_id, "failed", "模型账户需要处理，恢复后可重试")
+            raise
         logger.error(f"Asset retry failed for task {task_id}: {e}")
         _update_task_status(script_id, task_id, "failed", str(e))
         return TaskResult(ok=False, error=str(e))
