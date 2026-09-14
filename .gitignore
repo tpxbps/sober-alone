@@ -44,3 +44,5 @@ blob-report/
 
 # Local maintainer notes
 /PLAN.md
+/docs/
+/design-qa.md
