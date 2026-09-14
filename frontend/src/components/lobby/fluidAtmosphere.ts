@@ -25,20 +25,31 @@ void main() {
   vec2 flow=texture2D(velocity,screen).xy;
   vec3 pigment=texture2D(density,screen).rgb;
   float ink=1.-exp(-pigment.b*.75);
-  float trail=(1.-exp(-pigment.r))* .18;
-  // The green channel carries a second, advected pigment layer for both sources.
+  // Only autonomous sources write green: their marble contours stay in the scene.
   float paint=1.-exp(-pigment.g*2.2);
-  vec2 d=(screen-pointer)*vec2(viewport.x/viewport.y,1.);
   float grain=noise(screen*5.+flow*.018);
-  vec2 liquidEdge=d+clamp(flow*.0008,vec2(-.009),vec2(.009))*min(length(d)*12.,1.);
   vec2 marbleUv=screen*vec2(viewport.x/viewport.y,1.)*6.;
   vec2 drift=clamp(flow*.008,vec2(-.18),vec2(.18));
   float fold=noise(marbleUv+drift+vec2(grain*.7,grain*.35));
   float veins=pow(1.-abs(sin(fold*12.+grain*2.)),4.);
-  // The core is anchored to the latest pointer. Only the edge and wake flow.
-  float nearLight=exp(-dot(liquidEdge,liquidEdge)/(.0065+fold*.004))*pointerActive;
-  float bloom=exp(-dot(d,d)/.021)*pointerActive;
-  float pearlescence=(paint*.65+bloom*.28)*(veins*.7+fold*.2);
+  float pearlescence=paint*.65*(veins*.7+fold*.2);
+
+  // A compact, rounded light with a soft liquid edge, measured in CSS pixels.
+  // The core never deforms or lags; neither the contours nor their large bloom
+  // belong to the pointer. Red dye supplies only a short, smooth wake.
+  float cursorRadius=clamp(min(viewport.x,viewport.y)*.065,42.,58.);
+  vec2 cursor=(screen-pointer)*viewport/cursorRadius;
+  float distanceToCursor=length(cursor);
+  float envelope=1.-smoothstep(1.25,2.1,distanceToCursor);
+  vec2 edgeFlow=clamp(flow*.003,vec2(-.09),vec2(.09));
+  edgeFlow*=smoothstep(.3,1.2,distanceToCursor);
+  float core=exp(-dot(cursor,cursor)*1.8);
+  float aura=exp(-dot(cursor+edgeFlow,cursor+edgeFlow)*.75)*envelope;
+  float silk=.5+.5*sin(cursor.x*1.3+cursor.y*.9+time*.65);
+  float nearLight=(core*.72+aura*.28)*pointerActive;
+  float sheen=aura*(.65+silk*.35)*pointerActive;
+  float wake=1.-smoothstep(1.5,3.2,distanceToCursor);
+  float trail=(1.-exp(-pigment.r*1.5))*.12*wake;
   vec2 waveDistance=(screen-ambientOrigin)*vec2(viewport.x/viewport.y,1.);
   float wave=exp(-pow(waveDistance.y+sin(waveDistance.x*5.+time*.45)*.04,2.)/.004-dot(waveDistance,waveDistance)*2.)*ambientWave;
   float light=clamp(ink*.65+trail+nearLight*.95+wave*.45+pearlescence*.32,0.,1.);
@@ -57,7 +68,10 @@ void main() {
   vec3 silver=vec3(.52,.68,.77), gold=vec3(.83,.73,.55);
   vec3 tint=mix(silver,gold,fold);
   float ribbons=ink*fold*.3;
-  col+=tint*(nearLight*.018+trail*.015+ink*grain*.06+ribbons*.08+wave*.025+pearlescence*.12)*(1.-isCard*.72);
+  vec3 sceneGlow=tint*(ink*grain*.06+ribbons*.08+wave*.025+pearlescence*.12);
+  vec3 cursorTint=mix(silver,gold,core*.6+silk*.15);
+  vec3 cursorGlow=cursorTint*(core*.014*pointerActive+sheen*.018+trail*.025);
+  col+=(sceneGlow+cursorGlow)*(1.-isCard*.72);
   gl_FragColor=vec4(col,mix(1.,surfaceOpacity,isCard));
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -236,7 +250,7 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
     }
     if (!isPaused && pendingSplat) {
       const { x, y, dx, dy } = pendingSplat;
-      fluid.addSplat(x, y, dx, dy, { radius: .0014, color: [.12, .16, 0] });
+      fluid.addSplat(x, y, dx * .5, dy * .5, { radius: .00035, color: [.075, 0, 0] });
       pendingSplat = null;
     }
     if (!isPaused) fluid.step(delta);
