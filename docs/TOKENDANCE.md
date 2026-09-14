@@ -28,3 +28,10 @@ does not itself add public-host authentication or multi-user billing to the loca
 `TokenDance-Recovery-Action` becomes `InferenceRecoveryError`; hosts must display
 recovery and stop the affected operation rather than falling back to another payer.
 Ordinary CI uses offline protocol fixtures. Real provider verification is separate.
+
+`SCRIPT_EDITOR_MODEL` selects the model for writing, conversion and content review.
+Long-form draft requests have a 240-second timeout, separate from gameplay.
+For a confirmed provider outage, `DISABLED_LLM_MODELS` accepts comma-separated
+model IDs (including legacy aliases). Disabled models are excluded from selection
+and health probes, and the server rejects direct calls to them. Clear the setting
+after verifying recovery; no model or billing credential is silently substituted.

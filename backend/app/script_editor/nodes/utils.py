@@ -25,7 +25,9 @@ BASE_DELAY = 5  # 秒，指数退避基数
 def get_script_llm() -> BaseChatModel:
     """获取剧本创作用的 LLM 实例"""
     model_name = getattr(settings, "SCRIPT_EDITOR_MODEL", None) or DEFAULT_SCRIPT_MODEL
-    return create_llm(model=model_name, temperature=0.85)
+    # A full draft may take longer than a game utterance. Allow the provider to
+    # finish before retrying an otherwise healthy long-form request.
+    return create_llm(model=model_name, temperature=0.85, timeout=240, max_retries=0)
 
 
 async def call_llm(

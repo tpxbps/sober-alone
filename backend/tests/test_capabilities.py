@@ -68,6 +68,15 @@ def test_conversion_honors_creator_model_configuration(monkeypatch):
     assert options["disable_thinking"] is True
 
 
+def test_long_form_creation_has_its_own_request_budget(monkeypatch):
+    from app.script_editor.nodes import utils
+
+    monkeypatch.setattr(utils, "create_llm", lambda **kwargs: kwargs)
+    options = utils.get_script_llm()
+    assert options["timeout"] == 240
+    assert options["max_retries"] == 0
+
+
 def test_model_registry_keeps_configured_models_available_during_slow_periods(monkeypatch):
     _clear_keys(monkeypatch)
     monkeypatch.setattr(capabilities.settings, "HUNYUAN_API_KEY", "h")
