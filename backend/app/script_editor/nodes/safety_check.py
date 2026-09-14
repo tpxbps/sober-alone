@@ -145,7 +145,7 @@ async def safety_check(state, config: RunnableConfig = None):
             for attempt in range(3):
                 try:
                     llm = create_llm(
-                        model=settings.SCRIPT_EDITOR_MODEL or "deepseek-flash",
+                        model=settings.get_script_review_model(),
                         temperature=0.1,
                         timeout=60,
                         max_retries=0,

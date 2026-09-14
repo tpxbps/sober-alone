@@ -77,6 +77,15 @@ def test_long_form_creation_has_its_own_request_budget(monkeypatch):
     assert options["max_retries"] == 0
 
 
+def test_review_model_is_independent_and_defaults_to_creator(monkeypatch):
+    monkeypatch.setattr(capabilities.settings, "SCRIPT_EDITOR_MODEL", "step-3.5-flash")
+    monkeypatch.setattr(capabilities.settings, "SCRIPT_REVIEW_MODEL", None)
+    assert capabilities.settings.get_script_review_model() == "step-3.5-flash"
+    monkeypatch.setattr(capabilities.settings, "SCRIPT_REVIEW_MODEL", "qwen3.8-flash")
+    assert capabilities.settings.get_script_review_model() == "qwen3.8-flash"
+    assert capabilities.settings.SCRIPT_EDITOR_MODEL == "step-3.5-flash"
+
+
 def test_model_registry_keeps_configured_models_available_during_slow_periods(monkeypatch):
     _clear_keys(monkeypatch)
     monkeypatch.setattr(capabilities.settings, "HUNYUAN_API_KEY", "h")

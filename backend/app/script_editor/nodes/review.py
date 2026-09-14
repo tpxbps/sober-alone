@@ -46,7 +46,7 @@ async def review_by_llm(state: ScriptGenState) -> dict:
         system_prompt,
         user_content,
         llm=create_llm(
-            model=settings.SCRIPT_EDITOR_MODEL or "deepseek-flash",
+            model=settings.get_script_review_model(),
             temperature=0.1,
             timeout=240,
             max_retries=0,

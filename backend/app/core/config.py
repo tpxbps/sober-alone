@@ -55,6 +55,7 @@ class Settings(BaseSettings):
     DEFAULT_LLM_PROVIDER: str = "deepseek"
     DEFAULT_LLM_MODEL: str | None = "deepseek-flash"  # 为None时使用DEFAULT_MODELS中的默认值
     SCRIPT_EDITOR_MODEL: str | None = "deepseek-flash"
+    SCRIPT_REVIEW_MODEL: str | None = None
     DISABLED_LLM_MODELS: str = ""  # Comma-separated canonical IDs or legacy aliases.
 
     # Vector database
@@ -121,6 +122,9 @@ class Settings(BaseSettings):
             if value.strip()
         }
         return get_model_spec(model).id not in disabled
+
+    def get_script_review_model(self) -> str:
+        return self.SCRIPT_REVIEW_MODEL or self.SCRIPT_EDITOR_MODEL or "deepseek-flash"
 
     def get_base_url(self, provider: str) -> str | None:
         """获取指定提供商的API Base URL"""

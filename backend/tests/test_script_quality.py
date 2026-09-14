@@ -131,6 +131,68 @@ class Judge:
         }
 
 
+@pytest.mark.asyncio
+async def test_interrupted_gateway_review_cannot_approve_partial_tool_data(monkeypatch):
+    import json
+
+    import httpx
+    from langchain_openai import ChatOpenAI
+
+    requests = []
+
+    class Interrupted(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            frame = {
+                "id": "review-test",
+                "object": "chat.completion.chunk",
+                "created": 0,
+                "model": "qwen3.8-flash",
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": "call-review",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "LocatedQualityResult",
+                                        "arguments": '{"findings":[]}',
+                                    },
+                                }
+                            ]
+                        },
+                        "finish_reason": None,
+                    }
+                ],
+            }
+            yield ("data: " + json.dumps(frame) + "\n\n").encode()
+            raise httpx.ReadError("stream interrupted before completion")
+
+    def handler(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(
+            200, headers={"content-type": "text/event-stream"}, stream=Interrupted()
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        model = ChatOpenAI(
+            api_key="test-only",
+            base_url="https://gateway.test/v1",
+            http_async_client=client,
+            max_retries=0,
+        )
+        monkeypatch.setattr(quality_check.settings, "INFERENCE_BACKEND", "tokendance")
+        monkeypatch.setattr(quality_check, "create_llm", lambda **kwargs: model)
+        state = {"game_data_sections": content()}
+        state.update(await quality_check.check_game_quality(state))
+    assert len(requests) == 1 and requests[0]["stream"] is True
+    assert requests[0]["tool_choice"]["function"]["name"] == "LocatedQualityResult"
+    assert state["quality_report"]["status"] == "incomplete"
+    assert not quality_check.quality_approved(state)
+
+
 def test_review_passages_preserve_every_character_and_nontext_value():
     text = "第一段。\n" * 200
     sources, values = quality_check.review_sources({"script": text, "rounds": [1, 2], "empty": []})

@@ -30,6 +30,8 @@ recovery and stop the affected operation rather than falling back to another pay
 Ordinary CI uses offline protocol fixtures. Real provider verification is separate.
 
 `SCRIPT_EDITOR_MODEL` selects the model for writing, conversion and content review.
+Optionally set `SCRIPT_REVIEW_MODEL` to use a separate model for review and safety
+checks; it defaults to the creator model and uses the same operation's credential.
 Long-form draft requests have a 240-second timeout, separate from gameplay.
 For a confirmed provider outage, `DISABLED_LLM_MODELS` accepts comma-separated
 model IDs (including legacy aliases). Disabled models are excluded from selection
