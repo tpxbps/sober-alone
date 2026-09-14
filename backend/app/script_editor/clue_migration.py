@@ -93,7 +93,7 @@ def _save_manifest(path: Path, manifest: dict) -> None:
 
 async def _convert(script: Script, source: list[dict]) -> tuple[list[dict], dict]:
     llm = create_llm(
-        model="deepseek-flash",
+        model=settings.SCRIPT_EDITOR_MODEL or "deepseek-flash",
         temperature=0,
         timeout=180,
         max_retries=2,

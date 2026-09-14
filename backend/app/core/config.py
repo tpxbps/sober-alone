@@ -55,6 +55,7 @@ class Settings(BaseSettings):
     DEFAULT_LLM_PROVIDER: str = "deepseek"
     DEFAULT_LLM_MODEL: str | None = "deepseek-flash"  # 为None时使用DEFAULT_MODELS中的默认值
     SCRIPT_EDITOR_MODEL: str | None = "deepseek-flash"
+    DISABLED_LLM_MODELS: str = ""  # Comma-separated canonical IDs or legacy aliases.
 
     # Vector database
     CHROMA_PERSIST_DIR: str = str(LOCAL_DATA_DIR / "chroma")
@@ -110,6 +111,16 @@ class Settings(BaseSettings):
             "hunyuan": self.HUNYUAN_API_KEY,
         }
         return key_mapping.get(provider)
+
+    def is_model_enabled(self, model: str) -> bool:
+        from app.core.model_registry import get_model_spec
+
+        disabled = {
+            get_model_spec(value.strip()).id
+            for value in self.DISABLED_LLM_MODELS.split(",")
+            if value.strip()
+        }
+        return get_model_spec(model).id not in disabled
 
     def get_base_url(self, provider: str) -> str | None:
         """获取指定提供商的API Base URL"""

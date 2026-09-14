@@ -52,7 +52,7 @@ def _get_structured_llm():
     from app.core.llm_factory import create_llm
 
     return create_llm(
-        model="deepseek-flash",
+        model=settings.SCRIPT_EDITOR_MODEL or "deepseek-flash",
         temperature=0.5,
         timeout=180,
         max_retries=0,

@@ -60,6 +60,8 @@ def create_llm(
     model_lower = model.lower()
     spec = get_model_spec(model_lower)
     model_lower = spec.id
+    if not settings.is_model_enabled(model_lower):
+        raise ValueError(f"模型 {spec.name} 暂停服务，请选择其他模型")
     provider = spec.provider
 
     if settings.INFERENCE_BACKEND == "tokendance":

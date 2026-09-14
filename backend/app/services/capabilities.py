@@ -15,8 +15,11 @@ def _feature(enabled: bool, enabled_reason: str, disabled_reason: str) -> dict[s
 def get_capabilities() -> dict[str, Any]:
     models = []
     for spec in MODEL_SPECS:
-        has_key = bool(settings.get_api_key(spec.provider))
-        if not has_key:
+        enabled = settings.is_model_enabled(spec.id)
+        has_key = bool(settings.get_api_key(spec.provider)) and enabled
+        if not enabled:
+            reason = "模型暂停服务，请选择其他模型"
+        elif not has_key:
             reason = f"未配置 {spec.provider} API Key"
         else:
             reason = "已配置"

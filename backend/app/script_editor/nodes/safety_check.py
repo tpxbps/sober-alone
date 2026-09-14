@@ -9,6 +9,7 @@ from typing import Literal
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
 
+from app.core.config import settings
 from app.core.inference import gather_inference, raise_for_inference_recovery
 from app.script_editor.state import STEP_SAFETY_CHECK
 
@@ -144,7 +145,8 @@ async def safety_check(state, config: RunnableConfig = None):
             for attempt in range(3):
                 try:
                     llm = create_llm(
-                        model="deepseek-flash", temperature=0.1, timeout=60, max_retries=0
+                        model=settings.SCRIPT_EDITOR_MODEL or "deepseek-flash",
+                        temperature=0.1, timeout=60, max_retries=0, disable_thinking=True
                     )
                     response = await asyncio.wait_for(
                         llm.with_structured_output(

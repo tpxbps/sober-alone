@@ -8,6 +8,7 @@ import logging
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
+from app.core.config import settings
 from app.core.inference import raise_for_inference_recovery
 from app.script_editor.nodes.utils import call_llm
 from app.script_editor.prompts.templates import get_prompt
@@ -41,7 +42,8 @@ async def generate_outline(state: ScriptGenState) -> dict:
         from app.core.llm_factory import create_llm
 
         llm = create_llm(
-            model="deepseek-flash", temperature=0.85, timeout=180, disable_thinking=True
+            model=settings.SCRIPT_EDITOR_MODEL or "deepseek-flash",
+            temperature=0.85, timeout=180, disable_thinking=True
         )
         structured_llm = llm.with_structured_output(
             OutlineResult, method="function_calling", tool_choice="auto"
