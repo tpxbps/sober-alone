@@ -3,9 +3,12 @@ TTSService - TTS 语音合成服务
 提供静态音频合成（mimo-v2.5-tts）和按需合成（step-tts-mini）
 """
 
+import asyncio
 import base64
 import logging
+import math
 import struct
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
@@ -23,6 +26,14 @@ AUDIO_ROOT = settings.audio_dir
 # Input context size is not an audio-output budget. Keep narration requests short
 # enough to finish, then join the sentence-aligned pieces into one recording.
 MIMO_MAX_CHARS = 600
+# Share scheduling across creation jobs and retries. Long narration has multiple
+# requests, so staggering only the first task does not prevent gateway bursts.
+MIMO_GATEWAY_CONCURRENCY = 2
+MIMO_GATEWAY_INTERVAL = 6.1
+_mimo_loop = None
+_mimo_slots = None
+_mimo_dispatch_lock = None
+_mimo_next_dispatch = 0.0
 # step-tts-mini: 1000 字限制
 STEP_MAX_CHARS = 900
 
@@ -373,7 +384,48 @@ class TTSService:
 # === 内部调用函数 ===
 
 
+@asynccontextmanager
+async def _mimo_gateway_slot():
+    global _mimo_loop, _mimo_slots, _mimo_dispatch_lock, _mimo_next_dispatch
+    loop = asyncio.get_running_loop()
+    if _mimo_loop is not loop:
+        _mimo_loop = loop
+        _mimo_slots = asyncio.Semaphore(MIMO_GATEWAY_CONCURRENCY)
+        _mimo_dispatch_lock = asyncio.Lock()
+        _mimo_next_dispatch = 0.0
+    async with _mimo_slots:
+        async with _mimo_dispatch_lock:
+            await asyncio.sleep(max(0, _mimo_next_dispatch - loop.time()))
+            _mimo_next_dispatch = loop.time() + MIMO_GATEWAY_INTERVAL
+        yield
+
+
 async def _mimo_single_call(
+    text: str, style_prompt: str, voice: str, base_url: str, api_key: str
+) -> bytes | None:
+    if settings.INFERENCE_BACKEND != "tokendance":
+        return await _mimo_request(text, style_prompt, voice, base_url, api_key)
+    for attempt in range(2):
+        try:
+            async with _mimo_gateway_slot():
+                return await _mimo_request(text, style_prompt, voice, base_url, api_key)
+        except httpx.HTTPStatusError as error:
+            if error.response.status_code != 429 or attempt == 1:
+                logger.warning("MiMo narration request failed: HTTP %s", error.response.status_code)
+                return None
+            # Quota/recovery responses have already raised InferenceRecoveryError
+            # in the transport hook. Only transient 429s get one bounded retry.
+            try:
+                delay = float(error.response.headers.get("Retry-After", MIMO_GATEWAY_INTERVAL))
+            except ValueError:
+                delay = MIMO_GATEWAY_INTERVAL
+            if not math.isfinite(delay):
+                delay = MIMO_GATEWAY_INTERVAL
+            await asyncio.sleep(max(MIMO_GATEWAY_INTERVAL, min(delay, 60)))
+    return None
+
+
+async def _mimo_request(
     text: str, style_prompt: str, voice: str, base_url: str, api_key: str
 ) -> bytes | None:
     """单次 mimo-v2.5-tts API 调用"""
@@ -438,7 +490,9 @@ async def _mimo_single_call(
                 return None
 
     except httpx.HTTPStatusError as e:
-        logger.error(f"MiMo TTS HTTP error: {e.response.status_code} - {e.response.text}")
+        if settings.INFERENCE_BACKEND == "tokendance":
+            raise
+        logger.error("MiMo TTS HTTP error: %s", e.response.status_code)
         return None
     except InferenceRecoveryError:
         raise
