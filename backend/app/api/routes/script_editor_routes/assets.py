@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.api.schemas.script_editor import ResumeWorkflowRequest
+from app.core.inference import raise_for_inference_recovery
 from app.script_editor.graph import get_script_gen_graph
 from app.script_editor.ownership import require_author_key_hash
 from app.script_editor.services.operation_service import editor_operation_runner
@@ -66,6 +67,7 @@ async def get_asset_progress_endpoint(
         progress = get_asset_progress(script_id) or snapshot.values.get("asset_progress")
         return {"success": True, "progress": progress}
     except Exception as error:
+        raise_for_inference_recovery(error)
         logger.error("Failed to get asset progress: %s", error)
         raise HTTPException(status_code=500, detail=str(error)) from error
 
@@ -88,6 +90,7 @@ async def get_convert_progress_endpoint(
         progress = get_convert_progress(script_id) or snapshot.values.get("convert_progress")
         return {"success": True, "progress": progress}
     except Exception as error:
+        raise_for_inference_recovery(error)
         logger.error("Failed to get conversion progress: %s", error)
         raise HTTPException(status_code=500, detail=str(error)) from error
 
@@ -101,26 +104,39 @@ async def retry_asset_task(
     """Retry one failed asset-generation task."""
     try:
         await _authorize_thread(thread_id, owner_key_hash)
-        graph = get_script_gen_graph()
-        state_snapshot = await graph.aget_state(ScriptEditorWorkflowService.config(thread_id))
-        script_id = state_snapshot.values.get("script_id", "")
-        if not script_id:
-            raise HTTPException(status_code=404, detail="工作流不存在")
+        async with editor_operation_runner.command_lock(thread_id):
+            graph = get_script_gen_graph()
+            state_snapshot = await graph.aget_state(ScriptEditorWorkflowService.config(thread_id))
+            script_id = state_snapshot.values.get("script_id", "")
+            if not script_id:
+                raise HTTPException(status_code=404, detail="工作流不存在")
 
-        from app.script_editor.nodes.save import get_asset_progress, retry_single_asset
-        from app.script_editor.state import ScriptGenState
+            from app.script_editor.nodes.save import get_asset_progress, retry_single_asset
+            from app.script_editor.state import ScriptGenState
 
-        await retry_single_asset(script_id, task_id, cast(ScriptGenState, state_snapshot.values))
-        progress = get_asset_progress(script_id)
-        await graph.aupdate_state(
-            ScriptEditorWorkflowService.config(thread_id),
-            {"asset_progress": progress or {}},
-        )
-        status = _task_status(progress, task_id)
-        return {"success": True, "message": f"任务 {task_id} 重试完成", "task_status": status}
+            progress = get_asset_progress(script_id) or state_snapshot.values.get("asset_progress")
+            status = _task_status(progress, task_id)
+            if status in {"complete", "skipped"}:
+                return {"success": True, "message": "任务已完成", "task_status": status}
+            if status != "failed":
+                raise HTTPException(status_code=409, detail="该资源当前不可重试，请刷新进度")
+            await retry_single_asset(
+                script_id, task_id, cast(ScriptGenState, state_snapshot.values)
+            )
+            progress = get_asset_progress(script_id)
+            await graph.aupdate_state(
+                ScriptEditorWorkflowService.config(thread_id),
+                {"asset_progress": progress or {}},
+            )
+            return {
+                "success": True,
+                "message": f"任务 {task_id} 重试完成",
+                "task_status": _task_status(progress, task_id),
+            }
     except HTTPException:
         raise
     except Exception as error:
+        raise_for_inference_recovery(error)
         raise HTTPException(status_code=500, detail=str(error)) from error
 
 
@@ -151,6 +167,7 @@ async def retry_convert_task(
     except HTTPException:
         raise
     except Exception as error:
+        raise_for_inference_recovery(error)
         logger.error("Retry conversion failed: %s", error, exc_info=True)
         raise HTTPException(status_code=500, detail=str(error)) from error
 

@@ -58,3 +58,35 @@ async def test_vector_account_failure_does_not_retry(monkeypatch):
             {"vector_alice"},
         )
     assert ingest.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_parallel_asset_retries_only_regenerate_once(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.api.routes.script_editor_routes import assets
+    from app.script_editor.nodes import save
+
+    progress = {"phases": [{"tasks": [{"id": "cover", "status": "failed"}]}]}
+    state = SimpleNamespace(values={"script_id": "script", "asset_progress": progress})
+    graph = SimpleNamespace(aget_state=AsyncMock(return_value=state), aupdate_state=AsyncMock())
+    monkeypatch.setattr(assets, "_authorize_thread", AsyncMock())
+    monkeypatch.setattr(assets, "get_script_gen_graph", lambda: graph)
+    monkeypatch.setattr(save, "get_asset_progress", lambda _: progress)
+
+    async def generate(*args):
+        await asyncio.sleep(0)
+        progress["phases"][0]["tasks"][0]["status"] = "complete"
+
+    regenerate = AsyncMock(side_effect=generate)
+    monkeypatch.setattr(save, "retry_single_asset", regenerate)
+    results = await asyncio.gather(
+        *(assets.retry_asset_task("asset-thread", "cover", "owner") for _ in range(4))
+    )
+    assert all(r["task_status"] == "complete" for r in results)
+    assert regenerate.await_count == 1
+
+    progress["phases"][0]["tasks"][0]["status"] = "failed"
+    regenerate.side_effect = InferenceRecoveryError("api_key_quota")
+    with pytest.raises(InferenceRecoveryError):
+        await assets.retry_asset_task("asset-thread", "cover", "owner")
