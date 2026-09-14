@@ -43,10 +43,16 @@ async def generate_outline(state: ScriptGenState) -> dict:
 
         llm = create_llm(
             model=settings.SCRIPT_EDITOR_MODEL or "deepseek-flash",
-            temperature=0.85, timeout=180, disable_thinking=True
+            temperature=0.85,
+            timeout=180,
+            disable_thinking=True,
         )
         structured_llm = llm.with_structured_output(
-            OutlineResult, method="function_calling", tool_choice="auto"
+            OutlineResult,
+            method="function_calling",
+            tool_choice=OutlineResult.__name__
+            if settings.INFERENCE_BACKEND == "tokendance"
+            else "auto",
         )
         result = await asyncio.wait_for(
             structured_llm.ainvoke(

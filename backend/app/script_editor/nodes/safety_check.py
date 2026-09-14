@@ -146,11 +146,18 @@ async def safety_check(state, config: RunnableConfig = None):
                 try:
                     llm = create_llm(
                         model=settings.SCRIPT_EDITOR_MODEL or "deepseek-flash",
-                        temperature=0.1, timeout=60, max_retries=0, disable_thinking=True
+                        temperature=0.1,
+                        timeout=60,
+                        max_retries=0,
+                        disable_thinking=True,
                     )
                     response = await asyncio.wait_for(
                         llm.with_structured_output(
-                            SafetyResult, method="function_calling", tool_choice="auto"
+                            SafetyResult,
+                            method="function_calling",
+                            tool_choice=SafetyResult.__name__
+                            if settings.INFERENCE_BACKEND == "tokendance"
+                            else "auto",
                         ).ainvoke(
                             [
                                 {

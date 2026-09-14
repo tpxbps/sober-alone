@@ -155,7 +155,11 @@ async def _discover_characters(
     """
     base_llm = _get_structured_llm()
     llm = base_llm.with_structured_output(
-        CharacterDiscoveryResult, method="function_calling", tool_choice="auto"
+        CharacterDiscoveryResult,
+        method="function_calling",
+        tool_choice=CharacterDiscoveryResult.__name__
+        if settings.INFERENCE_BACKEND == "tokendance"
+        else "auto",
     )
 
     user_prompt = (
@@ -231,7 +235,11 @@ async def _run_game_clues(base_llm, script_id: str, state: ScriptGenState, chars
     num_rounds = state.get("num_clue_rounds", 2)
     try:
         llm = base_llm.with_structured_output(
-            ClueStagesResult, method="function_calling", tool_choice="auto"
+            ClueStagesResult,
+            method="function_calling",
+            tool_choice=ClueStagesResult.__name__
+            if settings.INFERENCE_BACKEND == "tokendance"
+            else "auto",
         )
         user_msg = (
             f"## 剧本标题\n{state.get('script_title', '')}\n\n"
@@ -267,7 +275,11 @@ async def _run_game_scenes(base_llm, script_id: str, state: ScriptGenState, char
     _update_convert_task(script_id, "game_scenes", "running")
     try:
         llm = base_llm.with_structured_output(
-            ScenesResult, method="function_calling", tool_choice="auto"
+            ScenesResult,
+            method="function_calling",
+            tool_choice=ScenesResult.__name__
+            if settings.INFERENCE_BACKEND == "tokendance"
+            else "auto",
         )
         user_msg = (
             f"## 剧本标题\n{state.get('script_title', '')}\n\n"
@@ -417,7 +429,11 @@ async def _run_metadata(base_llm, script_id: str, state: ScriptGenState):
     _update_convert_task(script_id, "metadata", "running")
     try:
         llm = base_llm.with_structured_output(
-            ScriptMetadata, method="function_calling", tool_choice="auto"
+            ScriptMetadata,
+            method="function_calling",
+            tool_choice=ScriptMetadata.__name__
+            if settings.INFERENCE_BACKEND == "tokendance"
+            else "auto",
         )
         user_msg = (
             f"## 剧本标题\n{state.get('script_title', '')}\n\n"
@@ -461,7 +477,11 @@ async def _run_character(
     _update_convert_task(script_id, task_id, "running")
     try:
         llm = base_llm.with_structured_output(
-            SingleCharacterResult, method="function_calling", tool_choice="auto"
+            SingleCharacterResult,
+            method="function_calling",
+            tool_choice=SingleCharacterResult.__name__
+            if settings.INFERENCE_BACKEND == "tokendance"
+            else "auto",
         )
         user_msg = (
             f"## 剧本标题\n{state.get('script_title', '')}\n\n"

@@ -247,7 +247,8 @@ async def _probe_model(spec: ModelSpec) -> dict[str, Any]:
 async def _probe_configured_models() -> list[dict[str, Any]]:
     global _cached_at_monotonic, _cached_models
     specs = [
-        spec for spec in MODEL_SPECS
+        spec
+        for spec in MODEL_SPECS
         if settings.is_model_enabled(spec.id) and settings.get_api_key(spec.provider)
     ]
     semaphore = asyncio.Semaphore(MODEL_PROBE_CONCURRENCY)
