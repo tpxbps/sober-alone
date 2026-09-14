@@ -88,7 +88,9 @@ async def env(tmp_path, monkeypatch):
 async def settle(runner):
     tasks = list(runner._tasks.values())
     if tasks:
-        await asyncio.wait_for(asyncio.gather(*tasks), 5)
+        # This exercises durable SQLite writes, not a latency contract. Hosted
+        # Windows runners can take over five seconds to flush the checkpoints.
+        await asyncio.wait_for(asyncio.gather(*tasks), 30)
 
 
 async def start(env):
