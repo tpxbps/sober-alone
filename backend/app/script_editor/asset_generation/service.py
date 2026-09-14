@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.core.config import settings
+from app.core.inference import gather_inference, raise_for_inference_recovery
 from app.game.endings import ending_audio_tasks
 from app.script_editor.asset_generation.progress import (
     _init_asset_progress,
@@ -36,7 +37,6 @@ async def _generate_assets(state: ScriptGenState) -> dict:
     并行生成所有资源：向量数据、图片、语音
     三个阶段同时运行，每个阶段内部串行但有独立的进度跟踪
     """
-    import asyncio
 
     script_id = state.get("script_id", str(uuid.uuid4()))
     characters = state.get("characters", [])
@@ -210,7 +210,7 @@ async def _generate_assets(state: ScriptGenState) -> dict:
         for task_id in selected_tts:
             _update_task_status(script_id, task_id, "skipped", "未配置 MIMO_API_KEY")
 
-    results = await asyncio.gather(*phase_jobs, return_exceptions=True)
+    results = await gather_inference(*phase_jobs, return_exceptions=True)
 
     # 收集结果
     for r in results:
@@ -233,6 +233,7 @@ async def _generate_assets(state: ScriptGenState) -> dict:
                 if avatar_path.exists() and avatar_path.stat().st_size > 0:
                     avatars[char_id] = f"/images/scripts/{script_id}/avatars/{char_id}.png"
     except Exception as e:
+        raise_for_inference_recovery(e)
         logger.warning(f"Failed to collect image URLs: {e}")
 
     updates["cover_image_url"] = cover_url
@@ -264,6 +265,7 @@ async def _generate_assets(state: ScriptGenState) -> dict:
     try:
         await ScriptRepository.update_asset_urls(script_id, cover_url, avatars, state)
     except Exception as e:
+        raise_for_inference_recovery(e)
         logger.error(f"Failed to update asset URLs: {e}")
 
     return updates
@@ -295,6 +297,7 @@ async def _run_vectorize(
                 _update_task_status(script_id, task_id, "complete")
                 return
             except Exception as error:
+                raise_for_inference_recovery(error)
                 if attempt < VECTORIZE_MAX_ATTEMPTS:
                     logger.warning(
                         "ChromaDB ingestion failed for %s (attempt %s/%s), retrying: %s",
@@ -323,7 +326,6 @@ async def _run_images(
     force: bool,
 ):
     """图片生成阶段（封面 + 角色头像）— 全部并行"""
-    import asyncio
 
     tasks = []
 
@@ -368,7 +370,7 @@ async def _run_images(
             )
         )
 
-    await asyncio.gather(*tasks, return_exceptions=True)
+    await gather_inference(*tasks, return_exceptions=True)
 
 
 async def _run_single_image(script_id: str, task_id: str, func_name: str, func_kwargs: dict):
@@ -384,6 +386,7 @@ async def _run_single_image(script_id: str, task_id: str, func_name: str, func_k
         else:
             _update_task_status(script_id, task_id, "failed", "供应商未返回有效图片")
     except Exception as e:
+        raise_for_inference_recovery(e)
         logger.error(f"Image task {task_id} failed: {e}")
         _update_task_status(script_id, task_id, "failed", str(e))
 
@@ -412,6 +415,7 @@ async def _run_tts(
             force=force,
         )
     except Exception as e:
+        raise_for_inference_recovery(e)
         logger.error(f"TTS generation failed: {e}")
         for task_id in task_ids:
             progress = get_asset_progress(script_id)
@@ -458,6 +462,7 @@ def _delete_tts_audio(script_id: str, task_id: str):
             path.unlink()
             logger.info(f"Deleted existing audio for retry: {path}")
     except Exception as e:
+        raise_for_inference_recovery(e)
         logger.warning(f"Failed to delete audio for task {task_id}: {e}")
 
 
@@ -669,6 +674,7 @@ async def _retry_single_asset(script_id: str, task_id: str, state: ScriptGenStat
         return result
 
     except Exception as e:
+        raise_for_inference_recovery(e)
         logger.error(f"Asset retry failed for task {task_id}: {e}")
         _update_task_status(script_id, task_id, "failed", str(e))
         return TaskResult(ok=False, error=str(e))

@@ -8,6 +8,7 @@ import logging
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
+from app.core.inference import raise_for_inference_recovery
 from app.script_editor.nodes.utils import call_llm
 from app.script_editor.prompts.templates import get_prompt
 from app.script_editor.state import STEP_GENERATE_OUTLINE, ScriptGenState
@@ -58,6 +59,7 @@ async def generate_outline(state: ScriptGenState) -> dict:
         outline = result.content.strip()  # type: ignore[union-attr]
         logger.info(f"Outline structured output OK, title: {title}")
     except Exception as e:
+        raise_for_inference_recovery(e)
         logger.warning(f"Outline structured output failed, falling back to text: {e}")
         outline = await call_llm(system_prompt, user_content)
 

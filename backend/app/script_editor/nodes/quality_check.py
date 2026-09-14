@@ -9,6 +9,7 @@ from langgraph.types import interrupt
 from pydantic import BaseModel, Field, create_model
 
 from app.core.config import settings
+from app.core.inference import raise_for_inference_recovery
 from app.core.llm_factory import create_llm
 from app.game.content_quality import (
     CAPABILITY_VERSION,
@@ -217,6 +218,7 @@ async def check_game_quality(state: dict) -> dict:
             else "passed"
         )
     except Exception as error:
+        raise_for_inference_recovery(error)
         # Provider errors can contain request/credential details; do not serialize them.
         logger.warning("Quality check incomplete: %s (%s)", failure_reason, type(error).__name__)
         report["status"] = "incomplete"

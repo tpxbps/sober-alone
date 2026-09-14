@@ -1,5 +1,6 @@
 """Request-scoped gateway authentication. Never put credentials in graph state."""
 
+import asyncio
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -36,6 +37,29 @@ def raise_for_inference_recovery(error: BaseException) -> None:
             pending.append(current.__context__)
         if isinstance(current, BaseExceptionGroup):
             pending.extend(current.exceptions)
+
+
+async def gather_inference(*jobs, return_exceptions: bool = False):
+    """Preserve partial-result behavior, but stop the batch on account recovery."""
+
+    async def run(job):
+        try:
+            return await job
+        except Exception as error:
+            raise_for_inference_recovery(error)
+            if return_exceptions:
+                return error
+            raise
+
+    inputs = [asyncio.ensure_future(job) for job in jobs]
+    tasks = [asyncio.create_task(run(job)) for job in inputs]
+    try:
+        return await asyncio.gather(*tasks)
+    except BaseException:
+        for task in inputs + tasks:
+            task.cancel()
+        await asyncio.gather(*inputs, *tasks, return_exceptions=True)
+        raise
 
 
 def retryable_gateway_error(error: Exception) -> bool:

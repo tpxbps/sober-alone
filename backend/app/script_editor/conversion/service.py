@@ -8,6 +8,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.core.config import settings
+from app.core.inference import gather_inference, raise_for_inference_recovery
 from app.game.clues import derive_game_process, normalize_clue_stages, render_clue_markdown
 from app.script_editor.conversion.contracts import (
     CharacterDiscoveryResult,
@@ -255,6 +256,7 @@ async def _run_game_clues(base_llm, script_id: str, state: ScriptGenState, chars
             _update_convert_task(script_id, "game_flow", "failed")
             return None
     except Exception as e:
+        raise_for_inference_recovery(e)
         logger.error(f"game_clues failed: {e}", exc_info=True)
         _update_convert_task(script_id, "game_flow", "failed")
         return None
@@ -290,6 +292,7 @@ async def _run_game_scenes(base_llm, script_id: str, state: ScriptGenState, char
             _update_convert_task(script_id, "game_scenes", "failed")
             return None
     except Exception as e:
+        raise_for_inference_recovery(e)
         logger.error(f"game_scenes failed: {e}", exc_info=True)
         _update_convert_task(script_id, "game_scenes", "failed")
         return None
@@ -439,6 +442,7 @@ async def _run_metadata(base_llm, script_id: str, state: ScriptGenState):
             _update_convert_task(script_id, "metadata", "failed")
             return None
     except Exception as e:
+        raise_for_inference_recovery(e)
         logger.error(f"metadata failed: {e}", exc_info=True)
         _update_convert_task(script_id, "metadata", "failed")
         return None
@@ -486,6 +490,7 @@ async def _run_character(
             _update_convert_task(script_id, task_id, "failed")
             return char_name, None
     except Exception as e:
+        raise_for_inference_recovery(e)
         logger.error(f"char '{char_name}' failed: {e}", exc_info=True)
         _update_convert_task(script_id, task_id, "failed")
         return char_name, None
@@ -560,7 +565,8 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
                     raise ValueError("转换结果不完整")
                 cache[key] = value.model_dump() if schema else value
                 return value
-            except Exception:
+            except Exception as error:
+                raise_for_inference_recovery(error)
                 pass
             if attempt < 2:
                 await asyncio.sleep(attempt + 1)
@@ -584,6 +590,7 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
             else:
                 _update_convert_task(script_id, "discover_chars", "failed")
         except Exception as e:
+            raise_for_inference_recovery(e)
             logger.error(f"Character discovery failed: {e}", exc_info=True)
             _update_convert_task(script_id, "discover_chars", "failed")
 
@@ -643,7 +650,7 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
                 ),
             )
         )
-    values = await asyncio.gather(*jobs)
+    values = await gather_inference(*jobs)
     if any(value is None for value in values):
         return failure()
     results = [

@@ -10,6 +10,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.core.config import settings
+from app.core.inference import raise_for_inference_recovery
 from app.core.llm_factory import create_llm
 
 logger = logging.getLogger(__name__)
@@ -64,6 +65,7 @@ async def call_llm(
                 )
             return content
         except Exception as e:
+            raise_for_inference_recovery(e)
             last_error = e
             error_str = str(e)
 

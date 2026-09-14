@@ -9,6 +9,7 @@ from typing import Literal
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
 
+from app.core.inference import gather_inference, raise_for_inference_recovery
 from app.script_editor.state import STEP_SAFETY_CHECK
 
 logger = logging.getLogger(__name__)
@@ -173,6 +174,7 @@ async def safety_check(state, config: RunnableConfig = None):
                     cache[key] = result.model_dump()
                     break
                 except Exception as exc:
+                    raise_for_inference_recovery(exc)
                     logger.warning(
                         "Safety chunk failed field=%s attempt=%s error=%s",
                         chunk["field"],
@@ -185,7 +187,7 @@ async def safety_check(state, config: RunnableConfig = None):
                 cache[key] = {"status": "ERROR", "reason": GENERIC_ERROR}
             publish(thread_id, "safety_progress", {"completed": len(cache), "total": len(chunks)})
 
-    await asyncio.gather(*(check(chunk) for chunk in chunks))
+    await gather_inference(*(check(chunk) for chunk in chunks))
     report["passed"] = sum(cache.get(chunk["key"], {}).get("status") == "PASS" for chunk in chunks)
     failed = [chunk for chunk in chunks if cache.get(chunk["key"], {}).get("status") == "FAIL"]
     if failed:
