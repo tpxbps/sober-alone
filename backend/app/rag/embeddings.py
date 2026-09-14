@@ -9,6 +9,15 @@ DIMENSIONS = 1024
 MODEL = "qwen3.7-text-embedding"
 
 
+def collection_name(script_id: str) -> str:
+    # Audio revisions identify a whole script; vector revisions are validated
+    # against each character's exact text. Keep one current gateway collection
+    # per script so existing versioned audio namespaces can use rebuilt vectors.
+    if settings.INFERENCE_BACKEND == "tokendance":
+        script_id = script_id.split("__", 1)[0]
+    return f"script_{script_id.replace('-', '_')}"
+
+
 def profile() -> str:
     return (
         f"tokendance:{MODEL}:{DIMENSIONS}:v1" if settings.INFERENCE_BACKEND == "tokendance" else ""

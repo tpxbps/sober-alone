@@ -97,7 +97,9 @@ async def _generate_assets(state: ScriptGenState) -> dict:
             "id": "vectorize",
             "label": "角色剧本向量化",
             "tech": "Embedding",
-            "model": "zai-embedding-3",
+            "model": "qwen3.7-text-embedding"
+            if settings.INFERENCE_BACKEND == "tokendance"
+            else "zai-embedding-3",
             "tasks": [
                 *[
                     {
@@ -113,7 +115,9 @@ async def _generate_assets(state: ScriptGenState) -> dict:
             "id": "image",
             "label": "剧本图片生成",
             "tech": "Text-to-Image",
-            "model": "doubao-seedream-4.0",
+            "model": "seedream-5.0-lite"
+            if settings.INFERENCE_BACKEND == "tokendance"
+            else "doubao-seedream-4.0",
             "tasks": [
                 {"id": "cover", "label": "剧本概览封面", "status": "pending"},
                 *[

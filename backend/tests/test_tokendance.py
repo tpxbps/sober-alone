@@ -279,3 +279,43 @@ async def test_agent_does_not_retry_or_convert_recovery_to_speech(gateway):
             with pytest.raises(InferenceRecoveryError):
                 raise_for_inference_recovery(caught.value)
     assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_versioned_audio_uses_current_vectors_only_for_matching_role_text(
+    gateway, tmp_path, monkeypatch
+):
+    from app.rag.embeddings import collection_name, profile
+    from app.rag.retriever import ChromaRetriever
+    from app.rag.revision import script_digest
+
+    retriever = ChromaRetriever(str(tmp_path / "chroma"))
+    collection = retriever.client.create_collection(
+        collection_name("test-script"), metadata={"embedding_profile": profile()}
+    )
+    digest = script_digest("角色自己的秘密")
+    collection.add(
+        ids=["one"],
+        documents=["角色自己的秘密"],
+        embeddings=[[0.1] * DIMENSIONS],
+        metadatas=[
+            {
+                "character_id": "role",
+                "content_digest": digest,
+                "ingest_version": "v1",
+                "chunk_index": 0,
+                "total_chunks": 1,
+            }
+        ],
+    )
+    monkeypatch.setattr(retriever, "_create_embeddings", lambda _: [[0.1] * DIMENSIONS])
+    assert await retriever.character_index_ready("test-script__audio-revision", "role", digest)
+    assert await retriever.retrieve("test-script__audio-revision", "秘密", "role", 1, digest)
+    assert not await retriever.retrieve(
+        "test-script__old-revision", "秘密", "role", 1, "old-digest"
+    )
+    assert not await retriever.retrieve(
+        "test-script__audio-revision", "秘密", "other-role", 1, digest
+    )
+    monkeypatch.setattr(settings, "INFERENCE_BACKEND", "direct")
+    assert collection_name("test-script__audio-revision") == "script_test_script__audio_revision"

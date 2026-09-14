@@ -53,7 +53,9 @@ class ChromaRetriever:
             str: 集合名称
         """
         # 预处理时，将UUID中的横线替换为了下划线，以符合ChromaDB命名规范
-        return f"script_{script_id.replace('-', '_')}"
+        from app.rag.embeddings import collection_name
+
+        return collection_name(script_id)
 
     def _create_embeddings(self, texts: list[str]) -> list[list[float]]:
         """
