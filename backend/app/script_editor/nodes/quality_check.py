@@ -136,13 +136,17 @@ async def check_game_quality(state: dict) -> dict:
         llm = create_llm(
             model=report["model"],
             temperature=0.1,
-            timeout=180,
-            max_retries=1,
+            timeout=240,
+            max_retries=0,
             disable_thinking=True,
         )
         result = await asyncio.wait_for(
             llm.with_structured_output(
-                result_schema, method="function_calling", tool_choice="auto"
+                result_schema,
+                method="function_calling",
+                tool_choice=result_schema.__name__
+                if settings.INFERENCE_BACKEND == "tokendance"
+                else "auto",
             ).ainvoke(
                 [
                     {
@@ -187,7 +191,7 @@ async def check_game_quality(state: dict) -> dict:
                     },
                 ]
             ),
-            timeout=240,
+            timeout=300,
         )
         failure_reason = "unverifiable_evidence"
         raw = result.model_dump() if isinstance(result, BaseModel) else result
