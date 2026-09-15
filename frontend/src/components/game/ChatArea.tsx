@@ -61,6 +61,11 @@ interface ChatAreaProps {
 // 格式化模型名称显示
 function getModelDisplayName(modelId: string | undefined | null): string {
   if (!modelId) return "";
+  const names: Record<string, string> = {
+    "kimi-k3": "Kimi K3", "qwen3.8-max-0902": "Qwen3.8 Max",
+    "glm-5.3": "GLM-5.3", "deepseek-v4-pro-0813": "DeepSeek V4 Pro",
+  };
+  if (names[modelId]) return names[modelId];
   return ["deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"].includes(modelId.toLowerCase())
     ? "deepseek-v4.1-flash" : modelId;
 }

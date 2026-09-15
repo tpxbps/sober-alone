@@ -6,7 +6,7 @@ export function configuredModels(
 ): AIModelOption[] {
   return capabilities.models
     .filter((item) => item.configured)
-    .map((item) => ({ id: item.id, name: item.name.replace(/deepseek(?=-v4)/gi, 'deepseek'), provider: item.provider }))
+    .map((item) => ({ id: item.id, name: item.name.replace(/deepseek(?=-v4)/gi, 'deepseek'), provider: item.provider, ...(item.tier ? { tier: item.tier } : {}) }))
 }
 
 export function ttsCapability(capabilities: SystemCapabilities) {

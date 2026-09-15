@@ -15,6 +15,8 @@ def _feature(enabled: bool, enabled_reason: str, disabled_reason: str) -> dict[s
 def get_capabilities() -> dict[str, Any]:
     models = []
     for spec in MODEL_SPECS:
+        if settings.INFERENCE_BACKEND not in spec.backends:
+            continue
         enabled = settings.is_model_enabled(spec.id)
         has_key = bool(settings.get_api_key(spec.provider)) and enabled
         if not enabled:

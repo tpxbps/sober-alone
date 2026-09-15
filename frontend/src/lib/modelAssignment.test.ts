@@ -29,6 +29,12 @@ function health(model: string, status: ModelHealthItem['status']): ModelHealthIt
 }
 
 describe('assignModelsToAICharacters', () => {
+  it('never assigns expensive models implicitly even when all health checks fail', () => {
+    const frontier: AIModelOption = { id: 'kimi-k3', name: 'Kimi K3', provider: 'moonshot', tier: 'frontier' }
+    const selected = assignModelsToAICharacters({ characters, humanCharacterId: 'human', models: [frontier, models[0]], healthById: { deepseek: health('deepseek', 'unavailable') } })
+    expect(new Set(Object.values(selected))).toEqual(new Set(['deepseek']))
+    expect(assignModelsToAICharacters({ characters, humanCharacterId: 'human', models: [frontier], healthById: {} })).toEqual({})
+  })
   it('excludes slow models and does not repeat when responsive models are sufficient', () => {
     const result = assignModelsToAICharacters({
       characters,

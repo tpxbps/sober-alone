@@ -17,12 +17,61 @@ class ModelSpec:
     provider: str
     provider_name: str
     disable_thinking_extra: str = ""
-    reaction_output_method: Literal["json_schema", "json_mode"] = "json_schema"
+    reaction_output_method: Literal["json_schema", "json_mode", "function_calling"] = "json_schema"
+    tier: Literal["standard", "frontier"] = "standard"
+    backends: tuple[str, ...] = ("direct", "tokendance")
+    reasoning_effort: str = ""
 
 
 MODEL_SPECS = (
+    ModelSpec(
+        "kimi-k3",
+        "Kimi K3",
+        "moonshot",
+        "Kimi",
+        tier="frontier",
+        backends=("tokendance",),
+        reasoning_effort="low",
+    ),
+    ModelSpec(
+        "qwen3.8-max-0902",
+        "Qwen3.8 Max",
+        "alibaba",
+        "Qwen",
+        tier="frontier",
+        backends=("tokendance",),
+        reasoning_effort="low",
+    ),
+    ModelSpec(
+        "glm-5.3",
+        "GLM-5.3",
+        "zhipuai",
+        "Zhipu GLM",
+        tier="frontier",
+        backends=("tokendance",),
+        reasoning_effort="low",
+        reaction_output_method="json_mode",
+    ),
+    ModelSpec(
+        "deepseek-v4-pro-0813",
+        "DeepSeek V4 Pro",
+        "deepseek",
+        "DeepSeek",
+        tier="frontier",
+        backends=("tokendance",),
+        reasoning_effort="low",
+        reaction_output_method="json_mode",
+    ),
     ModelSpec("deepseek-flash", "deepSeek-v4.1-flash", "deepseek", "DeepSeek"),
-    ModelSpec("step-3.5-flash", "step-3.5-flash", "stepfun", "StepFun"),
+    ModelSpec("step-3.5-flash", "step-3.5-flash", "stepfun", "StepFun", backends=("direct",)),
+    ModelSpec(
+        "ling-3.0-flash",
+        "Ling-3.0-flash",
+        "inclusionai",
+        "Ling",
+        backends=("tokendance",),
+        disable_thinking_extra="ling",
+    ),
     ModelSpec(
         "qwen3.8-flash",
         "qwen3.8-flash",

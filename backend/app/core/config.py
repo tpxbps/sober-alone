@@ -121,7 +121,8 @@ class Settings(BaseSettings):
             for value in self.DISABLED_LLM_MODELS.split(",")
             if value.strip()
         }
-        return get_model_spec(model).id not in disabled
+        spec = get_model_spec(model)
+        return spec.id not in disabled and self.INFERENCE_BACKEND in spec.backends
 
     def get_script_review_model(self) -> str:
         return self.SCRIPT_REVIEW_MODEL or self.SCRIPT_EDITOR_MODEL or "deepseek-flash"

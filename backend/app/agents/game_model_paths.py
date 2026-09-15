@@ -39,7 +39,11 @@ def create_game_model(
 
 def bind_reaction_output(model, model_id: str, schema=SpeechReactionPayload):
     spec = get_model_spec(model_id)
-    if settings.INFERENCE_BACKEND == "tokendance" and spec.provider == "deepseek":
+    if (
+        settings.INFERENCE_BACKEND == "tokendance"
+        and spec.provider == "deepseek"
+        and spec.tier != "frontier"
+    ):
         return model.with_structured_output(schema, method="function_calling")
     return model.with_structured_output(schema, method=spec.reaction_output_method)
 

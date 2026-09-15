@@ -185,7 +185,9 @@ def build_reaction_analysis_prompt(
     - 其他重要的策略性发言
 2. 如果该发言影响了你对其他玩家的怀疑程度，将变化逐条加入 suspicion_changes 数组
 3. 如果该发言在怀疑或攻击你，将变化逐条加入 suspected_by_changes 数组
-4. 两个变化字段始终是数组；没有变化时返回 []，不要返回单个对象"""
+4. 两个变化字段始终是数组；没有变化时返回 []，不要返回单个对象
+5. 两组变化只填写其他角色，禁止把你自己「{character_name}」填为 target 或 suspecter。
+别人指控你时，应把发言者填入 suspected_by_changes 的 suspecter，不能把自己填入 suspicion_changes。"""
 
     if is_human:
         start = prompt.index("1. 提炼")

@@ -135,6 +135,7 @@ export interface StreamingMessage {
 
 // AI model option
 export interface AIModelOption {
+  tier?: 'standard' | 'frontier';
   id: string;
   name: string;
   provider: string;

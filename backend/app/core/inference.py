@@ -1,6 +1,7 @@
 """Request-scoped gateway authentication. Never put credentials in graph state."""
 
 import asyncio
+import json
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -109,6 +110,7 @@ class InferenceScope:
     reference: str
     resolve_key: Callable[[], str] = field(repr=False, compare=False)
     allow_deepseek_fallback: bool = False
+    allowed_models: frozenset[str] | None = None
 
 
 _scope: ContextVar[InferenceScope | None] = ContextVar("inference_scope", default=None)
@@ -148,6 +150,8 @@ def feature_available(provider: str) -> bool:
 class GatewayAuth(httpx.Auth):
     """Resolve at dispatch, including SDK retries and cached model instances."""
 
+    requires_request_body = True
+
     def auth_flow(self, request: httpx.Request):
         expected = httpx.URL(settings.TOKENDANCE_BASE_URL)
         if (request.url.scheme, request.url.host, request.url.port) != (
@@ -156,6 +160,11 @@ class GatewayAuth(httpx.Auth):
             expected.port,
         ):
             raise ValueError("Gateway credentials cannot be sent to another origin")
+        scope = _scope.get()
+        if scope and scope.allowed_models is not None and request.method == "POST":
+            body = json.loads(request.content)
+            if body.get("model") not in scope.allowed_models:
+                raise InferenceRecoveryError("reauthorize_api_key", status=403)
         request.headers["Authorization"] = "Bearer " + gateway_key()
         if settings.TOKENDANCE_APP_URL:
             request.headers["X-App-URL"] = settings.TOKENDANCE_APP_URL

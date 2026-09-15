@@ -58,6 +58,9 @@ def create_llm(
             2. 结构化输出（with_structured_output）— 思考模式与 function_calling 不兼容
     """
     model_lower = model.lower()
+    # Existing gateway games can resume after the selectable Step model retires.
+    if settings.INFERENCE_BACKEND == "tokendance" and model_lower == "step-3.5-flash":
+        model_lower = "ling-3.0-flash"
     spec = get_model_spec(model_lower)
     model_lower = spec.id
     if not settings.is_model_enabled(model_lower):
@@ -71,25 +74,36 @@ def create_llm(
             gateway_model,
             gateway_url,
         )
+        from app.core.reasoning_chat import ReasoningChatOpenAI
 
         extra = None
-        if disable_thinking:
+        if spec.reasoning_effort:
+            extra = {"reasoning_effort": spec.reasoning_effort}
+            if provider == "deepseek":
+                extra["thinking"] = {"type": "enabled"}
+        elif disable_thinking:
             if provider == "deepseek":
                 extra = {"thinking": {"type": "disabled"}}
             elif spec.disable_thinking_extra == "qwen":
                 extra = {"enable_thinking": False}
             elif spec.disable_thinking_extra == "glm_low":
                 extra = {"reasoning_effort": "low"}
-        return ChatOpenAI(
+            elif spec.disable_thinking_extra == "ling":
+                extra = {"thinking": {"type": "disabled"}}
+        return ReasoningChatOpenAI(
             model=gateway_model(model_lower),
             api_key=SecretStr("scoped-at-dispatch"),
             base_url=gateway_url("v1"),
-            temperature=temperature,
+            temperature=None if provider == "moonshot" else temperature,
             timeout=timeout or 90,
             # SDK retries wrap recovery errors as network failures. Agent retry
             # middleware owns the bounded transport retry and preserves recovery.
             max_retries=0,
             extra_body=extra,
+            # K3 low reserves 8192 reasoning tokens at some gateway endpoints.
+            max_tokens=(12288 if provider == "moonshot" else 8192)
+            if spec.tier == "frontier"
+            else None,
             http_client=gateway_client(
                 timeout=timeout or 90, deepseek_fallback=provider == "deepseek"
             ),
@@ -217,7 +231,7 @@ def create_summary_llm() -> BaseChatModel:
     """Create the summary model, falling back to the configured primary model."""
     if settings.INFERENCE_BACKEND == "tokendance":
         return create_llm(
-            model="step-3.5-flash",
+            model="qwen3.8-flash",
             temperature=0.3,
             timeout=90,
             max_retries=2,

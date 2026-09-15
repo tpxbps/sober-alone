@@ -59,7 +59,12 @@ export function ScriptSetup({ script, quiet, onBack, onStartGame, onBusyChange }
                         const focused = document.activeElement;
                         if (focused instanceof HTMLElement && focused !== document.body && focused !== document.documentElement && !(event.target instanceof HTMLElement && event.target.contains(focused))) event.preventDefault();
                       }}><Select.Viewport>
-                        {setup.models.map(model => <Select.Item aria-label={model.name} key={model.id} value={model.id} className="setup-model-option"><Select.ItemText>{model.name}</Select.ItemText><span>{setup.health[model.id]?.status === "normal" ? "" : setup.health[model.id]?.status === "slow" ? "响应较慢" : setup.health[model.id]?.status === "timeout" ? "测速超时" : setup.health[model.id]?.status === "unavailable" ? "当前不可用" : ""}</span><Select.ItemIndicator><Check size={13} /></Select.ItemIndicator></Select.Item>)}
+                        {([true, false] as const).map(frontier => {
+                          const models = setup.models.filter(model => (model.tier === "frontier") === frontier);
+                          return models.length > 0 && <Select.Group key={String(frontier)} className={frontier ? "setup-frontier-models" : undefined} aria-label={frontier ? "前沿模型" : "常用模型"}>
+                            {models.map(model => <Select.Item aria-label={model.name} key={model.id} value={model.id} className="setup-model-option"><Select.ItemText>{model.name}</Select.ItemText><span>{setup.health[model.id]?.status === "normal" ? "" : setup.health[model.id]?.status === "slow" ? "响应较慢" : setup.health[model.id]?.status === "timeout" ? "测速超时" : setup.health[model.id]?.status === "unavailable" ? "当前不可用" : ""}</span><Select.ItemIndicator><Check size={13} /></Select.ItemIndicator></Select.Item>)}
+                          </Select.Group>;
+                        })}
                       </Select.Viewport></Select.Content></Select.Portal>
                     </Select.Root> : <p role="status" className="setup-model-warning">暂不可分配 AI 模型：{setup.modelReason}</p>}
                     {health && health.status !== "normal" && <p role="status" className="setup-model-warning">{health.status === "unavailable" ? "模型暂不可用，建议选择其他模型" : health.message}</p>}

@@ -100,6 +100,9 @@ async def _probe_models(selected: str | None) -> None:
     if selected and not specs:
         raise ValueError(f"Unknown model: {selected}")
     for spec in specs:
+        if spec.tier == "frontier" or not settings.is_model_enabled(spec.id):
+            print(f"SKIP {spec.id}: excluded from model probes")
+            continue
         if not settings.get_api_key(spec.provider):
             print(f"SKIP {spec.id}: missing {spec.provider} API key")
             continue

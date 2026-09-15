@@ -578,7 +578,8 @@ submit_final_vote(suspect_name="角色全名", reasoning="1-2句投票理由")
 
 【格式纠正】上次返回格式不符合要求。suspicion_changes 和
 suspected_by_changes 必须是数组；没有变化时返回空数组。main_perspective 必须是字符串，
-不要返回数组或对象；score 必须是 0 到 1 的绝对怀疑程度。请重新返回完整结构。"""
+不要返回数组或对象；score 必须是 0 到 1 的绝对怀疑程度。
+target 和 suspecter 只能是合法的其他角色，禁止填自己的名字。请重新返回完整结构。"""
                 if is_human:
                     prompt = prompt.replace("main_perspective 必须是字符串，", "")
                 try:

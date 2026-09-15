@@ -25,6 +25,9 @@ export function assignModelsToAICharacters({
   healthById: Record<string, ModelHealthItem>
   random?: () => number
 }): Record<string, string> {
+  // Frontier models are an explicit player choice, including when every
+  // inexpensive model is slow or health information is not available yet.
+  models = models.filter((model) => model.tier !== 'frontier')
   const aiCharacterIds = characters
     .filter((character) => character.character_id !== humanCharacterId)
     .map((character) => character.character_id)
