@@ -90,8 +90,12 @@ def create_llm(
             # middleware owns the bounded transport retry and preserves recovery.
             max_retries=0,
             extra_body=extra,
-            http_client=gateway_client(timeout=timeout or 90),
-            http_async_client=gateway_async_client(timeout=timeout or 90),
+            http_client=gateway_client(
+                timeout=timeout or 90, deepseek_fallback=provider == "deepseek"
+            ),
+            http_async_client=gateway_async_client(
+                timeout=timeout or 90, deepseek_fallback=provider == "deepseek"
+            ),
             stream_usage=True,
         )
 

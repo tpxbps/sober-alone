@@ -108,6 +108,7 @@ def tool_retry_middleware():
 class InferenceScope:
     reference: str
     resolve_key: Callable[[], str] = field(repr=False, compare=False)
+    allow_deepseek_fallback: bool = False
 
 
 _scope: ContextVar[InferenceScope | None] = ContextVar("inference_scope", default=None)
@@ -172,7 +173,11 @@ async def _check_async(response: httpx.Response) -> None:
     check_gateway_response(response)
 
 
-def gateway_client(**kwargs) -> httpx.Client:
+def gateway_client(*, deepseek_fallback: bool = False, **kwargs) -> httpx.Client:
+    if deepseek_fallback:
+        from app.core.deepseek_fallback import DeepSeekTransport
+
+        kwargs["transport"] = DeepSeekTransport()
     return httpx.Client(
         auth=GatewayAuth(),
         event_hooks={"response": [check_gateway_response]},
@@ -181,7 +186,11 @@ def gateway_client(**kwargs) -> httpx.Client:
     )
 
 
-def gateway_async_client(**kwargs) -> httpx.AsyncClient:
+def gateway_async_client(*, deepseek_fallback: bool = False, **kwargs) -> httpx.AsyncClient:
+    if deepseek_fallback:
+        from app.core.deepseek_fallback import AsyncDeepSeekTransport
+
+        kwargs["transport"] = AsyncDeepSeekTransport()
     return httpx.AsyncClient(
         auth=GatewayAuth(),
         event_hooks={"response": [_check_async]},
