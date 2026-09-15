@@ -139,6 +139,8 @@ for (const failure of ["create","init"] as const) {
   });
 }
 test("320—1440 像素的列表和原页选角不横向溢出", async ({page},info) => {
+  // Six complete open/return flows and full-page captures share this budget.
+  test.setTimeout(90_000);
   await fixture(page);
   for(const width of [1440,1280,1024,768,390,320]) {
     await page.setViewportSize({width,height:900});
