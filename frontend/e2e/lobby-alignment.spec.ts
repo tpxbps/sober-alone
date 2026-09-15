@@ -1,6 +1,22 @@
 import { expect, test, type Page } from "@playwright/test";
 
 async function openCalibrationLobby(page: Page) {
+  // Pixel calibration requires the real GPU surface to stay active. Software
+  // compositing and PNG capture on CI can otherwise trip the independent
+  // low-FPS failover mid-test. Advance RAF time by a frame, not capture latency;
+  // lobby-v2.spec.ts separately tests failover with the real time budget.
+  await page.addInitScript(() => {
+    const schedule = window.requestAnimationFrame.bind(window);
+    let lastReal = 0;
+    let frameTime = performance.now();
+    window.requestAnimationFrame = callback => schedule(realTime => {
+      if (realTime !== lastReal) {
+        frameTime += Math.min(1000 / 60, Math.max(0, realTime - lastReal));
+        lastReal = realTime;
+      }
+      callback(frameTime);
+    });
+  });
   await page.route("**/alignment-cover.svg", route => route.fulfill({
     contentType: "image/svg+xml",
     body: '<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="768"><path fill="#f00" d="M0 0h1280v768H0z"/></svg>',
