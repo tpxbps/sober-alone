@@ -12,6 +12,8 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import GameStage
+from app.game.citation_stream import CitationStreamFilter
+from app.game.clues import stage_public_clues
 
 logger = logging.getLogger(__name__)
 _ai_speech_locks: dict[str, asyncio.Lock] = {}
@@ -172,6 +174,12 @@ class GameSpeechService:
 
         # 生成AI发言
         full_content = ""
+        citation_filter = CitationStreamFilter(
+            stage_public_clues(
+                flow_controller.session.current_stage,
+                getattr(flow_controller.session, "revealed_clues", None) or [],
+            )
+        )
         is_thinking = False
         agent_error = False
 
@@ -185,10 +193,10 @@ class GameSpeechService:
                         if is_thinking:
                             is_thinking = False
 
-                        text = chunk.get("text", "")
+                        text = citation_filter.feed(chunk.get("text", ""))
                         full_content += text
-                        # 发送文本token给前端
-                        yield encode_sse({"type": "token", "text": text})
+                        if text:
+                            yield encode_sse({"type": "token", "text": text})
 
                     elif chunk_type == "progress":
                         status = chunk.get("status", "")
@@ -203,6 +211,11 @@ class GameSpeechService:
             agent_error = True
             logger.error(f"AI speech stream error: {e}")
 
+        tail = citation_filter.finish()
+        if tail:
+            full_content += tail
+            yield encode_sse({"type": "token", "text": tail})
+
         # AI发言流结束，通知前端进入反应处理阶段
         yield encode_sse({"type": "speech_done"})
 
@@ -210,7 +223,7 @@ class GameSpeechService:
         # 当 agent 出错或内容为空时，用兜底消息代替，确保流程继续推进
         next_speaker_info = {}
         content_to_record = full_content
-        if agent_error or not full_content:
+        if agent_error or not full_content.strip():
             logger.warning(
                 f"Agent {character_id} produced no content (error={agent_error}), inserting fallback record"
             )

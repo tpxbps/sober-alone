@@ -21,7 +21,7 @@ export function StreamingBubble() {
   const isProcessingReactions = useGameStore((s) => s.isProcessingReactions);
   const characters = useGameStore((s) => s.characters);
   const agentLlmInfo = useGameStore((s) => s.agentLlmInfo);
-  const publicClues = useGameStore((s) => s.publicClues);
+  const publicClues = useGameStore((s) => s.streamingClues);
 
   // RAF-throttled scroll: only scroll once per animation frame at most
   const scrollRafRef = useRef<number | null>(null);
@@ -173,7 +173,7 @@ export function StreamingBubble() {
           {/* Keep streaming and persisted messages visually consistent. */}
           {streamingContent.trim() && (
             <div className="text-sm">
-              <GameMessageMarkdown characters={characters} publicClues={publicClues}>
+              <GameMessageMarkdown characters={characters} publicClues={publicClues} allowedCitationIds={publicClues.map(clue => clue.id)}>
                 {streamingContent}
               </GameMessageMarkdown>
               {isStreaming && (

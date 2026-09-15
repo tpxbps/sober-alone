@@ -7,7 +7,7 @@ varying vec2 vUv;
 void main() { vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }
 `;
 const fragmentShader = `
-uniform sampler2D map, density, velocity;
+uniform sampler2D map, density, velocity, dye;
 uniform vec2 viewport, imageSize, panelSize, origin, pointer;
 uniform vec4 rect;
 uniform float time, reveal, isCard, pointerActive, surfaceOpacity, ambientWave;
@@ -25,8 +25,8 @@ void main() {
   vec2 flow=texture2D(velocity,screen).xy;
   vec3 pigment=texture2D(density,screen).rgb;
   float ink=1.-exp(-pigment.b*.75);
-  // Only autonomous sources write green: their marble contours stay in the scene.
-  float paint=1.-exp(-pigment.g*2.2);
+  // Only autonomous sources write blue density. XY also carry solver velocity.
+  float paint=1.-exp(-pigment.b*1.71);
   float grain=.5, fold=.5, pearlescence=0.;
   // Most of the viewport contains no dye; do not evaluate its marble field.
   if(max(ink,paint)>.00001) {
@@ -38,43 +38,24 @@ void main() {
     pearlescence=paint*.65*(veins*.7+fold*.2);
   }
 
-  // Natural light anchors the pointer; a separate pigment layer unfolds outward.
-  // Both stay in CSS-pixel bounds. Only the pigment edge and short wake deform.
-  float cursorRadius=clamp(min(viewport.x,viewport.y)*.065,42.,58.);
-  vec2 cursor=(screen-pointer)*viewport/cursorRadius;
-  float distanceToCursor=length(cursor);
-  float core=0., silk=.5, nearLight=0., sheen=0., pigmentEdge=0., angle=0.;
-  // Angular detail is local to the cursor, not a full-screen shader pass.
-  if(pointerActive>.5 && distanceToCursor<2.35) {
-    float envelope=1.-smoothstep(1.25,2.1,distanceToCursor);
-    vec2 edgeFlow=clamp(flow*.003,vec2(-.09),vec2(.09));
-    edgeFlow*=smoothstep(.3,1.2,distanceToCursor);
-    core=exp(-dot(cursor,cursor)*1.8);
-    float aura=exp(-dot(cursor+edgeFlow,cursor+edgeFlow)*.75)*envelope;
-    silk=.5+.5*sin(cursor.x*1.3+cursor.y*.9+time*.65);
-    nearLight=core*.72+aura*.28;
-    sheen=aura*(.65+silk*.35);
-    // Soft outward fronts stay coherent inside and gently slip apart outside.
-    // Integer harmonics keep the pattern seamless around atan's branch cut.
-    angle=atan(cursor.y,cursor.x+.00001);
-    float unrest=smoothstep(-.35,.65,sin(angle+time*.17));
-    float outer=smoothstep(.45,1.8,distanceToCursor);
-    float slip=sin(angle*3.-time*.7+distanceToCursor*1.8)*.035;
-    slip+=unrest*outer*(sin(angle*5.+time*.53)*.10+sin(angle*9.-time*.39)*.045);
-    slip+=dot(edgeFlow,vec2(cos(angle),sin(angle)))*outer*.5;
-    float front=.5+.5*cos((distanceToCursor+slip)*9.2-time*2.4);
-    float fracture=mix(1.,smoothstep(-.7,.3,sin(angle*4.+distanceToCursor*2.-time*.6)),unrest*outer*.8);
-    pigmentEdge=pow(front,5.)*fracture;
-    pigmentEdge*=smoothstep(.3,.65,distanceToCursor)*(1.-smoothstep(1.5,2.35,distanceToCursor));
-  }
-  float wake=1.-smoothstep(1.5,3.2,distanceToCursor);
-  float trail=(1.-exp(-pigment.r*1.5))*.12*wake;
+  // The pointer changes how much of the existing image is visible. It has no
+  // emissive core, rings or drawn contour: only advected exposure remains.
+  vec2 pixels=screen*viewport;
+  vec2 driftPx=clamp(flow*.35,vec2(-8.),vec2(8.));
+  float driftNoise=noise(pixels/170.+flow*.0015);
+  vec2 exposureUv=screen+(driftPx+vec2(driftNoise-.5,noise(pixels.yx/190.)-.5)*13.)/viewport;
+  float exposure=texture2D(dye,exposureUv).r;
+  float distanceToPointer=length((screen-pointer)*viewport);
+  float proximity=1.-smoothstep(90.,220.,distanceToPointer);
+  float unveiling=(1.-exp(-max(0.,exposure-.008)*2.8));
+  unveiling*=mix(.72,1.,driftNoise)*proximity;
+  unveiling=min(unveiling,.72);
   float wave=0.;
   if(ambientWave>.00001) {
     vec2 waveDistance=(screen-ambientOrigin)*vec2(viewport.x/viewport.y,1.);
     wave=exp(-pow(waveDistance.y+sin(waveDistance.x*5.+time*.45)*.04,2.)/.004-dot(waveDistance,waveDistance)*2.)*ambientWave;
   }
-  float light=clamp(ink*.65+trail+nearLight*.95+pigmentEdge*.11+wave*.45+pearlescence*.32,0.,1.);
+  float light=clamp(ink*.65+unveiling+wave*.45+pearlescence*.32,0.,1.);
   float visible=light;
   if(isCard>.5) {
     float spread=step(.995,reveal);
@@ -95,13 +76,7 @@ void main() {
   vec3 tint=mix(silver,gold,fold);
   float ribbons=ink*fold*.3;
   vec3 sceneGlow=tint*(ink*grain*.06+ribbons*.08+wave*.025+pearlescence*.12);
-  vec3 cursorTint=mix(silver,gold,core*.6+silk*.15);
-  vec3 cursorGlow=cursorTint*(core*.014*pointerActive+sheen*.018+trail*.025);
-  if(pigmentEdge>0.) {
-    vec3 pigmentTint=mix(silver,gold,.5+.5*sin(angle*2.+distanceToCursor*2.-time*.35));
-    cursorGlow+=pigmentTint*pigmentEdge*.017;
-  }
-  col+=(sceneGlow+cursorGlow)*(1.-isCard*.72);
+  col+=sceneGlow*(1.-isCard*.72);
   gl_FragColor=vec4(col,mix(1.,surfaceOpacity,isCard));
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -117,8 +92,9 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
   const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: false, powerPreference: "low-power" });
   if (!renderer.extensions.has("EXT_color_buffer_float")) { renderer.dispose(); throw new Error("Float targets unavailable"); }
   let fluid: FluidSimulation;
-  try { fluid = new FluidSimulation(renderer, { profile: "performance", dyeResolution: 512, densityDissipation: .95, velocityDissipation: .96, enableVorticity: true, curlStrength: 12, bfecc: false, reflectWalls: false }); }
+  try { fluid = new FluidSimulation(renderer, { profile: "performance", dyeResolution: 512, densityDissipation: .95, velocityDissipation: .96, dyeDissipation: .94, enableVorticity: true, curlStrength: 12, bfecc: false, reflectWalls: false }); }
   catch (error) { renderer.dispose(); throw error; }
+  fluid.enableDye = true;
   const scene = new THREE.Scene();
   let canvasBounds = canvas.getBoundingClientRect();
   const camera = new THREE.OrthographicCamera(0, canvasBounds.width, canvasBounds.height, 0, -10, 10);
@@ -135,11 +111,13 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
   const pointer = new THREE.Vector2(-2, -2);
   const pointerClient = new THREE.Vector2(-2, -2);
   let pointerActive = 0;
+  let lastMoved = 0, lastIdleSplat = 0;
+  let painted: THREE.Vector2 | null = null;
   let pointerCard: HTMLElement | null = null;
   const material = (isCard: boolean) => new THREE.ShaderMaterial({
     vertexShader, fragmentShader, depthTest: false, depthWrite: false, transparent: isCard,
     uniforms: {
-      map: { value: null }, density: { value: fluid.densityTexture }, velocity: { value: fluid.velocityTexture },
+      map: { value: null }, density: { value: fluid.densityTexture }, velocity: { value: fluid.velocityTexture }, dye: { value: fluid.dyeTexture },
       viewport: { value: new THREE.Vector2(width, height) }, imageSize: { value: new THREE.Vector2(1, 1) },
       panelSize: { value: new THREE.Vector2(width, height) }, rect: { value: new THREE.Vector4(0, 0, width, height) },
       origin: { value: new THREE.Vector2(.5, .5) }, pointer: { value: pointer }, pointerActive: { value: 0 },
@@ -209,6 +187,7 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
   const move = (event: PointerEvent) => {
     if (event.pointerType === "touch" || paused()) return;
     const x = (event.clientX - canvasBounds.left) / width, y = 1 - (event.clientY - canvasBounds.top) / height;
+    if (!pointerActive || event.clientX !== pointerClient.x || event.clientY !== pointerClient.y) lastMoved = performance.now();
     pointerClient.set(event.clientX, event.clientY);
     const dx = pointerActive ? (x - pointer.x) * 220 : 0;
     const dy = pointerActive ? (y - pointer.y) * 220 : 0;
@@ -225,7 +204,7 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
     });
     pointerCard = enteredCard;
   };
-  const leave = () => { pointerActive = 0; pointerCard = null; pendingSplat = null; };
+  const leave = () => { pointerActive = 0; pointerCard = null; pendingSplat = null; painted = null; };
   const observer = new MutationObserver(markDirty);
   observer.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ["src"] });
   const resizeObserver = new ResizeObserver(markDirty);
@@ -235,6 +214,7 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
   canvas.addEventListener("webglcontextlost", contextLost);
   window.addEventListener("pointermove", move, { passive: true });
   document.documentElement.addEventListener("pointerleave", leave);
+  window.addEventListener("blur", leave);
   window.addEventListener("scroll", markDirty, { passive: true });
   window.addEventListener("resize", resize);
   root.addEventListener("load", markDirty, true);
@@ -249,6 +229,7 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
     const viewportChanged = resize();
     const isPaused = paused();
     if (isPaused) {
+      leave();
       frameBudget.reset();
       if (!dirty && !viewportChanged) return;
     }
@@ -278,14 +259,33 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
         radius: broadAmbient ? .005 : .003, color: [0, .035 * breath, .045 * breath],
       });
     }
-    if (!isPaused && pendingSplat) {
-      const { x, y, dx, dy } = pendingSplat;
-      fluid.addSplat(x, y, dx * .5, dy * .5, { radius: .00035, color: [.075, 0, 0] });
-      pendingSplat = null;
+    if (!isPaused && pointerActive && (pendingSplat || now-lastIdleSplat>32)) {
+      const moving = Math.exp(-(now-lastMoved)/220);
+      const from = painted ?? pointer;
+      const travel = new THREE.Vector2((pointer.x-from.x)*width,(pointer.y-from.y)*height);
+      // Never interpolate the source's position across frames. All samples,
+      // including the latest coordinate, are painted in this same frame.
+      const distance = travel.length();
+      const count = pendingSplat ? Math.min(6,Math.max(1,Math.ceil(distance/18))) : 1;
+      const start = distance>220 ? 1-220/distance : 0;
+      const radiusPx = 26+moving*20;
+      const radius = Math.pow(radiusPx*2/height,2);
+      const dose = pendingSplat ? (.025+.095*moving)/count : .017;
+      const direction = travel.clone().normalize().multiplyScalar(.7*moving);
+      for(let i=1;i<=count;i++) {
+        const t=start+(1-start)*i/count;
+        const x=from.x+(pointer.x-from.x)*t, y=from.y+(pointer.y-from.y)*t;
+        // In three-fluid-fx 0.1.0 color.xy is also written into velocity.
+        // Reserve density.z for ambient illumination and dye.r for exposure.
+        fluid.addSplat(x,y,direction.x,direction.y,{
+          radius, color:[direction.x,direction.y,0], dyeColor:[dose,0,0],
+        });
+      }
+      painted=pointer.clone(); pendingSplat=null; lastIdleSplat=now;
     }
     if (!isPaused) fluid.step(delta);
     const update = (mat: THREE.ShaderMaterial) => {
-      mat.uniforms.density.value = fluid.densityTexture; mat.uniforms.velocity.value = fluid.velocityTexture;
+      mat.uniforms.density.value = fluid.densityTexture; mat.uniforms.dye.value = fluid.dyeTexture; mat.uniforms.velocity.value = fluid.velocityTexture;
       mat.uniforms.viewport.value.set(width, height); mat.uniforms.time.value = now / 1000;
       mat.uniforms.pointerActive.value = pointerActive;
       mat.uniforms.surfaceOpacity.value = surfaceOpacity;
@@ -323,7 +323,7 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
   function cleanup() {
     if (disposed) return;
     disposed = true; cancelAnimationFrame(frame); observer.disconnect(); resizeObserver.disconnect();
-    window.removeEventListener("pointermove", move); document.documentElement.removeEventListener("pointerleave", leave);
+    window.removeEventListener("pointermove", move); document.documentElement.removeEventListener("pointerleave", leave); window.removeEventListener("blur", leave);
     window.removeEventListener("scroll", markDirty); window.removeEventListener("resize", resize);
     root.removeEventListener("load", markDirty, true); document.removeEventListener("visibilitychange", visibility);
     canvas.removeEventListener("webglcontextlost", contextLost);

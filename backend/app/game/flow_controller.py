@@ -21,6 +21,7 @@ from app.game.clues import (
     build_agent_clue_context,
     normalize_clue_stages,
     render_clue_markdown,
+    stage_public_clues,
 )
 from app.game.resource_revision import resource_namespace
 from app.game.speech_scheduler import SpeechScheduler
@@ -1022,7 +1023,9 @@ class GameFlowController:
             "db_session": db_session,
             "character_name_map": character_name_map,
             "character_names": character_names,  # 用于校验角色名称
-            "public_clues": list(self.session.revealed_clues or []),
+            "public_clues": stage_public_clues(
+                self.session.current_stage, self.session.revealed_clues or []
+            ),
         }
 
         # 构建发言上下文（动态系统推送内容）
@@ -1115,7 +1118,11 @@ class GameFlowController:
               其他玩家的发言要点由 agent_player._build_knowledge_context 处理
               此方法仅负责获取当前阶段的 system_notice（动态系统消息）
         """
-        context_parts = [build_agent_clue_context(self.session.revealed_clues or [])]
+        context_parts = [
+            build_agent_clue_context(
+                stage_public_clues(self.session.current_stage, self.session.revealed_clues or [])
+            )
+        ]
 
         # 获取当前阶段的配置
         if self.current_process_index < len(self.game_process):
@@ -1159,5 +1166,7 @@ class GameFlowController:
             "turn_processing": bool(self.session.pending_speech),
             "has_all_spoken": len(self.session.speech_queue or []) == 0,
             "agent_llm_info": agent_llm_info,
-            "public_clues": list(self.session.revealed_clues or []),
+            "public_clues": stage_public_clues(
+                self.session.current_stage, self.session.revealed_clues or []
+            ),
         }

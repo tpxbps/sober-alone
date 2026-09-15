@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, memo } from "react";
 import { Send, Loader2, ArrowRight, Plus, X, CircleHelp } from "lucide-react";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { Switch } from "@/components/ui/switch";
+import { speechClues } from "@/lib/clueScope";
 import { DynamicDot } from "@/components/ui/DynamicDot";
 import type { Character, PublicClue } from "@/types/game";
 import { GameMessageMarkdown } from "@/components/ui/GameMessageMarkdown";
@@ -26,7 +27,7 @@ interface ChatInputAreaProps {
   onSendMessage: (content: string) => void;
   onAdvanceStage: () => void;
   onEndGame: () => void;
-  onSetPendingHumanSpeech: (speech: string | null) => void;
+  onSetPendingHumanSpeech: (speech: string | null, clues?: PublicClue[]) => void;
   characters: Character[];
   publicClues: PublicClue[];
   mentionRequest?: { character: Character; nonce: number } | null;
@@ -60,6 +61,8 @@ export const ChatInputArea = memo(function ChatInputArea({
   onHumanSpeechCompleted,
 }: ChatInputAreaProps) {
   const [input, setInput] = useState("");
+  const [draftClues, setDraftClues] = useState<PublicClue[] | null>(null);
+  const availableClues = draftClues ?? speechClues(stage, publicClues);
   const [pendingLines, setPendingLines] = useState<string[]>([]);
   const inputRef = useRef<MentionComposerHandle>(null);
 
@@ -100,7 +103,8 @@ export const ChatInputArea = memo(function ChatInputArea({
 
     // 自由发言阶段且AI正在发言：暂存发言，等待AI完成
     if (stage === "free_discussion" && (isStreaming || isProcessingReactions)) {
-      onSetPendingHumanSpeech(fullSpeech);
+      onSetPendingHumanSpeech(fullSpeech, availableClues);
+      setDraftClues(null);
       setPendingLines([]);
       clearInput();
       return;
@@ -108,6 +112,7 @@ export const ChatInputArea = memo(function ChatInputArea({
 
     // 其他阶段或AI未发言：直接发送
     onSendMessage(fullSpeech);
+    setDraftClues(null);
     setPendingLines([]);
     clearInput();
   }, [
@@ -119,6 +124,7 @@ export const ChatInputArea = memo(function ChatInputArea({
     onSendMessage,
     onSetPendingHumanSpeech,
     onHumanSpeechCompleted,
+    availableClues,
   ]);
 
   const inputDisabled =
@@ -200,7 +206,7 @@ export const ChatInputArea = memo(function ChatInputArea({
                     key={index}
                     className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-primary/20 text-sm text-primary group"
                   >
-                    <GameMessageMarkdown characters={characters} publicClues={publicClues} preserveWhitespace>
+                    <GameMessageMarkdown characters={characters} publicClues={availableClues} allowedCitationIds={availableClues.map(clue => clue.id)} preserveWhitespace>
                       {line}
                     </GameMessageMarkdown>
                     <button
@@ -240,10 +246,13 @@ export const ChatInputArea = memo(function ChatInputArea({
                 <MentionComposer
                   ref={inputRef}
                   characters={characters}
-                  clues={publicClues}
+                  clues={availableClues}
                   disabled={inputDisabled}
                   maxLength={3000}
-                  onChange={setInput}
+                  onChange={value => {
+                    setInput(value);
+                    if (value) setDraftClues(previous => previous ?? speechClues(stage, publicClues));
+                  }}
                   onCtrlEnter={handleEndSpeech}
                   onEnter={() => {
                     if (!input.trim()) return;

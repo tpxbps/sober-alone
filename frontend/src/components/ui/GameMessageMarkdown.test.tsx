@@ -35,7 +35,7 @@ describe("GameMessageMarkdown mentions", () => {
       stage: 1,
     };
     const markup = renderToStaticMarkup(
-      <GameMessageMarkdown publicClues={[clue]}>
+      <GameMessageMarkdown publicClues={[clue]} allowedCitationIds={[clue.id]}>
         第一句没有依据。第二句是熟人作案。[c01] 第三句仍然可见。[c99]
       </GameMessageMarkdown>
     );
@@ -59,7 +59,7 @@ describe("GameMessageMarkdown mentions", () => {
       { id: "c06", summary: "节目清单", content: "母带今晚销毁。", stage: 1 },
     ];
     const markup = renderToStaticMarkup(
-      <GameMessageMarkdown publicClues={clues}>
+      <GameMessageMarkdown publicClues={clues} allowedCitationIds={clues.map(clue => clue.id)}>
         {"c02 明确记录广播持续九秒。`[c02]`\n[设备](#clue-ref-c04) 显示异常。\n至于清单 c06，我需要解释。"}
       </GameMessageMarkdown>,
     );
@@ -71,4 +71,20 @@ describe("GameMessageMarkdown mentions", () => {
     expect(markup).toContain("查看线索 设备记录");
     expect(markup).toContain("查看线索 节目清单");
   });
+});
+
+it("does not retroactively activate an introduction's unknown citation", () => {
+  const clue = { id: "c01", summary: "门锁", content: "完整证据", stage: 1 };
+  const render = (clues: typeof clue[]) => renderToStaticMarkup(
+    <GameMessageMarkdown publicClues={clues} allowedCitationIds={[]}>我是馆长。[c01]</GameMessageMarkdown>
+  );
+  for (const clues of [[], [clue]]) {
+    const markup = render(clues);
+    expect(markup).toContain("[c01]");
+    expect(markup).not.toContain("查看线索");
+  }
+  const missingMetadata = renderToStaticMarkup(
+    <GameMessageMarkdown publicClues={[clue]}>旧记录。[c01]</GameMessageMarkdown>
+  );
+  expect(missingMetadata).not.toContain("查看线索");
 });

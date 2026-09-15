@@ -236,11 +236,9 @@ def parse_clue_citations(
     ``[c01]`` tags stay where the speaker placed them. Known code-wrapped tags,
     internal Markdown anchors and bare IDs are repaired to that canonical form.
     If a canonical citation already exists, a duplicate bare ID is removed instead
-    of showing an unexplained machine identifier. Unknown/future IDs stay plain text.
-    ``strip_unknown`` is retained for API compatibility but intentionally ignored.
+    of showing an unexplained machine identifier. Unknown/future IDs are removed for AI output when ``strip_unknown`` is true.
+    Human prose can retain untrusted tags without granting citation permission.
     """
-
-    del strip_unknown
 
     allowed = {str(item.get("id", "")).lower() for item in allowed_clues}
     refs: list[str] = []
@@ -255,6 +253,11 @@ def parse_clue_citations(
         if clue_id in allowed:
             return f"[{clue_id}]"
         remember_unknown(clue_id)
+        if strip_unknown:
+            if "#clue-ref-" in match.group(0):
+                label = re.search(r"\[([^\]\n]+)\]", match.group(0))
+                return label.group(1).rstrip("\\") if label else ""
+            return ""
         return match.group(0)
 
     normalized = CLUE_CODE_TAG_RE.sub(canonicalize_variant, content)
@@ -270,7 +273,7 @@ def parse_clue_citations(
         clue_id = match.group(1).lower()
         if clue_id not in allowed:
             remember_unknown(clue_id)
-            return match.group(0)
+            return "" if strip_unknown else match.group(0)
         return "" if clue_id in explicit_ids else f"[{clue_id}]"
 
     normalized = CLUE_BARE_ID_RE.sub(canonicalize_bare_id, normalized)
@@ -283,7 +286,19 @@ def parse_clue_citations(
         else:
             remember_unknown(clue_id)
 
+    if strip_unknown:
+        normalized = CLUE_ID_RE.sub(
+            lambda match: match.group(0) if match.group(1).lower() in allowed else "",
+            normalized,
+        )
     return normalized.strip(), refs, unknown
+
+
+def stage_public_clues(stage: str, clues: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Only gameplay phases after introduction may use public citation machinery."""
+    if stage not in {"clue_analysis", "free_discussion", "summary", "vote", "review", "completed"}:
+        return []
+    return list(clues)
 
 
 def build_agent_clue_context(clues: Iterable[dict[str, Any]]) -> str:

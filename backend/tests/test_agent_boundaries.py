@@ -29,8 +29,8 @@ def test_role_prompt_requires_markdown_and_tools_before_visible_speech():
     assert "应先完成全部工具调用并等待结果" in prompt
     assert "不应以牺牲流式输出为代价" in prompt
     assert "逐个点评场上所有玩家" in prompt
-    assert "绝不能在正文中说“c01 显示”" in prompt
-    assert "不要在标签两侧添加反引号" in prompt
+    assert "c01" not in prompt
+    assert "recall_public_clues" not in prompt
 
 
 def test_rag_tool_registration_is_capability_driven():
@@ -232,7 +232,13 @@ async def test_clue_recall_reads_only_server_side_revealed_clues(monkeypatch):
     result = await module.recall_public_clues.coroutine(
         clue_ids=["c01", "c99"],
         query="",
-        runtime=SimpleNamespace(state={"session_id": "session"}),
+        runtime=SimpleNamespace(
+            state={
+                "session_id": "session",
+                "current_stage": "clue_analysis",
+                "public_clues": [{"id": "c01"}],
+            }
+        ),
     )
 
     assert "c01" in result

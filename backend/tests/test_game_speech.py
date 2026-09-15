@@ -52,6 +52,8 @@ async def test_human_stream_event_order_is_stable():
 @pytest.mark.asyncio
 async def test_ai_stream_finishes_with_speech_done_then_done():
     class Controller:
+        session = SimpleNamespace(current_stage="intro", revealed_clues=[])
+
         async def generate_ai_speech(self, _character_id, _db):
             yield {"type": "progress", "status": "正在整理线索"}
             yield {"type": "token", "text": "结"}

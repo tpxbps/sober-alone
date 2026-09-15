@@ -1,14 +1,18 @@
-"""
-Game module
-游戏流程控制
-"""
+"""Game API exports, loaded lazily so pure clue policies do not import agents."""
 
-from app.game.flow_controller import GameFlowController, StageTransition
-from app.game.speech_scheduler import SpeechScheduler, SpeechTendency
+from importlib import import_module
 
-__all__ = [
-    "GameFlowController",
-    "StageTransition",
-    "SpeechScheduler",
-    "SpeechTendency",
-]
+__all__ = ["GameFlowController", "StageTransition", "SpeechScheduler", "SpeechTendency"]
+
+
+def __getattr__(name):
+    if name not in __all__:
+        raise AttributeError(name)
+    module = (
+        "flow_controller"
+        if name in {"GameFlowController", "StageTransition"}
+        else "speech_scheduler"
+    )
+    value = getattr(import_module(f"app.game.{module}"), name)
+    globals()[name] = value
+    return value

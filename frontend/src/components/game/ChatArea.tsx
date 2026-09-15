@@ -16,6 +16,8 @@ import { ChatInputArea } from "@/components/game/ChatInputArea";
 import { SpeakerIcon, type SpeakerState } from "@/components/ui/SpeakerIcon";
 import { AudioSpeedButton } from "@/components/ui/AudioSpeedButton";
 import { audioPlayerManager } from "@/lib/audioPlayerManager";
+import { systemApi } from "@/lib/api";
+import { useGameStore } from "@/stores/gameStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 
 const THINKING_MESSAGES = [
@@ -102,6 +104,15 @@ export function ChatArea({
     Record<number, SpeakerState>
   >({});
   const ttsEnabled = useSettingsStore((s) => s.ttsEnabled);
+  const pendingHumanClues = useGameStore(s => s.pendingHumanClues);
+  const [canSynthesizeSpeech, setCanSynthesizeSpeech] = useState(false);
+  useEffect(() => {
+    let active = true;
+    void systemApi.getCapabilities().then(capabilities => {
+      if (active) setCanSynthesizeSpeech(capabilities.features.streaming_tts.enabled);
+    }).catch(() => { /* Existing audio remains playable when capability lookup fails. */ });
+    return () => { active = false; };
+  }, []);
 
   // User scroll priority ref: shared with StreamingBubble via DOM event
   const userScrollTimerRef = useRef<number>(0);
@@ -482,7 +493,7 @@ export function ChatArea({
               // Player message styling
               const isAI = !isHuman && record.speaker_id;
               const recordSpeakerState: SpeakerState = isAI
-                ? ttsEnabled
+                ? ttsEnabled && (canSynthesizeSpeech || Boolean(record.audio_url) || Boolean(audioPlayerManager.getCachedUrl(record.id)))
                   ? ttsStates[record.id] || "off"
                   : "disabled"
                 : "disabled";
@@ -563,6 +574,7 @@ export function ChatArea({
                         className="text-sm"
                         characters={characters}
                         publicClues={publicClues}
+                        allowedCitationIds={record.stage === "intro" ? [] : (record.clue_refs ?? [])}
                         preserveWhitespace={isHuman}
                       >
                         {record.content}
@@ -615,7 +627,8 @@ export function ChatArea({
                   <GameMessageMarkdown
                     className="text-sm"
                     characters={characters}
-                    publicClues={publicClues}
+                    publicClues={pendingHumanClues}
+                    allowedCitationIds={pendingHumanClues.map(clue => clue.id)}
                     preserveWhitespace
                   >
                     {pendingHumanSpeech}

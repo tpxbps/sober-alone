@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from app.agents.context import get_db_session
 from app.db.models import GameSession
+from app.game.clues import stage_public_clues
 
 
 class RecallCluesInput(BaseModel):
@@ -25,6 +26,12 @@ async def recall_public_clues(
 ) -> str:
     """Recall public system clues without exposing later stages."""
 
+    snapshot = stage_public_clues(
+        runtime.state.get("current_stage", ""), runtime.state.get("public_clues", [])
+    )
+    if not snapshot:
+        return "当前没有可供核对的公开内容。"
+    allowed_ids = {str(clue.get("id", "")).lower() for clue in snapshot}
     get_stream_writer()("正在核对已公开线索...")
     db_session = get_db_session()
     session_id = runtime.state.get("session_id", "")
@@ -42,6 +49,8 @@ async def recall_public_clues(
     matches = []
     for clue in session.revealed_clues or []:
         clue_id = str(clue.get("id", "")).lower()
+        if clue_id not in allowed_ids:
+            continue
         haystack = f"{clue.get('summary', '')} {clue.get('content', '')}".lower()
         if requested and clue_id not in requested:
             continue

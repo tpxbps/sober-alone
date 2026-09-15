@@ -42,6 +42,7 @@ from app.agents.reaction import (
 )
 from app.core.config import settings
 from app.core.llm_factory import create_summary_llm
+from app.game.clues import stage_public_clues
 
 logger = logging.getLogger(__name__)
 
@@ -457,7 +458,7 @@ submit_final_vote(suspect_name="角色全名", reasoning="1-2句投票理由")
             "current_round": game_state.get("current_round", 0),
             "character_name_map": game_state.get("character_name_map", {}),
             "character_names": game_state.get("character_names", []),
-            "public_clues": game_state.get("public_clues", []),
+            "public_clues": stage_public_clues(stage, game_state.get("public_clues", [])),
             "personal_script": getattr(self, "personal_script", ""),
         }
 

@@ -34,7 +34,7 @@ const StableQuickOverviewContent = memo(function StableQuickOverviewContent({
     <div className="px-4 py-3 space-y-3 select-text">
       {scriptSummary && (
         <div>
-          <Markdown className="text-sm text-muted-foreground leading-relaxed">
+          <Markdown className="player-script-reading text-sm text-muted-foreground leading-relaxed">
             {scriptSummary}
           </Markdown>
         </div>
@@ -50,7 +50,7 @@ const StableScriptContent = memo(function StableScriptContent({
 }) {
   return (
     <div data-player-script-content className="select-text">
-      <Markdown className="prose-sm">{content}</Markdown>
+      <Markdown className="player-script-reading prose-sm">{content}</Markdown>
     </div>
   );
 });

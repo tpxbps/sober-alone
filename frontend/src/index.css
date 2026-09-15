@@ -462,3 +462,6 @@ html {
 
 
 .scene-workshop .markdown-content h1 { font-family:var(--font-display); font-weight:400; }
+
+/* Readable emphasis in the player's private script and quick overview. */
+.player-script-reading strong { color: #f2dfb9; font-weight: 700; opacity: 1; }
