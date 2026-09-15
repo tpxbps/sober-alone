@@ -27,47 +27,62 @@ void main() {
   float ink=1.-exp(-pigment.b*.75);
   // Only autonomous sources write green: their marble contours stay in the scene.
   float paint=1.-exp(-pigment.g*2.2);
-  float grain=noise(screen*5.+flow*.018);
-  vec2 marbleUv=screen*vec2(viewport.x/viewport.y,1.)*6.;
-  vec2 drift=clamp(flow*.008,vec2(-.18),vec2(.18));
-  float fold=noise(marbleUv+drift+vec2(grain*.7,grain*.35));
-  float veins=pow(1.-abs(sin(fold*12.+grain*2.)),4.);
-  float pearlescence=paint*.65*(veins*.7+fold*.2);
+  float grain=.5, fold=.5, pearlescence=0.;
+  // Most of the viewport contains no dye; do not evaluate its marble field.
+  if(max(ink,paint)>.00001) {
+    grain=noise(screen*5.+flow*.018);
+    vec2 marbleUv=screen*vec2(viewport.x/viewport.y,1.)*6.;
+    vec2 drift=clamp(flow*.008,vec2(-.18),vec2(.18));
+    fold=noise(marbleUv+drift+vec2(grain*.7,grain*.35));
+    float veins=pow(1.-abs(sin(fold*12.+grain*2.)),4.);
+    pearlescence=paint*.65*(veins*.7+fold*.2);
+  }
 
   // Natural light anchors the pointer; a separate pigment layer unfolds outward.
   // Both stay in CSS-pixel bounds. Only the pigment edge and short wake deform.
   float cursorRadius=clamp(min(viewport.x,viewport.y)*.065,42.,58.);
   vec2 cursor=(screen-pointer)*viewport/cursorRadius;
   float distanceToCursor=length(cursor);
-  float envelope=1.-smoothstep(1.25,2.1,distanceToCursor);
-  vec2 edgeFlow=clamp(flow*.003,vec2(-.09),vec2(.09));
-  edgeFlow*=smoothstep(.3,1.2,distanceToCursor);
-  float core=exp(-dot(cursor,cursor)*1.8);
-  float aura=exp(-dot(cursor+edgeFlow,cursor+edgeFlow)*.75)*envelope;
-  float silk=.5+.5*sin(cursor.x*1.3+cursor.y*.9+time*.65);
-  float nearLight=(core*.72+aura*.28)*pointerActive;
-  float sheen=aura*(.65+silk*.35)*pointerActive;
-  // Two or three soft fronts: coherent inside, gently slipping apart outside.
-  // Integer angular harmonics keep the pattern seamless around atan's branch cut.
-  float angle=atan(cursor.y,cursor.x);
-  float unrest=smoothstep(-.35,.65,sin(angle+time*.17));
-  float outer=smoothstep(.45,1.8,distanceToCursor);
-  float slip=sin(angle*3.-time*.7+distanceToCursor*1.8)*.035;
-  slip+=unrest*outer*(sin(angle*5.+time*.53)*.10+sin(angle*9.-time*.39)*.045);
-  slip+=dot(edgeFlow,vec2(cos(angle),sin(angle)))*outer*.5;
-  float front=.5+.5*cos((distanceToCursor+slip)*9.2-time*2.4);
-  float fracture=mix(1.,smoothstep(-.7,.3,sin(angle*4.+distanceToCursor*2.-time*.6)),unrest*outer*.8);
-  float pigmentEdge=pow(front,5.)*fracture;
-  pigmentEdge*=smoothstep(.3,.65,distanceToCursor)*(1.-smoothstep(1.5,2.35,distanceToCursor))*pointerActive;
+  float core=0., silk=.5, nearLight=0., sheen=0., pigmentEdge=0., angle=0.;
+  // Angular detail is local to the cursor, not a full-screen shader pass.
+  if(pointerActive>.5 && distanceToCursor<2.35) {
+    float envelope=1.-smoothstep(1.25,2.1,distanceToCursor);
+    vec2 edgeFlow=clamp(flow*.003,vec2(-.09),vec2(.09));
+    edgeFlow*=smoothstep(.3,1.2,distanceToCursor);
+    core=exp(-dot(cursor,cursor)*1.8);
+    float aura=exp(-dot(cursor+edgeFlow,cursor+edgeFlow)*.75)*envelope;
+    silk=.5+.5*sin(cursor.x*1.3+cursor.y*.9+time*.65);
+    nearLight=core*.72+aura*.28;
+    sheen=aura*(.65+silk*.35);
+    // Soft outward fronts stay coherent inside and gently slip apart outside.
+    // Integer harmonics keep the pattern seamless around atan's branch cut.
+    angle=atan(cursor.y,cursor.x+.00001);
+    float unrest=smoothstep(-.35,.65,sin(angle+time*.17));
+    float outer=smoothstep(.45,1.8,distanceToCursor);
+    float slip=sin(angle*3.-time*.7+distanceToCursor*1.8)*.035;
+    slip+=unrest*outer*(sin(angle*5.+time*.53)*.10+sin(angle*9.-time*.39)*.045);
+    slip+=dot(edgeFlow,vec2(cos(angle),sin(angle)))*outer*.5;
+    float front=.5+.5*cos((distanceToCursor+slip)*9.2-time*2.4);
+    float fracture=mix(1.,smoothstep(-.7,.3,sin(angle*4.+distanceToCursor*2.-time*.6)),unrest*outer*.8);
+    pigmentEdge=pow(front,5.)*fracture;
+    pigmentEdge*=smoothstep(.3,.65,distanceToCursor)*(1.-smoothstep(1.5,2.35,distanceToCursor));
+  }
   float wake=1.-smoothstep(1.5,3.2,distanceToCursor);
   float trail=(1.-exp(-pigment.r*1.5))*.12*wake;
-  vec2 waveDistance=(screen-ambientOrigin)*vec2(viewport.x/viewport.y,1.);
-  float wave=exp(-pow(waveDistance.y+sin(waveDistance.x*5.+time*.45)*.04,2.)/.004-dot(waveDistance,waveDistance)*2.)*ambientWave;
+  float wave=0.;
+  if(ambientWave>.00001) {
+    vec2 waveDistance=(screen-ambientOrigin)*vec2(viewport.x/viewport.y,1.);
+    wave=exp(-pow(waveDistance.y+sin(waveDistance.x*5.+time*.45)*.04,2.)/.004-dot(waveDistance,waveDistance)*2.)*ambientWave;
+  }
   float light=clamp(ink*.65+trail+nearLight*.95+pigmentEdge*.11+wave*.45+pearlescence*.32,0.,1.);
-  float spread=1.-smoothstep(reveal*1.7-.15,reveal*1.7+.05,length(vUv-origin)+noise(vUv*2.+flow*.01)*.14);
-  spread=mix(spread,1.,step(.995,reveal));
-  spread*=step(.001,reveal);
-  float visible=mix(light,max(light*.72,spread),isCard);
+  float visible=light;
+  if(isCard>.5) {
+    float spread=step(.995,reveal);
+    if(reveal>.001 && reveal<.995) {
+      spread=1.-smoothstep(reveal*1.7-.15,reveal*1.7+.05,length(vUv-origin)+noise(vUv*2.+flow*.01)*.14);
+    }
+    visible=max(light*.72,spread);
+  }
   float imageAspect=imageSize.x/imageSize.y;
   float panelAspect=panelSize.x/panelSize.y;
   vec2 crop=vec2(min(panelAspect/imageAspect,1.),min(imageAspect/panelAspect,1.));
@@ -82,8 +97,10 @@ void main() {
   vec3 sceneGlow=tint*(ink*grain*.06+ribbons*.08+wave*.025+pearlescence*.12);
   vec3 cursorTint=mix(silver,gold,core*.6+silk*.15);
   vec3 cursorGlow=cursorTint*(core*.014*pointerActive+sheen*.018+trail*.025);
-  vec3 pigmentTint=mix(silver,gold,.5+.5*sin(angle*2.+distanceToCursor*2.-time*.35));
-  cursorGlow+=pigmentTint*pigmentEdge*.017;
+  if(pigmentEdge>0.) {
+    vec3 pigmentTint=mix(silver,gold,.5+.5*sin(angle*2.+distanceToCursor*2.-time*.35));
+    cursorGlow+=pigmentTint*pigmentEdge*.017;
+  }
   col+=(sceneGlow+cursorGlow)*(1.-isCard*.72);
   gl_FragColor=vec4(col,mix(1.,surfaceOpacity,isCard));
   #include <tonemapping_fragment>
