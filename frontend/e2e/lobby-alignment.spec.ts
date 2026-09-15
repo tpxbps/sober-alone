@@ -69,6 +69,8 @@ for (const deviceScaleFactor of [1, 1.25, 2]) {
   test.describe("动态封面像素对齐 DPR " + deviceScaleFactor, () => {
     test.use({ viewport: { width: 1280, height: 850 }, deviceScaleFactor, reducedMotion: "no-preference" });
     test("滚动条、双侧留槽、弹层和滚动后的封面边界与 DOM 一致", async ({ page }, info) => {
+      // Six GPU captures include browser compositing and PNG decoding on CI.
+      test.setTimeout(90_000);
       await openCalibrationLobby(page);
       // Stable gutters reproduce classic Windows scrollbars even on headless CI.
       const gutter = await page.addStyleTag({ content: "html { scrollbar-gutter:stable; } ::-webkit-scrollbar { width:18px; }" });
