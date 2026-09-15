@@ -34,9 +34,8 @@ void main() {
   float veins=pow(1.-abs(sin(fold*12.+grain*2.)),4.);
   float pearlescence=paint*.65*(veins*.7+fold*.2);
 
-  // A compact, rounded light with a soft liquid edge, measured in CSS pixels.
-  // The core never deforms or lags; neither the contours nor their large bloom
-  // belong to the pointer. Red dye supplies only a short, smooth wake.
+  // Natural light anchors the pointer; a separate pigment layer unfolds outward.
+  // Both stay in CSS-pixel bounds. Only the pigment edge and short wake deform.
   float cursorRadius=clamp(min(viewport.x,viewport.y)*.065,42.,58.);
   vec2 cursor=(screen-pointer)*viewport/cursorRadius;
   float distanceToCursor=length(cursor);
@@ -48,11 +47,23 @@ void main() {
   float silk=.5+.5*sin(cursor.x*1.3+cursor.y*.9+time*.65);
   float nearLight=(core*.72+aura*.28)*pointerActive;
   float sheen=aura*(.65+silk*.35)*pointerActive;
+  // Two or three soft fronts: coherent inside, gently slipping apart outside.
+  // Integer angular harmonics keep the pattern seamless around atan's branch cut.
+  float angle=atan(cursor.y,cursor.x);
+  float unrest=smoothstep(-.35,.65,sin(angle+time*.17));
+  float outer=smoothstep(.45,1.8,distanceToCursor);
+  float slip=sin(angle*3.-time*.7+distanceToCursor*1.8)*.035;
+  slip+=unrest*outer*(sin(angle*5.+time*.53)*.10+sin(angle*9.-time*.39)*.045);
+  slip+=dot(edgeFlow,vec2(cos(angle),sin(angle)))*outer*.5;
+  float front=.5+.5*cos((distanceToCursor+slip)*9.2-time*2.4);
+  float fracture=mix(1.,smoothstep(-.7,.3,sin(angle*4.+distanceToCursor*2.-time*.6)),unrest*outer*.8);
+  float pigmentEdge=pow(front,5.)*fracture;
+  pigmentEdge*=smoothstep(.3,.65,distanceToCursor)*(1.-smoothstep(1.5,2.35,distanceToCursor))*pointerActive;
   float wake=1.-smoothstep(1.5,3.2,distanceToCursor);
   float trail=(1.-exp(-pigment.r*1.5))*.12*wake;
   vec2 waveDistance=(screen-ambientOrigin)*vec2(viewport.x/viewport.y,1.);
   float wave=exp(-pow(waveDistance.y+sin(waveDistance.x*5.+time*.45)*.04,2.)/.004-dot(waveDistance,waveDistance)*2.)*ambientWave;
-  float light=clamp(ink*.65+trail+nearLight*.95+wave*.45+pearlescence*.32,0.,1.);
+  float light=clamp(ink*.65+trail+nearLight*.95+pigmentEdge*.11+wave*.45+pearlescence*.32,0.,1.);
   float spread=1.-smoothstep(reveal*1.7-.15,reveal*1.7+.05,length(vUv-origin)+noise(vUv*2.+flow*.01)*.14);
   spread=mix(spread,1.,step(.995,reveal));
   spread*=step(.001,reveal);
@@ -71,6 +82,8 @@ void main() {
   vec3 sceneGlow=tint*(ink*grain*.06+ribbons*.08+wave*.025+pearlescence*.12);
   vec3 cursorTint=mix(silver,gold,core*.6+silk*.15);
   vec3 cursorGlow=cursorTint*(core*.014*pointerActive+sheen*.018+trail*.025);
+  vec3 pigmentTint=mix(silver,gold,.5+.5*sin(angle*2.+distanceToCursor*2.-time*.35));
+  cursorGlow+=pigmentTint*pigmentEdge*.017;
   col+=(sceneGlow+cursorGlow)*(1.-isCard*.72);
   gl_FragColor=vec4(col,mix(1.,surfaceOpacity,isCard));
   #include <tonemapping_fragment>
