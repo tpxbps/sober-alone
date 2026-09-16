@@ -1,20 +1,29 @@
 import * as THREE from "three";
 import { FluidSimulation } from "three-fluid-fx";
 import { FrameBudget } from "./frameBudget";
+import { sampleRevealPath, type RevealPoint } from "./revealPath";
 
 const vertexShader = `
 varying vec2 vUv;
 void main() { vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }
 `;
 const fragmentShader = `
-uniform sampler2D map, density, velocity, dye;
-uniform vec2 viewport, imageSize, panelSize, origin, pointer;
+uniform sampler2D map, density, velocity, dye, detailMap;
+uniform vec2 viewport, imageSize, detailSize, panelSize, origin;
 uniform vec4 rect;
-uniform float time, reveal, isCard, pointerActive, surfaceOpacity, ambientWave;
+uniform float time, reveal, isCard, surfaceOpacity, ambientWave, detailReady;
 uniform vec2 ambientOrigin;
 varying vec2 vUv;
 float noise(vec2 p) {
   return .5+.25*sin(p.x*7.1+sin(p.y*8.2+time*.55))+.25*cos(p.y*10.3+sin(p.x*5.4-time*.37));
+}
+float hash(vec2 p) { return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
+float valueNoise(vec2 p) {
+  vec2 i=floor(p), f=fract(p); f=f*f*(3.-2.*f);
+  return mix(mix(hash(i),hash(i+vec2(1.,0.)),f.x),mix(hash(i+vec2(0.,1.)),hash(i+1.),f.x),f.y);
+}
+float brushGrain(vec2 p) {
+  return valueNoise(p)*.57+valueNoise(p*2.07+13.4)*.28+valueNoise(p*4.19+7.2)*.15;
 }
 void main() {
   if(isCard>.5 && vUv.y>.5) {
@@ -38,18 +47,23 @@ void main() {
     pearlescence=paint*.65*(veins*.7+fold*.2);
   }
 
-  // The pointer changes how much of the existing image is visible. It has no
-  // emissive core, rings or drawn contour: only advected exposure remains.
-  vec2 pixels=screen*viewport;
-  vec2 driftPx=clamp(flow*.35,vec2(-8.),vec2(8.));
-  float driftNoise=noise(pixels/170.+flow*.0015);
-  vec2 exposureUv=screen+(driftPx+vec2(driftNoise-.5,noise(pixels.yx/190.)-.5)*13.)/viewport;
-  float exposure=texture2D(dye,exposureUv).r;
-  float distanceToPointer=length((screen-pointer)*viewport);
-  float proximity=1.-smoothstep(90.,220.,distanceToPointer);
-  float unveiling=(1.-exp(-max(0.,exposure-.008)*2.8));
-  unveiling*=mix(.72,1.,driftNoise)*proximity;
-  unveiling=min(unveiling,.72);
+  // Reveal the fixed artwork through a short-lived, eroding brush mask. Texture
+  // detail comes from the palace itself, never from a light drawn over it.
+  float unveiling=0.;
+  vec2 present=texture2D(dye,screen).rg;
+  if(max(present.r,present.g)>.012 && !(isCard>.5 && reveal>.995)) {
+    vec2 pixels=screen*viewport;
+    vec2 brushUv=pixels/48.+vec2(time*.045,-time*.03);
+    float edgeGrain=brushGrain(brushUv);
+    vec2 driftPx=clamp(flow*.18,vec2(-4.),vec2(4.));
+    vec2 edgeOffset=vec2(edgeGrain-.5,brushGrain(brushUv+31.7)-.5)*20.;
+    vec2 exposure=texture2D(dye,screen+(driftPx+edgeOffset)/viewport).rg;
+    float threshold=.105+edgeGrain*.09;
+    float stroke=smoothstep(threshold*.78,threshold*1.15,exposure.r);
+    float resting=smoothstep(threshold*.55,threshold*1.35,exposure.g)*.22;
+    // Past segments fade independently, without a circle clipping the path.
+    unveiling=max(stroke*.94,resting);
+  }
   float wave=0.;
   if(ambientWave>.00001) {
     vec2 waveDistance=(screen-ambientOrigin)*vec2(viewport.x/viewport.y,1.);
@@ -70,6 +84,17 @@ void main() {
   vec2 uv=(vUv-.5)*crop+.5;
   vec2 blur=(1.-visible)*1.2/imageSize;
   vec3 col=(texture2D(map,uv).rgb*4.+texture2D(map,uv+blur).rgb+texture2D(map,uv-blur).rgb)/6.;
+  if(isCard<.5 && detailReady>.5 && unveiling>.001) {
+    float detailAspect=detailSize.x/detailSize.y;
+    vec2 detailCrop=vec2(min(panelAspect/detailAspect,1.),min(detailAspect/panelAspect,1.));
+    // This relief remains fixed in scene coordinates. Only its visibility is
+    // uncovered, keeping the moving edge from resembling an emissive blob.
+    vec3 relief=texture2D(detailMap,(vUv-.5)*detailCrop+.5).rgb;
+    // Keep the existing door, curtains and floor recognizable; the additional
+    // material lives in the central mist, where the original has little detail.
+    float interior=smoothstep(.09,.25,uv.x)*(1.-smoothstep(.76,.92,uv.x))*smoothstep(.12,.34,uv.y);
+    col=mix(col,relief,unveiling*.92*interior);
+  }
   float brightness=mix(.10+visible*.85,.22+visible*.78,isCard);
   col*=brightness;
   vec3 silver=vec3(.52,.68,.77), gold=vec3(.83,.73,.55);
@@ -92,7 +117,7 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
   const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: false, powerPreference: "low-power" });
   if (!renderer.extensions.has("EXT_color_buffer_float")) { renderer.dispose(); throw new Error("Float targets unavailable"); }
   let fluid: FluidSimulation;
-  try { fluid = new FluidSimulation(renderer, { profile: "performance", dyeResolution: 512, densityDissipation: .95, velocityDissipation: .96, dyeDissipation: .94, enableVorticity: true, curlStrength: 12, bfecc: false, reflectWalls: false }); }
+  try { fluid = new FluidSimulation(renderer, { profile: "performance", dyeResolution: 512, densityDissipation: .95, velocityDissipation: .96, dyeDissipation: .935, enableVorticity: true, curlStrength: 12, bfecc: false, reflectWalls: false }); }
   catch (error) { renderer.dispose(); throw error; }
   fluid.enableDye = true;
   const scene = new THREE.Scene();
@@ -102,25 +127,27 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
   const loader = new THREE.TextureLoader();
   const covers = new Map<HTMLImageElement, Cover>();
   const textures = new Map<string, THREE.Texture>();
+  let revealTexture: THREE.Texture | null = null;
   let disposed = false, frame = 0, dirty = true, width = 0, height = 0;
   const frameBudget = new FrameBudget();
   let lastTime = performance.now(), nextAmbient = lastTime + 1500, ambientUntil = 0;
   let ambientX = .5, ambientY = .5, ambientBegan = 0, ambientDuration = 1, broadAmbient = false;
-  let pendingSplat: { x: number; y: number; dx: number; dy: number } | null = null;
+  const pendingPoints: RevealPoint[] = [];
   const content = root.querySelector<HTMLElement>(".lobby-main");
   const pointer = new THREE.Vector2(-2, -2);
   const pointerClient = new THREE.Vector2(-2, -2);
   let pointerActive = 0;
-  let lastMoved = 0, lastIdleSplat = 0;
-  let painted: THREE.Vector2 | null = null;
+  let lastIdleSplat = 0, clearPointerDye = false;
+  let painted: RevealPoint | null = null;
   let pointerCard: HTMLElement | null = null;
   const material = (isCard: boolean) => new THREE.ShaderMaterial({
     vertexShader, fragmentShader, depthTest: false, depthWrite: false, transparent: isCard,
     uniforms: {
       map: { value: null }, density: { value: fluid.densityTexture }, velocity: { value: fluid.velocityTexture }, dye: { value: fluid.dyeTexture },
+      detailMap: { value:null }, detailSize: { value:new THREE.Vector2(1,1) }, detailReady: { value:0 },
       viewport: { value: new THREE.Vector2(width, height) }, imageSize: { value: new THREE.Vector2(1, 1) },
       panelSize: { value: new THREE.Vector2(width, height) }, rect: { value: new THREE.Vector4(0, 0, width, height) },
-      origin: { value: new THREE.Vector2(.5, .5) }, pointer: { value: pointer }, pointerActive: { value: 0 },
+      origin: { value: new THREE.Vector2(.5, .5) },
       surfaceOpacity: { value: 1 }, ambientWave: { value: 0 }, ambientOrigin: { value: new THREE.Vector2(.5, .5) },
       time: { value: 0 }, reveal: { value: 0 }, isCard: { value: isCard ? 1 : 0 },
     },
@@ -144,6 +171,7 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
     background.material.uniforms.map.value = texture;
     background.material.uniforms.imageSize.value.set((texture.image as HTMLImageElement).width, (texture.image as HTMLImageElement).height);
   });
+  loadImage("/lobby/palace-relief.webp", texture => { revealTexture=texture; });
   function syncCovers() {
     const images = new Set(root.querySelectorAll<HTMLImageElement>(".card-cover-media"));
     covers.forEach((cover, image) => {
@@ -173,6 +201,7 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
     const nextWidth = Math.max(1, canvasBounds.width), nextHeight = Math.max(1, canvasBounds.height);
     if (nextWidth === width && nextHeight === height) return false;
     width = nextWidth; height = nextHeight;
+    painted = null; pendingPoints.length = 0;
     renderer.setPixelRatio(Math.min(devicePixelRatio, width < 900 ? 1 : 1.25));
     renderer.setSize(width, height, false); fluid.resize(width, height);
     // Reallocating render targets is a new warm-up, not sustained device slowness.
@@ -187,13 +216,16 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
   const move = (event: PointerEvent) => {
     if (event.pointerType === "touch" || paused()) return;
     const x = (event.clientX - canvasBounds.left) / width, y = 1 - (event.clientY - canvasBounds.top) / height;
-    if (!pointerActive || event.clientX !== pointerClient.x || event.clientY !== pointerClient.y) lastMoved = performance.now();
     pointerClient.set(event.clientX, event.clientY);
-    const dx = pointerActive ? (x - pointer.x) * 220 : 0;
-    const dy = pointerActive ? (y - pointer.y) * 220 : 0;
-    // This is the source coordinate itself: never interpolate or ease it.
+    // Record real input samples rather than easing the source toward the cursor.
+    const events = event.getCoalescedEvents?.() ?? [];
+    for (const sample of [...events, event]) {
+      const point = { x: sample.clientX-canvasBounds.left, y: height-(sample.clientY-canvasBounds.top) };
+      const last = pendingPoints[pendingPoints.length-1] ?? painted;
+      if (!last || Math.hypot(point.x-last.x, point.y-last.y)>.25) pendingPoints.push(point);
+    }
+    if (pendingPoints.length>32) pendingPoints.splice(0,pendingPoints.length-32);
     pointer.set(x, y); pointerActive = 1;
-    pendingSplat = { x, y, dx: Math.max(-12, Math.min(12, dx)), dy: Math.max(-12, Math.min(12, dy)) };
     canvas.dataset.pointer = event.clientX + "," + event.clientY;
     const enteredCard = (event.target as Element).closest<HTMLElement>(".lobby-card");
     covers.forEach(cover => {
@@ -204,7 +236,7 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
     });
     pointerCard = enteredCard;
   };
-  const leave = () => { pointerActive = 0; pointerCard = null; pendingSplat = null; painted = null; };
+  const leave = () => { pointerActive = 0; pointerCard = null; pendingPoints.length = 0; painted = null; };
   const observer = new MutationObserver(markDirty);
   observer.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ["src"] });
   const resizeObserver = new ResizeObserver(markDirty);
@@ -218,18 +250,18 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
   window.addEventListener("scroll", markDirty, { passive: true });
   window.addEventListener("resize", resize);
   root.addEventListener("load", markDirty, true);
-  const visibility = () => { lastTime = performance.now(); frameBudget.reset(); if (!document.hidden && !frame) frame = requestAnimationFrame(draw); };
+  const visibility = () => { leave(); clearPointerDye=true; lastTime = performance.now(); frameBudget.reset(); if (!document.hidden && !frame) frame = requestAnimationFrame(draw); };
   document.addEventListener("visibilitychange", visibility);
   resize();
   function draw(now: number) {
     frame = 0;
     if (disposed || document.hidden) return;
     frame = requestAnimationFrame(draw);
-    const delta = Math.min((now - lastTime) / 1000, .035); lastTime = now;
+    const delta = Math.min(Math.max((now - lastTime) / 1000, .001), .035); lastTime = now;
     const viewportChanged = resize();
     const isPaused = paused();
     if (isPaused) {
-      leave();
+      leave(); clearPointerDye=true;
       frameBudget.reset();
       if (!dirty && !viewportChanged) return;
     }
@@ -259,35 +291,49 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
         radius: broadAmbient ? .005 : .003, color: [0, .035 * breath, .045 * breath],
       });
     }
-    if (!isPaused && pointerActive && (pendingSplat || now-lastIdleSplat>32)) {
-      const moving = Math.exp(-(now-lastMoved)/220);
-      const from = painted ?? pointer;
-      const travel = new THREE.Vector2((pointer.x-from.x)*width,(pointer.y-from.y)*height);
-      // Never interpolate the source's position across frames. All samples,
-      // including the latest coordinate, are painted in this same frame.
-      const distance = travel.length();
-      const count = pendingSplat ? Math.min(6,Math.max(1,Math.ceil(distance/18))) : 1;
-      const start = distance>220 ? 1-220/distance : 0;
-      const radiusPx = 26+moving*20;
-      const radius = Math.pow(radiusPx*2/height,2);
-      const dose = pendingSplat ? (.025+.095*moving)/count : .017;
-      const direction = travel.clone().normalize().multiplyScalar(.7*moving);
-      for(let i=1;i<=count;i++) {
-        const t=start+(1-start)*i/count;
-        const x=from.x+(pointer.x-from.x)*t, y=from.y+(pointer.y-from.y)*t;
-        // In three-fluid-fx 0.1.0 color.xy is also written into velocity.
-        // Reserve density.z for ambient illumination and dye.r for exposure.
-        fluid.addSplat(x,y,direction.x,direction.y,{
-          radius, color:[direction.x,direction.y,0], dyeColor:[dose,0,0],
+    if (!isPaused && pointerActive) {
+      const point = { x:pointer.x*width, y:pointer.y*height };
+      const path = pendingPoints.splice(0);
+      if (painted) path.unshift(painted);
+      const samples = sampleRevealPath(path);
+      const distance = samples.reduce((sum,sample)=>sum+sample.distance,0);
+      const speed = Math.min(1, distance / Math.max(delta, .001) / 1400);
+      const radiusPx = 38+speed*8;
+      for (const sample of samples) {
+        // Spatial deposition keeps a quick pass legible without piling up a
+        // bright pool when many events arrive at nearly the same coordinate.
+        const dose = Math.min(.35,.18*(sample.distance/18+delta*15));
+        // The brush opens immediately at the event, with its wider body behind
+        // the leading edge. This offsets its footprint, not the pointer timing.
+        fluid.addSplat((sample.x-sample.dx*radiusPx*.65)/width,(sample.y-sample.dy*radiusPx*.65)/height,sample.dx*.45,sample.dy*.45,{
+          radius:Math.pow(radiusPx*2/height,2), color:[sample.dx*.45,sample.dy*.45,0], dyeColor:[dose,0,0],
         });
       }
-      painted=pointer.clone(); pendingSplat=null; lastIdleSplat=now;
+      if (samples.length || now-lastIdleSplat>32) {
+        // A separate channel holds only a small, dim glimpse at rest. It does
+        // not keep the wider moving stroke alive after motion has stopped.
+        fluid.addSplat(point.x/width,point.y/height,0,0,{
+          radius:Math.pow(22*2/height,2), color:[0,0,0], dyeColor:[0,.045,0],
+        });
+        lastIdleSplat=now;
+      }
+      painted=point;
     }
-    if (!isPaused) fluid.step(delta);
+    if (!isPaused) {
+      // The library caps the simulation step at 1/60 s; compensate only the
+      // pointer dye decay so its lifetime stays stable at 30/60/120 Hz.
+      fluid.dyeDissipation=clearPointerDye ? 0 : Math.pow(.935,delta/Math.min(delta,1/60));
+      fluid.step(delta); clearPointerDye=false;
+    }
     const update = (mat: THREE.ShaderMaterial) => {
       mat.uniforms.density.value = fluid.densityTexture; mat.uniforms.dye.value = fluid.dyeTexture; mat.uniforms.velocity.value = fluid.velocityTexture;
+      mat.uniforms.detailMap.value=revealTexture ?? mat.uniforms.map.value;
+      mat.uniforms.detailReady.value=revealTexture ? 1 : 0;
+      if(revealTexture) {
+        const image=revealTexture.image as HTMLImageElement;
+        mat.uniforms.detailSize.value.set(image.width,image.height);
+      }
       mat.uniforms.viewport.value.set(width, height); mat.uniforms.time.value = now / 1000;
-      mat.uniforms.pointerActive.value = pointerActive;
       mat.uniforms.surfaceOpacity.value = surfaceOpacity;
       mat.uniforms.ambientOrigin.value.set(ambientX, ambientY);
       mat.uniforms.ambientWave.value = broadAmbient && now < ambientUntil ? Math.sin((now - ambientBegan) / ambientDuration * Math.PI) : 0;
