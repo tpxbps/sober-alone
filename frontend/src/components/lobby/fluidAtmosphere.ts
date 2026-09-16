@@ -87,13 +87,11 @@ void main() {
   if(isCard<.5 && detailReady>.5 && unveiling>.001) {
     float detailAspect=detailSize.x/detailSize.y;
     vec2 detailCrop=vec2(min(panelAspect/detailAspect,1.),min(detailAspect/panelAspect,1.));
-    // This relief remains fixed in scene coordinates. Only its visibility is
-    // uncovered, keeping the moving edge from resembling an emissive blob.
-    vec3 relief=texture2D(detailMap,(vUv-.5)*detailCrop+.5).rgb;
-    // Keep the existing door, curtains and floor recognizable; the additional
-    // material lives in the central mist, where the original has little detail.
-    float interior=smoothstep(.09,.25,uv.x)*(1.-smoothstep(.76,.92,uv.x))*smoothstep(.12,.34,uv.y);
-    col=mix(col,relief,unveiling*.92*interior);
+    // The revealed scene shares the original camera and architecture, including
+    // its floor. Uncover it across the whole scene so floor discoveries remain
+    // visible; the moving brush and its decay are unchanged.
+    vec3 revealedScene=texture2D(detailMap,(vUv-.5)*detailCrop+.5).rgb;
+    col=mix(col,revealedScene,unveiling*.92);
   }
   float brightness=mix(.10+visible*.85,.22+visible*.78,isCard);
   col*=brightness;
@@ -171,7 +169,7 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
     background.material.uniforms.map.value = texture;
     background.material.uniforms.imageSize.value.set((texture.image as HTMLImageElement).width, (texture.image as HTMLImageElement).height);
   });
-  loadImage("/lobby/palace-relief.webp", texture => { revealTexture=texture; });
+  loadImage("/lobby/palace-revealed.webp", texture => { revealTexture=texture; });
   function syncCovers() {
     const images = new Set(root.querySelectorAll<HTMLImageElement>(".card-cover-media"));
     covers.forEach((cover, image) => {
