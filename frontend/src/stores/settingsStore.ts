@@ -13,7 +13,7 @@ export const useSettingsStore = create<SettingsState>()(
     (set) => ({
       lobbyMotionEnabled: true,
       setLobbyMotionEnabled: (enabled) => set({ lobbyMotionEnabled: enabled }),
-      ttsEnabled: false,
+      ttsEnabled: true,
       setTtsEnabled: (enabled) => set({ ttsEnabled: enabled }),
     }),
     { name: 'sober_alone_settings' }

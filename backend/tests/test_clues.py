@@ -57,7 +57,7 @@ def test_citation_parser_only_activates_revealed_ids():
     assert refs == [clue["id"]]
     assert unknown == [future_id]
     assert f"[{clue['id']}]" in visible
-    assert f"[{future_id}]" in visible
+    assert f"[{future_id}]" not in visible
 
 
 def test_citation_parser_repairs_code_links_and_bare_ids_in_place():

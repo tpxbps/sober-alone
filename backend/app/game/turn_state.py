@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from app.agents.role_state import apply_beliefs, normalize_beliefs, observations, put_observation
 from app.db.models import GameRecord, GameSession, PlayerState
-from app.game.clues import parse_clue_citations
+from app.game.clues import parse_clue_citations, stage_public_clues
 
 
 async def players_for(controller, db):
@@ -42,7 +42,9 @@ async def process_turn(
         await finish_pending(controller, db)
         return {"success": False, "error": "上一条发言已恢复，请刷新当前回合后重试"}
     text, refs, _ = parse_clue_citations(
-        content, session.revealed_clues or [], strip_unknown=not is_human
+        content,
+        stage_public_clues(session.current_stage, session.revealed_clues or []),
+        strip_unknown=not is_human,
     )
     if is_human:
         text = content

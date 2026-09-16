@@ -6,6 +6,7 @@ import { ClueCitationHover } from "../game/ClueCitationHover";
 
 const NO_CHARACTERS: Character[] = [];
 const NO_CLUES: PublicClue[] = [];
+const NO_IDS: string[] = [];
 
 interface GameMessageMarkdownProps {
   children: string;
@@ -15,6 +16,8 @@ interface GameMessageMarkdownProps {
   /** 是否保留原始空白符（换行等），用于真人玩家发言 */
   preserveWhitespace?: boolean;
   publicClues?: PublicClue[];
+  /** Permission captured for this message; absent means no trusted citations. */
+  allowedCitationIds?: string[];
 }
 
 const CLUE_ID_SOURCE = String.raw`(?:c[0-9]{2,4})|(?:clue-[a-z0-9]{12})`;
@@ -194,10 +197,16 @@ export function GameMessageMarkdown({
   characters = NO_CHARACTERS,
   preserveWhitespace = false,
   publicClues = NO_CLUES,
+  allowedCitationIds = NO_IDS,
 }: GameMessageMarkdownProps) {
   // Normalize mentions, keep clue references at their exact sentence position,
   // and only activate IDs that the server says have already been revealed.
-  const clueMap = useMemo(() => new Map(publicClues.map((clue) => [clue.id.toLowerCase(), clue])), [publicClues]);
+  const allowedKey = allowedCitationIds.map(id => id.toLowerCase()).sort().join("\n");
+  const clueMap = useMemo(() => {
+    const allowed = new Set(allowedKey.split("\n"));
+    return new Map(publicClues.filter(clue => allowed.has(clue.id.toLowerCase()))
+      .map(clue => [clue.id.toLowerCase(), clue]));
+  }, [publicClues, allowedKey]);
   const contentWithCompatibilityRefs = normalizeClueSyntax(
     children.replace(/@{2,}/g, "@"),
     clueMap,

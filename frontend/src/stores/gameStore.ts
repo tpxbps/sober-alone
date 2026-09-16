@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type {
   GameState,
+  PublicClue,
   GameRecord,
   PlayerState,
   Character,
@@ -11,6 +12,7 @@ import type {
 } from '@/types/game';
 import { gameApi, speechApi, voteApi } from '@/lib/api';
 import { adaptGameState } from '@/lib/gameStateAdapter';
+import { speechClues, citedIds } from '@/lib/clueScope';
 import { OperationRegistry } from '@/lib/operationRegistry';
 import { runSpeechStream } from '@/lib/speechStreamRunner';
 
@@ -57,7 +59,7 @@ interface GameActions {
   setScript: (script: Script) => void;
   setVoteResults: (results: VoteResults | null) => void;
   setHumanCharacterScript: (script: string) => void;
-  setPendingHumanSpeech: (speech: string | null) => void;
+  setPendingHumanSpeech: (speech: string | null, clues?: PublicClue[]) => void;
 }
 
 const initialState: GameState = {
@@ -93,6 +95,8 @@ const initialState: GameState = {
   isProcessingReactions: false,
   isAdvancingStage: false, // 推进阶段的loading状态
   streamingContent: '',
+  streamingClues: [],
+  pendingHumanClues: [],
   streamingSpeakerId: null,
   thinkingTip: '', // 工具调用时的提示信息（显示在流式消息上方）
   showStageTransition: false,
@@ -259,7 +263,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
     const operationKey = `ai-speak-${characterId}`;
     const controller = operations.start(operationKey);
 
-    set({ isStreaming: true, streamingContent: '', streamingSpeakerId: characterId, thinkingTip: '' });
+    set({ isStreaming: true, streamingContent: '', streamingSpeakerId: characterId, thinkingTip: '', streamingClues: speechClues(get().stage, get().publicClues) });
 
     try {
       const response = await speechApi.aiSpeakStream(sessionId, characterId, controller.signal);
@@ -356,6 +360,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
                   speaker_id: aiSpeakerId,
                   speaker_name: aiName,
                   content: aiFinalContent,
+                  clue_refs: citedIds(aiFinalContent, get().streamingClues),
                   record_type: 'speech',
                   stage,
                   created_at: new Date().toISOString(),
@@ -369,6 +374,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
                   speaker_id: humanCharacterId,
                   speaker_name: humanName,
                   content: pendingHumanSpeech,
+                  clue_refs: citedIds(pendingHumanSpeech, get().pendingHumanClues),
                   record_type: 'speech',
                   stage,
                   created_at: new Date().toISOString(),
@@ -538,6 +544,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
   setStreaming: (isStreaming: boolean, content = '', speakerId: string | undefined = undefined) => {
     set({
       isStreaming,
+      streamingClues: isStreaming && !get().isStreaming ? speechClues(get().stage, get().publicClues) : get().streamingClues,
       streamingContent: content,
       streamingSpeakerId: speakerId ?? null,
     });
@@ -566,7 +573,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
     set({ humanCharacterScript: script });
   },
 
-  setPendingHumanSpeech: (speech: string | null) => {
-    set({ pendingHumanSpeech: speech });
+  setPendingHumanSpeech: (speech: string | null, clues?: PublicClue[]) => {
+    set({ pendingHumanSpeech: speech, pendingHumanClues: speech ? speechClues(get().stage, clues ?? get().publicClues) : [] });
   },
 }));

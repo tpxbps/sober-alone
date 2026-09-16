@@ -263,6 +263,8 @@ export interface GameState {
   isProcessingReactions: boolean; // 正在处理玩家反应（广播发言）
   isAdvancingStage: boolean; // 正在推进阶段
   streamingContent: string;
+  streamingClues: PublicClue[];
+  pendingHumanClues: PublicClue[];
   streamingSpeakerId: string | null;
   thinkingTip: string; // 工具调用时的提示信息（显示在流式消息上方）
   showStageTransition: boolean;

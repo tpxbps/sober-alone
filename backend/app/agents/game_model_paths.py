@@ -7,6 +7,7 @@ from langchain.agents.middleware import SummarizationMiddleware
 from langchain.messages import AIMessageChunk
 
 from app.agents.reaction import REACTION_MODEL_TIMEOUT_SECONDS, SpeechReactionPayload
+from app.agents.stage_policy import StagePolicyMiddleware
 from app.agents.state import GameAgentState
 from app.agents.tools import get_tools
 from app.core.config import settings
@@ -69,6 +70,7 @@ def build_role_agent(
             model_retry_middleware(),
             tool_retry_middleware(),
             *middleware,
+            StagePolicyMiddleware(),
         ],
         checkpointer=checkpointer,
         system_prompt=system_prompt,
