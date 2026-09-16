@@ -29,6 +29,21 @@ function health(model: string, status: ModelHealthItem['status']): ModelHealthIt
 }
 
 describe('assignModelsToAICharacters', () => {
+  it('keeps all displayed choices when later probes report a different healthy model', () => {
+    const previous = { 'ai-1': 'mimo', 'ai-2': 'qwen', 'ai-3': 'glm' }
+    expect(assignModelsToAICharacters({ characters, humanCharacterId: 'human', models,
+      previous, healthById: { deepseek: health('deepseek', 'normal'), mimo: health('mimo', 'unavailable') },
+      random: () => { throw new Error('Existing choices must not be shuffled') },
+    })).toEqual(previous)
+  })
+
+  it('replaces only removed choices and drops the human role from AI assignments', () => {
+    const previous = { human: 'deepseek', 'ai-1': 'removed', 'ai-2': 'qwen', 'ai-3': 'glm' }
+    expect(assignModelsToAICharacters({ characters, humanCharacterId: 'human', models,
+      previous, healthById: { deepseek: health('deepseek', 'normal') },
+    })).toEqual({ 'ai-1': 'deepseek', 'ai-2': 'qwen', 'ai-3': 'glm' })
+  })
+
   it('never assigns expensive models implicitly even when all health checks fail', () => {
     const frontier: AIModelOption = { id: 'kimi-k3', name: 'Kimi K3', provider: 'moonshot', tier: 'frontier' }
     const selected = assignModelsToAICharacters({ characters, humanCharacterId: 'human', models: [frontier, models[0]], healthById: { deepseek: health('deepseek', 'unavailable') } })

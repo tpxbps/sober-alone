@@ -20,7 +20,6 @@ export function useScriptSetup(scriptId: string, quiet: boolean, onStartGame: (i
   const [reload, setReload] = useState(0);
   const [error, setError] = useState("");
   const [phase, setPhase] = useState<"idle" | "preparing" | "revealing">("idle");
-  const manual = useRef(new Set<string>());
   const alive = useRef(true);
   const creating = useRef(false);
   const pendingSession = useRef<string | null>(null);
@@ -46,7 +45,6 @@ export function useScriptSetup(scriptId: string, quiet: boolean, onStartGame: (i
     const controller = new AbortController();
     setLoading(true); setLoadError(""); setModelReason("");
     setCharacters([]); setModels([]); setHuman(null); setAssignments({}); setHealth({});
-    manual.current.clear();
     const applyHealth = (result: { models: ModelHealthItem[]; probing?: boolean }) => {
       if (cancelled) return;
       setHealth(Object.fromEntries(result.models.map(item => [item.model, item])));
@@ -72,11 +70,7 @@ export function useScriptSetup(scriptId: string, quiet: boolean, onStartGame: (i
   }, [scriptId, reload]);
   useEffect(() => {
     if (!human || !models.length || creating.current) return;
-    setAssignments(current => {
-      const next = assignModelsToAICharacters({ characters, humanCharacterId: human, models, healthById: health });
-      manual.current.forEach(id => { if (current[id]) next[id] = current[id]; });
-      return next;
-    });
+    setAssignments(current => assignModelsToAICharacters({ characters, humanCharacterId: human, models, healthById: health, previous: current }));
   }, [characters, human, models, health]);
   const discardPending = () => {
     if (pendingSession.current) {
@@ -87,12 +81,12 @@ export function useScriptSetup(scriptId: string, quiet: boolean, onStartGame: (i
   };
   const selectHuman = (id: string) => {
     if (creating.current || human === id) return;
-    discardPending(); manual.current.clear(); setError(""); setHuman(id);
+    discardPending(); setError(""); setHuman(id);
     setAssignments(assignModelsToAICharacters({ characters, humanCharacterId: id, models, healthById: health }));
   };
   const selectModel = (id: string, model: string) => {
     if (creating.current) return;
-    discardPending(); manual.current.add(id); setError("");
+    discardPending(); setError("");
     setAssignments(current => ({ ...current, [id]: model }));
   };
   const refreshHealth = async () => {
