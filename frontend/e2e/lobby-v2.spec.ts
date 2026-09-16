@@ -287,11 +287,13 @@ test.describe("入局遮罩连续性",()=>{
     await page.evaluate(()=>{
       const frames:Array<{phase:string;opacity:number;game:boolean}>=[];
       (window as unknown as {entryFrames:typeof frames}).entryFrames=frames;
-      let id=0;
+      // Sample the entire transition; a fixed frame count ends early on
+      // fast displays and can miss the already-rendered game handoff.
+      const deadline=performance.now()+10_000;
       const sample=()=>{
         const el=document.querySelector(".game-entry-overlay");
         if(el) frames.push({phase:el.className,opacity:Number(getComputedStyle(el).opacity),game:!!document.querySelector(".scene-game")});
-        if(id++<100) requestAnimationFrame(sample);
+        if(performance.now()<deadline && (el || !document.querySelector(".scene-game"))) requestAnimationFrame(sample);
       };requestAnimationFrame(sample);
     });
     seen.release();
