@@ -11,7 +11,11 @@ from typing import Any, cast
 from app.agents.agent_player import AgentPlayer
 from app.agents.reaction import REACTION_TASK_TIMEOUT_SECONDS
 from app.core.config import settings
-from app.core.inference import InferenceRecoveryError, raise_for_inference_recovery
+from app.core.inference import (
+    InferenceRecoveryError,
+    gather_inference,
+    raise_for_inference_recovery,
+)
 
 
 @dataclass
@@ -260,7 +264,7 @@ class AgentManager:
 
         if agent_tasks:
             # 使用wait_for给每个任务添加超时，并收集结果
-            results = await asyncio.gather(*agent_tasks, return_exceptions=True)
+            results = await gather_inference(*agent_tasks, return_exceptions=True)
 
             for i, char_id in enumerate(agent_ids):
                 result = results[i]
