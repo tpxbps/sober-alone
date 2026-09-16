@@ -5,6 +5,7 @@ import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 
 from app.agents.game_model_paths import visible_speech_text
+from app.api.schemas.script_editor import ChatRequest
 from app.core.config import settings
 from app.core.inference import GatewayAuth, InferenceRecoveryError, InferenceScope, inference_scope
 from app.core.llm_factory import create_llm
@@ -14,6 +15,13 @@ from app.services import model_health
 from app.services.capabilities import get_capabilities
 
 FRONTIER = [spec for spec in MODEL_SPECS if spec.tier == "frontier"]
+
+
+def test_frontier_cannot_be_selected_for_creator_assistant():
+    for spec in FRONTIER:
+        with pytest.raises(ValueError, match="前沿模型仅供游戏"):
+            ChatRequest(message="hello", model=spec.id, chat_session_id="test")
+    assert ChatRequest(message="hello", chat_session_id="test").model == "deepseek-flash"
 
 
 @pytest.mark.parametrize("spec", FRONTIER, ids=lambda spec: spec.id)

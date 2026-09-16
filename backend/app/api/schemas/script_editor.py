@@ -1,7 +1,9 @@
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from app.core.model_registry import get_model_spec
 
 
 class StartWorkflowRequest(BaseModel):
@@ -51,3 +53,10 @@ class ChatRequest(BaseModel):
     model: str = "deepseek-flash"
     chat_session_id: str
     workflow_thread_id: str | None = None
+
+    @field_validator("model")
+    @classmethod
+    def standard_model_only(cls, value: str) -> str:
+        if get_model_spec(value).tier == "frontier":
+            raise ValueError("前沿模型仅供游戏角色选择，创作助手请使用常用模型")
+        return value

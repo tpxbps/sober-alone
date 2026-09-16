@@ -36,7 +36,7 @@ export function ChatPanel({ threadId, onClose }: ChatPanelProps) {
     systemApi
       .getCapabilities()
       .then((capabilities) => {
-        const models = configuredModels(capabilities);
+        const models = configuredModels(capabilities).filter(item => item.tier !== "frontier");
         setAvailableModels(models);
         setModelReason(models.length ? "" : "没有已配置的模型");
         if (models[0]) setModel(models[0].id);
