@@ -24,7 +24,7 @@ test('作者从大厅编辑结构化数据并选择性更新资源', async ({ pa
       profile: '简介',
       appearance: '黑色风衣',
       system_prompt: '保持冷静',
-      step_voice_id: 'voice-1',
+      step_voice_id: 'cixingnansheng',
     },
   ]
   const sections = () => ({
@@ -126,6 +126,11 @@ test('作者从大厅编辑结构化数据并选择性更新资源', async ({ pa
       const request = route.request().postDataJSON()
       resumeCount += 1
       if (resumeCount === 1) {
+        expect(request.game_data_sections.title).toBe('修改后的剧本')
+        expect(request.game_data_sections.character_data[0]).toMatchObject({
+          character_id: 'c1',
+          step_voice_id: 'wenroushunv',
+        })
         title = request.game_data_sections.title
         operationResponses.set('resume-1', {
           success: true,
@@ -157,12 +162,12 @@ test('作者从大厅编辑结构化数据并选择性更新资源', async ({ pa
                 phase: 'tts',
                 phase_label: '语音资源生成',
                 label: '林岚个人剧本 TTS',
-                changed: false,
+                changed: true,
                 missing: false,
                 available: true,
                 unavailable_reason: '',
-                default_selected: false,
-                change_reason: '依赖字段未变化',
+                default_selected: true,
+                change_reason: '角色声音已修改',
               },
             ],
           },
@@ -214,30 +219,24 @@ test('作者从大厅编辑结构化数据并选择性更新资源', async ({ pa
   await page.goto('/')
   await page.getByRole('button', { name: '管理剧本 可编辑剧本' }).click()
   await page.getByRole('button', { name: '编辑剧本', exact: true }).click()
-  await expect(page.getByText('游戏数据确认')).toBeVisible()
-  await page.getByRole('button', { name: /角色数据/ }).click()
-  const voiceHelp = page.getByRole('button', { name: 'Voice ID 说明与可选音色' })
-  await voiceHelp.hover()
-  const voiceTooltip = page.getByRole('tooltip')
-  await expect(voiceTooltip).toContainText('游戏实时 TTS 音色')
-  await expect(voiceTooltip).toContainText('磁性男声')
-  await expect(voiceTooltip).toContainText('温柔淑女')
-  await expect(voiceTooltip).toContainText('cixingnansheng')
-  await expect(voiceTooltip).toContainText('wenroushunv')
-  await expect(
-    page.locator('.scrollbar-thin').filter({ hasText: '游戏实时 TTS 音色' }).last(),
-  ).toBeVisible()
-  await page.mouse.move(0, 0)
-  await page.getByRole('button', { name: '剧本元数据' }).click()
-  await page.locator('input[value="可编辑剧本"]').fill('修改后的剧本')
-  await page.getByRole('button', { name: '确认并保存' }).click()
+  await expect(page.getByRole('heading', { name: '让故事成为可以游玩的剧本' })).toBeVisible()
+  await page.getByRole('button', { name: '角色 每个人眼中的真相' }).click()
+  const voice = page.getByRole('combobox', { name: '角色声音' })
+  await expect(voice).toHaveValue('cixingnansheng')
+  await expect(voice.getByRole('option', { name: '磁性男声' })).toBeAttached()
+  await voice.selectOption({ label: '温柔淑女' })
+  await expect(voice).toHaveValue('wenroushunv')
+  await page.getByRole('button', { name: '公开介绍 让玩家走进故事' }).click()
+  await page.getByRole('textbox', { name: '剧本名称', exact: true }).fill('修改后的剧本')
+  await page.getByRole('button', { name: '下一步 · 生成资源' }).click()
 
   await expect(page.getByText('确认本次资源更新')).toBeVisible()
   const assetPlanScroll = page.getByTestId('asset-plan-scroll')
   await expect(assetPlanScroll).toHaveCSS('overflow-y', 'auto')
   await expect(assetPlanScroll).toHaveClass(/scrollbar-thin/)
   await expect(page.getByRole('checkbox').first()).toBeChecked()
-  await expect(page.getByRole('checkbox').nth(1)).not.toBeChecked()
+  await expect(page.getByRole('checkbox').nth(1)).toBeChecked()
+  await page.getByRole('checkbox').nth(1).uncheck()
   await page.getByRole('button', { name: '确认保存并执行所选资源' }).click()
 
   await expect(page.getByText('剧本修改完成！')).toBeVisible()
