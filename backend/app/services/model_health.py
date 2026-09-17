@@ -192,6 +192,8 @@ def _health_message(status: str) -> str:
 
 async def _probe_model(spec: ModelSpec) -> dict[str, Any]:
     """Probe speaking and reaction paths concurrently for one configured model."""
+    if spec.tier == "frontier":
+        raise ValueError("Frontier models do not participate in health probes")
     first_token, reaction = await asyncio.gather(
         _measure_dimension(_measure_first_token, spec, FIRST_TOKEN_PROBE_TIMEOUT_SECONDS),
         _measure_dimension(_measure_reaction, spec, REACTION_PROBE_TIMEOUT_SECONDS),
@@ -246,7 +248,13 @@ async def _probe_model(spec: ModelSpec) -> dict[str, Any]:
 
 async def _probe_configured_models() -> list[dict[str, Any]]:
     global _cached_at_monotonic, _cached_models
-    specs = [spec for spec in MODEL_SPECS if settings.get_api_key(spec.provider)]
+    specs = [
+        spec
+        for spec in MODEL_SPECS
+        if spec.tier != "frontier"
+        and settings.is_model_enabled(spec.id)
+        and settings.get_api_key(spec.provider)
+    ]
     semaphore = asyncio.Semaphore(MODEL_PROBE_CONCURRENCY)
 
     async def probe(spec: ModelSpec) -> dict[str, Any]:

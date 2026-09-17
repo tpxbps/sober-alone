@@ -16,7 +16,10 @@ export interface OutlineDecision {
 export interface OutlineSession {
   protocol_version: 2;
   revision: number;
-  status: "writing" | "directing" | "awaiting_answer" | "finalizing" | "checking" | "ready" | "needs_revision";
+  status: "writing" | "directing" | "awaiting_answer" | "finalizing" | "checking" | "ready" | "needs_revision" | "revising";
+  canon?: string[];
+  changes?: Array<{ revision: number; summary: string }>;
+  undo_stack?: unknown[];
   segments: Array<{ id: string; content: string }>;
   decisions: OutlineDecision[];
   pending_question: OutlineQuestion | null;
@@ -47,7 +50,7 @@ export interface OutlineDelta {
   text: string;
 }
 export interface OutlineCommand {
-  action: "answer" | "pause" | "continue" | "stop_questions" | "rewrite" | "retry" | "save";
+  action: "answer" | "pause" | "continue" | "stop_questions" | "rewrite" | "retry" | "save" | "revise" | "undo";
   request_id: string;
   expected_revision: number;
   question_id?: string;

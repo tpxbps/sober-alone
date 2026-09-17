@@ -95,6 +95,11 @@ async def test_conversion_defaults_single_and_preserves_manual_endings(monkeypat
         )
 
     monkeypatch.setattr(service, "_get_structured_llm", lambda: None)
+
+    async def plan(_llm, state):
+        return {"characters": state["characters"], "facts": []}
+
+    monkeypatch.setattr(service, "extract_plan", plan)
     monkeypatch.setattr(service, "_run_game_clues", clues)
     monkeypatch.setattr(service, "_run_game_scenes", scenes)
     monkeypatch.setattr(service, "_run_metadata", metadata)

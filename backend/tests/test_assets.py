@@ -39,7 +39,18 @@ async def test_optional_asset_tasks_are_skipped_without_keys(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_script_repository_saves_script_and_characters_atomically(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "report",
+    [
+        None,
+        {"status": "blocked"},
+        {"status": "incomplete"},
+        {"status": "passed", "content_fingerprint": "old"},
+    ],
+)
+async def test_script_repository_saves_script_and_characters_atomically(
+    tmp_path, monkeypatch, report
+):
     database = tmp_path / "generated.db"
     database_url = f"sqlite+aiosqlite:///{database.as_posix()}"
     engine = create_async_engine(database_url)
@@ -57,7 +68,12 @@ async def test_script_repository_saves_script_and_characters_atomically(tmp_path
     state = valid_state()
     state["game_data_sections"]["title"] = "生成剧本"
     state["game_data_sections"]["character_data"][0]["character_script"] = "个人剧本"
-    result = await ScriptRepository.save_generated_script(approve(state))
+    approve(state)
+    state.pop("quality_report", None)
+    state.pop("quality_acceptance", None)
+    if report is not None:
+        state["quality_report"] = report
+    result = await ScriptRepository.save_generated_script(state)
     assert result["error_message"] == ""
 
     async with session_factory() as session:

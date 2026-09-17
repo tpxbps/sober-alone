@@ -3,13 +3,18 @@ TTSService - TTS 语音合成服务
 提供静态音频合成（mimo-v2.5-tts）和按需合成（step-tts-mini）
 """
 
+import asyncio
+import base64
 import logging
+import math
 import struct
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
 
 from app.core.config import settings
+from app.core.inference import InferenceRecoveryError, raise_for_inference_recovery
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +26,14 @@ AUDIO_ROOT = settings.audio_dir
 # Input context size is not an audio-output budget. Keep narration requests short
 # enough to finish, then join the sentence-aligned pieces into one recording.
 MIMO_MAX_CHARS = 600
+# Share scheduling across creation jobs and retries. Long narration has multiple
+# requests, so staggering only the first task does not prevent gateway bursts.
+MIMO_GATEWAY_CONCURRENCY = 2
+MIMO_GATEWAY_INTERVAL = 6.1
+_mimo_loop = None
+_mimo_slots = None
+_mimo_dispatch_lock = None
+_mimo_next_dispatch = 0.0
 # step-tts-mini: 1000 字限制
 STEP_MAX_CHARS = 900
 
@@ -142,7 +155,10 @@ def get_wav_duration(wav_path: Path) -> float | None:
             if byte_rate <= 0:
                 return None
             return data_size / byte_rate
-    except Exception:
+    except InferenceRecoveryError:
+        raise
+    except Exception as exc:
+        raise_for_inference_recovery(exc)
         return None
 
 
@@ -183,12 +199,12 @@ class TTSService:
             logger.debug("synthesize_static: empty text, skipping")
             return None
 
-        api_key = settings.MIMO_API_KEY
+        api_key = settings.get_api_key("mimo")
         if not api_key:
             logger.warning("MIMO_API_KEY not configured, skipping TTS")
             return None
 
-        base_url = settings.MIMO_API_BASE_URL or "https://api.xiaomimimo.com/v1"
+        base_url = settings.get_base_url("mimo") or "https://api.xiaomimimo.com/v1"
 
         chunks = split_text_for_tts(text, MIMO_MAX_CHARS)
 
@@ -222,6 +238,19 @@ class TTSService:
         Returns:
             mp3 音频字节，失败返回 None
         """
+        if settings.INFERENCE_BACKEND == "tokendance":
+            from app.services.minimax_tts import MiniMaxTTSSession
+
+            session = MiniMaxTTSSession()
+            try:
+                await session.connect(voice_id)
+                await session.send_text(text)
+                parts = [
+                    base64.b64decode(chunk["audio"]) async for chunk in session.receive_audio()
+                ]
+                return b"".join(parts) or None
+            finally:
+                await session.close()
         api_key = settings.STEPFUN_API_KEY
         if not api_key:
             logger.warning("STEPFUN_API_KEY not configured, skipping TTS")
@@ -355,7 +384,48 @@ class TTSService:
 # === 内部调用函数 ===
 
 
+@asynccontextmanager
+async def _mimo_gateway_slot():
+    global _mimo_loop, _mimo_slots, _mimo_dispatch_lock, _mimo_next_dispatch
+    loop = asyncio.get_running_loop()
+    if _mimo_loop is not loop:
+        _mimo_loop = loop
+        _mimo_slots = asyncio.Semaphore(MIMO_GATEWAY_CONCURRENCY)
+        _mimo_dispatch_lock = asyncio.Lock()
+        _mimo_next_dispatch = 0.0
+    async with _mimo_slots:
+        async with _mimo_dispatch_lock:
+            await asyncio.sleep(max(0, _mimo_next_dispatch - loop.time()))
+            _mimo_next_dispatch = loop.time() + MIMO_GATEWAY_INTERVAL
+        yield
+
+
 async def _mimo_single_call(
+    text: str, style_prompt: str, voice: str, base_url: str, api_key: str
+) -> bytes | None:
+    if settings.INFERENCE_BACKEND != "tokendance":
+        return await _mimo_request(text, style_prompt, voice, base_url, api_key)
+    for attempt in range(2):
+        try:
+            async with _mimo_gateway_slot():
+                return await _mimo_request(text, style_prompt, voice, base_url, api_key)
+        except httpx.HTTPStatusError as error:
+            if error.response.status_code != 429 or attempt == 1:
+                logger.warning("MiMo narration request failed: HTTP %s", error.response.status_code)
+                return None
+            # Quota/recovery responses have already raised InferenceRecoveryError
+            # in the transport hook. Only transient 429s get one bounded retry.
+            try:
+                delay = float(error.response.headers.get("Retry-After", MIMO_GATEWAY_INTERVAL))
+            except ValueError:
+                delay = MIMO_GATEWAY_INTERVAL
+            if not math.isfinite(delay):
+                delay = MIMO_GATEWAY_INTERVAL
+            await asyncio.sleep(max(MIMO_GATEWAY_INTERVAL, min(delay, 60)))
+    return None
+
+
+async def _mimo_request(
     text: str, style_prompt: str, voice: str, base_url: str, api_key: str
 ) -> bytes | None:
     """单次 mimo-v2.5-tts API 调用"""
@@ -366,10 +436,17 @@ async def _mimo_single_call(
         messages.append({"role": "user", "content": "请自然地朗读以下内容，语速适中，语气自然。"})
     messages.append({"role": "assistant", "content": text})
 
-    # 长文本生成耗时更久，按字符数动态调整超时
-    timeout = max(60, min(300, len(text) // 5))
+    # Even the final, shorter chunk can queue before audio generation starts.
+    timeout = max(120, min(300, len(text) // 5))
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        from app.core.inference import gateway_async_client
+
+        factory = (
+            gateway_async_client
+            if settings.INFERENCE_BACKEND == "tokendance"
+            else httpx.AsyncClient
+        )
+        async with factory(timeout=timeout) as client:
             response = await client.post(
                 f"{base_url}/chat/completions",
                 headers={
@@ -413,10 +490,15 @@ async def _mimo_single_call(
                 return None
 
     except httpx.HTTPStatusError as e:
-        logger.error(f"MiMo TTS HTTP error: {e.response.status_code} - {e.response.text}")
+        if settings.INFERENCE_BACKEND == "tokendance":
+            raise
+        logger.error("MiMo TTS HTTP error: %s", e.response.status_code)
         return None
+    except InferenceRecoveryError:
+        raise
     except Exception as e:
-        logger.error(f"MiMo TTS error: {e}")
+        raise_for_inference_recovery(e)
+        logger.error("MiMo TTS error: %s", type(e).__name__)
         return None
 
 
@@ -445,6 +527,9 @@ async def _step_single_call(text: str, voice_id: str, base_url: str, api_key: st
     except httpx.HTTPStatusError as e:
         logger.error(f"StepFun TTS HTTP error: {e.response.status_code} - {e.response.text}")
         return None
+    except InferenceRecoveryError:
+        raise
     except Exception as e:
+        raise_for_inference_recovery(e)
         logger.error(f"StepFun TTS error: {e}")
         return None

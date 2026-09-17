@@ -17,6 +17,11 @@ class Settings(BaseSettings):
     API_V1_PREFIX: str = "/api/v1"
     PROJECT_NAME: str = "Sober Alone"
     ALLOW_LEGACY_OWNER_CLAIM: bool = False
+    INFERENCE_BACKEND: str = "direct"
+    TOKENDANCE_API_KEY: str | None = None
+    TOKENDANCE_BASE_URL: str = "https://tokendance.space/gateway"
+    TOKENDANCE_APP_URL: str = ""
+    TOKENDANCE_REQUIRE_SCOPE: bool = False
 
     # Database
     DATABASE_URL: str = _sqlite_url(LOCAL_DATA_DIR / "game_data.db")
@@ -50,6 +55,8 @@ class Settings(BaseSettings):
     DEFAULT_LLM_PROVIDER: str = "deepseek"
     DEFAULT_LLM_MODEL: str | None = "deepseek-flash"  # 为None时使用DEFAULT_MODELS中的默认值
     SCRIPT_EDITOR_MODEL: str | None = "deepseek-flash"
+    SCRIPT_REVIEW_MODEL: str | None = None
+    DISABLED_LLM_MODELS: str = ""  # Comma-separated canonical IDs or legacy aliases.
 
     # Vector database
     CHROMA_PERSIST_DIR: str = str(LOCAL_DATA_DIR / "chroma")
@@ -91,6 +98,10 @@ class Settings(BaseSettings):
 
     def get_api_key(self, provider: str) -> str | None:
         """获取指定提供商的API Key"""
+        if self.INFERENCE_BACKEND == "tokendance":
+            from app.core.inference import gateway_available
+
+            return "scoped-credential" if gateway_available() else None
         key_mapping = {
             "zhipuai": self.ZHIPUAI_API_KEY,
             "deepseek": self.DEEPSEEK_API_KEY,
@@ -102,8 +113,24 @@ class Settings(BaseSettings):
         }
         return key_mapping.get(provider)
 
+    def is_model_enabled(self, model: str) -> bool:
+        from app.core.model_registry import get_model_spec
+
+        disabled = {
+            get_model_spec(value.strip()).id
+            for value in self.DISABLED_LLM_MODELS.split(",")
+            if value.strip()
+        }
+        spec = get_model_spec(model)
+        return spec.id not in disabled and self.INFERENCE_BACKEND in spec.backends
+
+    def get_script_review_model(self) -> str:
+        return self.SCRIPT_REVIEW_MODEL or self.SCRIPT_EDITOR_MODEL or "deepseek-flash"
+
     def get_base_url(self, provider: str) -> str | None:
         """获取指定提供商的API Base URL"""
+        if self.INFERENCE_BACKEND == "tokendance":
+            return self.TOKENDANCE_BASE_URL.rstrip("/") + "/v1"
         url_mapping = {
             "zhipuai": self.ZHIPUAI_API_BASE_URL,
             "deepseek": self.DEEPSEEK_API_BASE_URL,

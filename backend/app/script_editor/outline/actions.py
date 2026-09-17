@@ -74,7 +74,13 @@ async def queue_action(runner, thread_id: str, request: OutlineAction, owner_key
                     EditorOperation.status.in_(("queued", "running")),
                 )
             )
-            if active and request.action not in {"pause", "stop_questions", "rewrite"}:
+            if active and request.action not in {
+                "pause",
+                "stop_questions",
+                "rewrite",
+                "revise",
+                "undo",
+            }:
                 raise OutlineConflict(
                     "当前操作尚未结束，请稍后重试；修改历史回答请使用“从这里修改”"
                 )
@@ -91,6 +97,9 @@ async def queue_action(runner, thread_id: str, request: OutlineAction, owner_key
             if request.action == "rewrite":
                 target = await decision_checkpoint(service, thread_id, request)
                 validate_choice(target.values["outline_session"]["pending_question"], request)
+            if request.action == "undo" and not session.get("undo_stack"):
+                raise OutlineConflict("当前没有可以撤销的修订")
+            if request.action in {"rewrite", "revise", "undo"}:
                 if active:
                     workflow.outline_control = {**control, "paused": True}
                     workflow.status = "paused"
@@ -110,7 +119,7 @@ async def queue_action(runner, thread_id: str, request: OutlineAction, owner_key
                 control["questions_stopped"] = True
             else:
                 control["paused"] = False
-            if request.action == "rewrite":
+            if request.action in {"rewrite", "revise", "undo"}:
                 control["revision"] = request.expected_revision + 1
             workflow.outline_control = control
             immediate = request.action == "pause" or (
@@ -205,10 +214,68 @@ async def execute_action(service, thread_id: str, payload: dict) -> dict:
         session = snapshot.values["outline_session"]
     consumed = request.request_id in session.get("consumed_requests", [])
     question = session.get("pending_question")
-    if request.action == "save":
+    if request.action in {"revise", "undo"} and not consumed:
+        revised = deepcopy(session)
+        outline = snapshot.values.get("outline", "")
+        if request.action == "undo":
+            before = revised["undo_stack"].pop()
+            revised = {
+                **before["session"],
+                "undo_stack": revised["undo_stack"],
+                "changes": revised.get("changes", []),
+            }
+            outline = before["outline"]
+            revised.pop("pending_input", None)
+            revised["changes"].append(
+                {
+                    "revision": request.expected_revision + 1,
+                    "summary": "已撤销上次修订，并恢复对应设定与正文。",
+                }
+            )
+            revised["next_action"] = (
+                "wait"
+                if revised.get("pending_question")
+                else "review"
+                if revised.get("final_outline")
+                else "direct"
+            )
+        else:
+            revised["pending_input"] = {
+                "other_text": request.other_text,
+                "after": "review"
+                if revised.get("status") in {"ready", "needs_revision"}
+                else "wait"
+                if question
+                else "direct",
+            }
+        revised["revision"] = request.expected_revision + 1
+        revised["consumed_requests"] = [*session.get("consumed_requests", []), request.request_id]
+        await service.graph.aupdate_state(
+            config,
+            {"outline": outline, "outline_session": revised},
+            as_node="outline_apply" if request.action == "undo" else "outline_wait",
+        )
+        if request.action == "undo" and revised["next_action"] == "direct":
+            # An undo must not immediately regenerate and erase the restored version.
+            async with AsyncSessionLocal() as db:
+                workflow = await db.get(EditorWorkflow, thread_id)
+                workflow.outline_control = {**workflow.outline_control, "paused": True}
+                await db.commit()
+        else:
+            await service.graph.ainvoke(None, config)
+    elif request.action == "save":
         if not consumed:
             saved = deepcopy(session)
-            saved.update(final_outline=request.content, status="ready", check=None)
+            from app.script_editor.outline.revisions import paragraphs, remember
+
+            remember(saved, snapshot.values.get("outline", ""))
+            saved.update(
+                final_outline=request.content,
+                status="ready",
+                check=None,
+                segments=paragraphs(request.content),
+                canon=[],
+            )
             saved["consumed_requests"] = [*saved.get("consumed_requests", []), request.request_id]
             # Re-enter only the confirmation interrupt. No generation node runs.
             await service.graph.aupdate_state(

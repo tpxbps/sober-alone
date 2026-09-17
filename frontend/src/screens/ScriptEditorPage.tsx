@@ -157,7 +157,7 @@ export function ScriptEditorPage({ onBack, editScriptId }: ScriptEditorPageProps
   };
 
   const handleRetryConvert = async () => {
-    await resumeWorkflow("regenerate");
+    await resumeWorkflow("retry_failed");
   };
 
   const handleBackToLobby = () => {

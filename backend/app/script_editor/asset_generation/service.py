@@ -6,6 +6,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.core.config import settings
+from app.core.inference import (
+    InferenceRecoveryError,
+    gather_inference,
+    raise_for_inference_recovery,
+)
 from app.game.endings import ending_audio_tasks
 from app.script_editor.asset_generation.progress import (
     _init_asset_progress,
@@ -36,7 +41,6 @@ async def _generate_assets(state: ScriptGenState) -> dict:
     并行生成所有资源：向量数据、图片、语音
     三个阶段同时运行，每个阶段内部串行但有独立的进度跟踪
     """
-    import asyncio
 
     script_id = state.get("script_id", str(uuid.uuid4()))
     characters = state.get("characters", [])
@@ -97,7 +101,9 @@ async def _generate_assets(state: ScriptGenState) -> dict:
             "id": "vectorize",
             "label": "角色剧本向量化",
             "tech": "Embedding",
-            "model": "zai-embedding-3",
+            "model": "qwen3.7-text-embedding"
+            if settings.INFERENCE_BACKEND == "tokendance"
+            else "zai-embedding-3",
             "tasks": [
                 *[
                     {
@@ -113,7 +119,9 @@ async def _generate_assets(state: ScriptGenState) -> dict:
             "id": "image",
             "label": "剧本图片生成",
             "tech": "Text-to-Image",
-            "model": "doubao-seedream-4.0",
+            "model": "seedream-5.0-lite"
+            if settings.INFERENCE_BACKEND == "tokendance"
+            else "doubao-seedream-4.0",
             "tasks": [
                 {"id": "cover", "label": "剧本概览封面", "status": "pending"},
                 *[
@@ -145,12 +153,46 @@ async def _generate_assets(state: ScriptGenState) -> dict:
         },
     ]
 
+    from app.script_editor.services.execution import digest
+
+    resource_input = digest(
+        {
+            key: state.get(key)
+            for key in (
+                "characters",
+                "character_scripts",
+                "game_full_process",
+                "clue_stages",
+                "ending_config",
+                "game_data_sections",
+                "selected_asset_ids",
+            )
+        }
+    )
+    previous_progress = state.get("asset_progress") or {}
+    if previous_progress.get("input_fingerprint") != resource_input:
+        previous_progress = {}
+    restored = {
+        task["id"]: task
+        for phase in previous_progress.get("phases", [])
+        for task in phase.get("tasks", [])
+        if task.get("status") in {"complete", "skipped"}
+    }
+    for phase in phases:
+        for task in phase["tasks"]:
+            if task["id"] in restored:
+                task.update(restored[task["id"]])
     _init_asset_progress(script_id, phases)
+    asset_progress_registry.mutate(
+        script_id, lambda progress: progress.update(input_fingerprint=resource_input)
+    )
+    _publish_asset_progress(script_id)
 
     all_task_ids = {task["id"] for phase in phases for task in phase.get("tasks", [])}
     if selected is not None:
         for task_id in all_task_ids - selected:
             _update_task_status(script_id, task_id, "skipped", "本次编辑未选择更新")
+    selected = (all_task_ids if selected is None else selected) - set(restored)
 
     updates = {
         "current_step": STEP_GENERATE_ASSETS,
@@ -164,7 +206,7 @@ async def _generate_assets(state: ScriptGenState) -> dict:
     phase_jobs = []
     vector_task_ids = {f"vector_{c.get('character_id', str(i))}" for i, c in enumerate(characters)}
     selected_vectors = vector_task_ids if selected is None else vector_task_ids & selected
-    if settings.ZHIPUAI_API_KEY and selected_vectors:
+    if settings.get_api_key("zhipuai") and selected_vectors:
         phase_jobs.append(_run_vectorize(script_id, state, characters, selected_vectors))
     else:
         for task_id in selected_vectors:
@@ -175,7 +217,7 @@ async def _generate_assets(state: ScriptGenState) -> dict:
         *[f"avatar_{c.get('character_id', str(i))}" for i, c in enumerate(characters)],
     ]
     selected_images = set(image_task_ids) if selected is None else set(image_task_ids) & selected
-    if settings.DOUBAO_API_KEY and selected_images:
+    if settings.get_api_key("bytedance") and selected_images:
         phase_jobs.append(_run_images(script_id, state, characters, selected_images, edit_mode))
     else:
         for task_id in selected_images:
@@ -191,7 +233,7 @@ async def _generate_assets(state: ScriptGenState) -> dict:
     for task_id in selected_tts & empty_character_tts:
         _update_task_status(script_id, task_id, "skipped", "角色个人剧本为空")
     selected_tts -= empty_character_tts
-    if settings.MIMO_API_KEY and selected_tts:
+    if settings.get_api_key("mimo") and selected_tts:
         phase_jobs.append(
             _run_tts(
                 script_id,
@@ -206,7 +248,20 @@ async def _generate_assets(state: ScriptGenState) -> dict:
         for task_id in selected_tts:
             _update_task_status(script_id, task_id, "skipped", "未配置 MIMO_API_KEY")
 
-    results = await asyncio.gather(*phase_jobs, return_exceptions=True)
+    recovery = None
+    try:
+        results = await gather_inference(*phase_jobs, return_exceptions=True)
+    except InferenceRecoveryError as error:
+        recovery = error
+        results = []
+        # The batch has stopped. Keep completed work and make interrupted tasks
+        # retryable after the account is recovered, including cancelled siblings.
+        for phase in (get_asset_progress(script_id) or {}).get("phases", []):
+            for task in phase.get("tasks", []):
+                if task.get("status") not in {"complete", "skipped"}:
+                    _update_task_status(
+                        script_id, task["id"], "failed", "模型账户需要处理，恢复后可重试"
+                    )
 
     # 收集结果
     for r in results:
@@ -229,6 +284,7 @@ async def _generate_assets(state: ScriptGenState) -> dict:
                 if avatar_path.exists() and avatar_path.stat().st_size > 0:
                     avatars[char_id] = f"/images/scripts/{script_id}/avatars/{char_id}.png"
     except Exception as e:
+        raise_for_inference_recovery(e)
         logger.warning(f"Failed to collect image URLs: {e}")
 
     updates["cover_image_url"] = cover_url
@@ -260,8 +316,11 @@ async def _generate_assets(state: ScriptGenState) -> dict:
     try:
         await ScriptRepository.update_asset_urls(script_id, cover_url, avatars, state)
     except Exception as e:
+        raise_for_inference_recovery(e)
         logger.error(f"Failed to update asset URLs: {e}")
 
+    if recovery is not None:
+        raise recovery
     return updates
 
 
@@ -291,6 +350,7 @@ async def _run_vectorize(
                 _update_task_status(script_id, task_id, "complete")
                 return
             except Exception as error:
+                raise_for_inference_recovery(error)
                 if attempt < VECTORIZE_MAX_ATTEMPTS:
                     logger.warning(
                         "ChromaDB ingestion failed for %s (attempt %s/%s), retrying: %s",
@@ -319,7 +379,6 @@ async def _run_images(
     force: bool,
 ):
     """图片生成阶段（封面 + 角色头像）— 全部并行"""
-    import asyncio
 
     tasks = []
 
@@ -364,7 +423,7 @@ async def _run_images(
             )
         )
 
-    await asyncio.gather(*tasks, return_exceptions=True)
+    await gather_inference(*tasks, return_exceptions=True)
 
 
 async def _run_single_image(script_id: str, task_id: str, func_name: str, func_kwargs: dict):
@@ -380,6 +439,7 @@ async def _run_single_image(script_id: str, task_id: str, func_name: str, func_k
         else:
             _update_task_status(script_id, task_id, "failed", "供应商未返回有效图片")
     except Exception as e:
+        raise_for_inference_recovery(e)
         logger.error(f"Image task {task_id} failed: {e}")
         _update_task_status(script_id, task_id, "failed", str(e))
 
@@ -408,6 +468,7 @@ async def _run_tts(
             force=force,
         )
     except Exception as e:
+        raise_for_inference_recovery(e)
         logger.error(f"TTS generation failed: {e}")
         for task_id in task_ids:
             progress = get_asset_progress(script_id)
@@ -454,6 +515,7 @@ def _delete_tts_audio(script_id: str, task_id: str):
             path.unlink()
             logger.info(f"Deleted existing audio for retry: {path}")
     except Exception as e:
+        raise_for_inference_recovery(e)
         logger.warning(f"Failed to delete audio for task {task_id}: {e}")
 
 
@@ -665,6 +727,11 @@ async def _retry_single_asset(script_id: str, task_id: str, state: ScriptGenStat
         return result
 
     except Exception as e:
+        try:
+            raise_for_inference_recovery(e)
+        except InferenceRecoveryError:
+            _update_task_status(script_id, task_id, "failed", "模型账户需要处理，恢复后可重试")
+            raise
         logger.error(f"Asset retry failed for task {task_id}: {e}")
         _update_task_status(script_id, task_id, "failed", str(e))
         return TaskResult(ok=False, error=str(e))

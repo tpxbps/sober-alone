@@ -79,6 +79,11 @@ class WorkflowProgressRegistry:
             thread_id = self._threads.get(script_id)
             snapshot = deepcopy(self._progress.get(script_id))
         if thread_id:
+            from app.script_editor.outline.runtime import current_runtime
+
+            runtime = current_runtime.get()
+            if runtime and snapshot is not None:
+                snapshot = runtime.queue_progress(self.event_type, snapshot)
             publish(thread_id, self.event_type, snapshot)
 
     def reset(self, script_id: str) -> None:

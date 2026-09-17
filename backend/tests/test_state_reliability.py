@@ -220,3 +220,82 @@ async def test_interrupted_reactions_resume_without_duplicate_records_or_counter
     assert human.total_speeches == 1 and human.remaining_speech_count == 3
     a = await db.scalar(select(PlayerState).where(PlayerState.character_id == "a"))
     assert len(observations(a.player_perspectives)["human"]) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["reauthorize_api_key", "top_up_balance", "api_key_quota"])
+async def test_account_recovery_keeps_reactions_pending_without_spending_attempts(game, action):
+    from app.core.inference import InferenceRecoveryError
+
+    db, controller = game
+
+    async def unavailable(**kwargs):
+        raise InferenceRecoveryError(action)
+
+    controller.agent_manager.broadcast_speech = unavailable
+    with pytest.raises(InferenceRecoveryError):
+        await controller.process_speech("human", "已提交发言", is_human=True, db_session=db)
+    for _ in range(3):
+        with pytest.raises(InferenceRecoveryError):
+            await finish_pending(controller, db)
+        assert controller.session.pending_speech["attempts"] == {}
+        assert controller.session.current_speaker is None
+
+    recovered_targets = []
+
+    async def available(**kwargs):
+        recovered_targets.extend(kwargs["target_ids"])
+        return {}
+
+    controller.agent_manager.broadcast_speech = available
+    await finish_pending(controller, db)
+    assert set(recovered_targets) == {"a", "b"}
+    assert not controller.session.pending_speech
+    assert len(list(await db.scalars(select(GameRecord)))) == 1
+    human = await db.scalar(select(PlayerState).where(PlayerState.character_id == "human"))
+    assert human.total_speeches == 1 and human.remaining_speech_count == 3
+
+
+@pytest.mark.asyncio
+async def test_paused_controller_read_does_not_resume_pending_inference(game, monkeypatch):
+    from app.services import game_service
+
+    db, controller = game
+    controller.session.pending_speech = {"record_id": 999, "targets": ["a"]}
+    await db.commit()
+
+    class Registry:
+        async def get_or_restore(self, *_args):
+            return controller
+
+    monkeypatch.setattr(game_service, "_flow_controllers", Registry())
+    # The nonexistent record would fail if reading resumed the pending work.
+    assert await game_service.ensure_flow_controller("g", db, resume_pending=False) is controller
+    assert controller.session.pending_speech["record_id"] == 999
+
+
+@pytest.mark.asyncio
+async def test_reaction_batch_stops_other_inference_on_account_recovery(monkeypatch):
+    import asyncio
+
+    from app.agents.agent_manager import AgentManager
+    from app.core.inference import InferenceRecoveryError
+
+    manager = AgentManager("recovery-test", "script")
+    manager.agents = {cid: SimpleNamespace(agent=object()) for cid in ("a", "b")}
+    entered, cancelled = asyncio.Event(), asyncio.Event()
+
+    async def reaction(cid, *_args, **_kwargs):
+        if cid == "a":
+            await entered.wait()
+            raise InferenceRecoveryError("reauthorize_api_key")
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    monkeypatch.setattr(manager, "_get_reaction_with_timeout", reaction)
+    with pytest.raises(InferenceRecoveryError):
+        await asyncio.wait_for(manager.broadcast_speech("human", "一条发言"), timeout=1)
+    assert cancelled.is_set()

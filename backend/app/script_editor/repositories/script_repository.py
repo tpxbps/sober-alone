@@ -27,7 +27,6 @@ async def _save_generated_script(state: ScriptGenState) -> dict:
     import aiosqlite
 
     from app.script_editor.editing import normalize_game_data
-    from app.script_editor.nodes.quality_check import quality_approved
     from app.script_editor.nodes.safety_check import safety_approved
 
     normalized = normalize_game_data(state)
@@ -37,10 +36,10 @@ async def _save_generated_script(state: ScriptGenState) -> dict:
             "error_message": "；".join(normalized["data_validation_errors"]),
         }
     state = {**state, **normalized}
-    if not quality_approved(state) or not safety_approved(state):
+    if not safety_approved(state):
         return {
             "current_step": STEP_SAVE,
-            "error_message": "内容检查缺失或已失效，请重新检查后保存",
+            "error_message": "合规评估缺失或已失效，请重新评估后保存",
         }
 
     script_id = state.get("script_id", str(uuid.uuid4()))
@@ -148,7 +147,17 @@ async def _save_generated_script(state: ScriptGenState) -> dict:
 
                 char_script = character_scripts.get(name, "") or cd.get("character_script", "")
 
-                voice_id = cd.get("step_voice_id", "") or character_voice_ids.get(char_id, "")
+                voice_id = (
+                    cd.get("step_voice_id", "")
+                    or cd.get("tts_voice_id", "")
+                    or character_voice_ids.get(char_id, "")
+                )
+                voice_provider = "stepfun"
+                if settings.INFERENCE_BACKEND == "tokendance":
+                    from app.services.voices import resolve_minimax_voice
+
+                    voice_id = resolve_minimax_voice(voice_id, {**c, **cd})
+                    voice_provider = "minimax"
 
                 values = (
                     name,
@@ -183,6 +192,11 @@ async def _save_generated_script(state: ScriptGenState) -> dict:
                         (script_id, char_id, *values[:9], avatar, avatar, values[9]),
                     )
 
+                await db.execute(
+                    "UPDATE characters SET voice_provider = ? WHERE character_id = ?",
+                    (voice_provider, char_id),
+                )
+
             from app.game.endings import normalize_endings
 
             ending_config = normalize_endings(game_data_sections.get("ending_config"), characters)
@@ -214,7 +228,7 @@ async def _save_generated_script(state: ScriptGenState) -> dict:
             fingerprint = content_fingerprint(saved_script, saved_characters)
             quality = dict(state.get("quality_report") or {})
             if quality and quality.get("content_fingerprint") != fingerprint:
-                raise ValueError("实际保存内容与质量报告不一致，请返回数据确认重新检查")
+                quality["outdated"] = True
             quality["acceptance"] = state.get("quality_acceptance") or {}
             await db.execute(
                 "UPDATE scripts SET content_fingerprint = ?, quality_report = ? WHERE script_id = ?",

@@ -66,5 +66,8 @@ class Character(Base):
     avatar_url: Mapped[str] = mapped_column(String(500), default="")
     portrait_url: Mapped[str] = mapped_column(String(500), default="")
     voice_id: Mapped[str] = mapped_column(String(100), default="")
+    voice_provider: Mapped[str] = mapped_column(
+        String(30), default="stepfun", server_default="stepfun"
+    )
 
     script: Mapped[Script] = relationship(back_populates="characters")

@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents import get_agent_manager, remove_agent_manager
+from app.core.inference import InferenceRecoveryError, raise_for_inference_recovery
 from app.db.models import GameRecord, GameSession, GameStage, GameStatus, PlayerState
 from app.game import GameFlowController
 from app.game.resource_revision import resource_namespace
@@ -48,7 +49,7 @@ def prune_flow_controllers(max_idle) -> list[str]:
 
 
 async def ensure_flow_controller(
-    session_id: str, db_session: AsyncSession
+    session_id: str, db_session: AsyncSession, *, resume_pending: bool = True
 ) -> GameFlowController | None:
     """
     确保流程控制器存在，如果不存在则从数据库重建
@@ -88,7 +89,7 @@ async def ensure_flow_controller(
         )
 
     controller = await _flow_controllers.get_or_restore(session_id, restore)
-    if controller:
+    if controller and resume_pending:
         current = await db_session.get(GameSession, session_id)
         if getattr(current, "pending_speech", None):
             from app.game.turn_state import finish_pending
@@ -187,7 +188,10 @@ class GameService:
             )
             start_result = await flow_controller.start_game(self.db)
             _flow_controllers.put(session_id, flow_controller)
-        except Exception:
+        except InferenceRecoveryError:
+            raise
+        except Exception as exc:
+            raise_for_inference_recovery(exc)
             logger.exception("Failed to initialize game session %s", session_id)
             await self.db.rollback()
             remove_agent_manager(session_id)
@@ -197,7 +201,10 @@ class GameService:
                 if persisted_session:
                     await self.db.delete(persisted_session)
                     await self.db.commit()
-            except Exception:
+            except InferenceRecoveryError:
+                raise
+            except Exception as exc:
+                raise_for_inference_recovery(exc)
                 await self.db.rollback()
                 logger.exception("Failed to clean incomplete game session %s", session_id)
             return {
@@ -236,7 +243,9 @@ class GameService:
         """获取剧本数据"""
         return await self.runtime_repository.load_script(script_id)
 
-    async def get_game_state(self, session_id: str) -> dict[str, Any]:
+    async def get_game_state(
+        self, session_id: str, *, resume_pending: bool = True
+    ) -> dict[str, Any]:
         """
         获取游戏状态
 
@@ -267,7 +276,9 @@ class GameService:
         )
 
         # 获取流程控制器
-        flow_controller = await ensure_flow_controller(session_id, self.db)
+        flow_controller = await ensure_flow_controller(
+            session_id, self.db, resume_pending=resume_pending
+        )
 
         if flow_controller:
             player_states = await self._get_player_states(session_id)
@@ -475,7 +486,10 @@ class GameService:
                 "current_speaker_id": flow_controller.session.current_speaker,
                 "speech_queue": flow_controller.session.speech_queue or [],
             }
+        except InferenceRecoveryError:
+            raise
         except Exception as e:
+            raise_for_inference_recovery(e)
             await self.db.rollback()
             return {"success": False, "error": str(e)}
 

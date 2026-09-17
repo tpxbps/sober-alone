@@ -10,6 +10,8 @@ from chromadb.config import Settings as ChromaSettings
 from zhipuai import ZhipuAI
 
 from app.core.config import settings
+from app.rag.embeddings import collection_name
+from app.rag.embeddings import profile as embedding_profile
 from app.rag.revision import script_digest
 
 logger = logging.getLogger(__name__)
@@ -52,12 +54,19 @@ def ingest_character(script_id: str, character: dict, script_text: str) -> None:
         settings=ChromaSettings(anonymized_telemetry=False),
     )
     collection = client.get_or_create_collection(
-        name=f"script_{script_id.replace('-', '_')}",
-        metadata={"script_id": script_id},
+        name=collection_name(script_id),
+        metadata={"script_id": script_id, "embedding_profile": embedding_profile()},
     )
+    from app.rag.embeddings import validate_collection
+
+    validate_collection(collection)
     chunks = _chunk_text(script_text, CHUNK_SIZE, CHUNK_OVERLAP) if script_text else []
     embeddings = []
-    if chunks:
+    if chunks and settings.INFERENCE_BACKEND == "tokendance":
+        from app.rag.embeddings import embed
+
+        embeddings = embed(chunks)
+    elif chunks:
         zhipu_client = ZhipuAI(api_key=settings.ZHIPUAI_API_KEY)
         for batch_start in range(0, len(chunks), 20):
             response = zhipu_client.embeddings.create(

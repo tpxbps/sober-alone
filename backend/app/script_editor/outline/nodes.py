@@ -24,23 +24,17 @@ def session_of(state: dict) -> dict:
 
 def context(state: dict, session: dict) -> str:
     # Deliberately omit assistant chat, discarded branches and unselected alternatives.
-    decisions = [
-        {
-            "source": d["source"],
-            "choice": d.get("choice", ""),
-            "other_text": d.get("other_text", ""),
-        }
-        for d in session["decisions"]
-    ]
     return json.dumps(
         {
-            "原始创意": state.get("user_idea", ""),
+            "原始创意": state.get("user_idea", "")
+            if not state.get("outline")
+            else "已融入当前大纲；后续以最新正文和有效设定为准",
             "创作参数": {
                 k: state.get(k) for k in ("player_count", "difficulty", "num_clue_rounds")
             },
             "创作要求": get_prompt("generate_outline", state),
             "有效大纲": state.get("outline", ""),
-            "已确认决策": decisions,
+            "已确认决策": session.get("canon", []),
             "未决事项": session["unresolved"],
         },
         ensure_ascii=False,
@@ -66,10 +60,17 @@ async def structured(schema, system: str, content: str):
         try:
             result = await asyncio.wait_for(
                 llm(0.35)
-                .with_structured_output(schema, method="function_calling")
+                .with_structured_output(schema, method="function_calling", include_raw=True)
                 .ainvoke(messages),
                 timeout=150,
             )
+            if isinstance(result, dict) and "raw" in result:
+                from app.script_editor.services.execution import observe_model
+
+                observe_model(result["raw"])
+                if result.get("parsing_error"):
+                    raise ValueError("模型返回结构不完整") from result["parsing_error"]
+                result = result.get("parsed")
             return schema.model_validate(result)
         except (ValueError, TypeError, AttributeError) as error:
             if attempt:
@@ -97,6 +98,9 @@ async def stream_text(state: dict, session: dict, task: str, segment_id: str, st
                 HumanMessage(content=context(state, session) + "\n\n本轮任务：" + task),
             ]
         ):
+            from app.script_editor.services.execution import observe_model
+
+            observe_model(chunk)
             text = chunk.content
             if isinstance(text, list):
                 text = "".join(
@@ -116,6 +120,14 @@ async def stream_text(state: dict, session: dict, task: str, segment_id: str, st
 
 async def write_segment(state: dict) -> dict:
     session = session_of(state)
+    refinement = state.get("refinement") or {}
+    if refinement.get("target") == "review_outline" and refinement.get(
+        "request_id"
+    ) not in state.get("completed_refinements", []):
+        from app.script_editor.outline.revisions import apply_outline_input
+
+        session["pending_input"] = {"other_text": refinement["feedback"], "after": "review"}
+        return await apply_outline_input({**state, "outline_session": session})
     if session.get("status") in {"ready", "needs_revision"}:
         session.update(check=None, next_action="review", status="ready")
         return {"outline_session": session, "current_step": "generate_outline"}
@@ -157,33 +169,14 @@ async def direct_outline(state: dict) -> dict:
     if runtime:
         stopped = stopped or (await runtime.read_control()).get("questions_stopped", False)
     session.update(unresolved=result.unresolved, questions_stopped=stopped)
-    for choice in result.ai_decisions:
-        session["decisions"].append(
-            {
-                "source": "ai",
-                "choice": choice,
-                "other_text": "",
-                "segment_index": len(session["segments"]),
-            }
-        )
+    # Suggestions are not decisions. In particular, an unselected option must never
+    # enter the authoritative context just because the director mentioned it.
     if result.action == "ask":
         question = {**result.question.model_dump(), "id": str(uuid.uuid4())}
         session["next_task"] = result.next_task
         if stopped or session["questions_asked"] >= 5:
-            option = next(
-                o for o in question["options"] if o["id"] == question["recommended_option_id"]
-            )
-            session["decisions"].append(
-                {
-                    "source": "ai",
-                    "choice": option["label"] + "：" + option["impact"],
-                    "other_text": "",
-                    "question": question,
-                    "option_id": option["id"],
-                    "segment_index": len(session["segments"]),
-                }
-            )
-            session.update(next_action="write", pending_question=None, status="writing")
+            # Stopping questions delegates completion, never acceptance of an option.
+            session.update(next_action="finalize", pending_question=None, status="finalizing")
         else:
             session["questions_asked"] += 1
             session.update(next_action="wait", pending_question=question, status="awaiting_answer")
@@ -220,6 +213,14 @@ async def wait_for_answer(state: dict) -> dict:
         )
     if response.get("question_id", question["id"]) != question["id"]:
         raise ValueError("回答对应的问题已经失效")
+    if response.get("source") == "ai":
+        session.update(
+            pending_question=None,
+            next_action="finalize",
+            status="finalizing",
+            questions_stopped=stopped,
+        )
+        return {"outline_session": session, "current_step": "generate_outline"}
     option_id = response.get("option_id")
     option = next((o for o in question["options"] if o["id"] == option_id), None)
     other = response.get("other_text", "").strip()
@@ -238,8 +239,14 @@ async def wait_for_answer(state: dict) -> dict:
     request_id = response.get("request_id")
     if request_id:
         session["consumed_requests"].append(request_id)
+    session["pending_input"] = {
+        "choice": (option["label"] + "：" + option["impact"]) if option else "",
+        "other_text": other,
+        "after": "write",
+        "source": response.get("source", "user"),
+    }
     session.update(
-        pending_question=None, next_action="write", status="writing", questions_stopped=stopped
+        pending_question=None, next_action="apply", status="revising", questions_stopped=stopped
     )
     return {"outline_session": session, "current_step": "generate_outline"}
 

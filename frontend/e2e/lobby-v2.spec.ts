@@ -22,7 +22,7 @@ async function fixture(page: Page, options: { failCreate?: boolean; failInit?: b
       return send(route,{success:true,characters:path.includes("v2-b") ? [{...people[0],name:"新故事角色"},...people.slice(1)] : people});
     }
     if(path.endsWith("/capabilities")) return send(route,{models:["deepseek-flash","hy3"].map(model=>({id:model,name:model,model,provider:"deepseek",provider_name:"DeepSeek",configured:true})),features:{rag:{enabled:false},image:{enabled:false},static_tts:{enabled:false},streaming_tts:{enabled:false}}});
-    if(path.endsWith("/model-health")) { if(options.deferHealth) await held; return send(route,{models:[{model:"deepseek-flash",status:"normal",message:"响应正常"},{model:"hy3",status:"slow",message:"响应较慢"}]}); }
+    if(path.endsWith("/model-health") || path.endsWith("/model-health/refresh")) { if(options.deferHealth) await held; return send(route,{models:[{model:"deepseek-flash",status:"normal",message:"响应正常"},{model:"hy3",status:"slow",message:"响应较慢"}]}); }
     if(path.endsWith("/create")) {
       seen.creates++; seen.body=route.request().postDataJSON();
       if(options.failCreate && seen.creates===1) return send(route,{success:false,error:"创建失败，请重试"});
@@ -201,7 +201,7 @@ test.describe("动态显现",()=>{
   });
 });
 
-test("测速晚到不覆盖手动模型配置",async({page})=>{
+test("测速晚到保留自动及手动模型配置",async({page})=>{
   const seen=await fixture(page,{deferHealth:true});
   await page.getByRole("button",{name:"打开剧本 雾中来信"}).click();
   await page.getByRole("button",{name:"扮演 陆鸣",exact:true}).click();
@@ -210,9 +210,14 @@ test("测速晚到不覆盖手动模型配置",async({page})=>{
   await page.getByRole("option",{name:"deepseek-flash",exact:true}).click();
   await model.click();
   await page.getByRole("option",{name:"hy3",exact:true}).click();
+  const before = await page.getByRole("combobox").allTextContents();
   seen.release();
-  await expect(page.getByRole("status").filter({hasText:"响应较慢"})).toBeVisible();
+  await expect(model.locator("..").getByRole("status")).toHaveText("响应较慢");
   await expect(model).toHaveText("hy3");
+  await expect(page.getByRole("combobox")).toHaveText(before);
+  await page.getByRole("button", {name:"重新进行模型测速"}).click();
+  await expect(page.getByRole("status").filter({hasText:"测速已更新"})).toBeVisible();
+  await expect(page.getByRole("combobox")).toHaveText(before);
   await expect(page.getByRole("button",{name:"走进故事"})).toBeEnabled();
 });
 test("初始资料慢请求期间保持准备遮罩，数据完成才切换",async({page})=>{

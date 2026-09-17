@@ -59,7 +59,17 @@ class Direction(BaseModel):
 
 
 class OutlineAction(BaseModel):
-    action: Literal["answer", "pause", "continue", "stop_questions", "rewrite", "retry", "save"]
+    action: Literal[
+        "answer",
+        "pause",
+        "continue",
+        "stop_questions",
+        "rewrite",
+        "retry",
+        "save",
+        "revise",
+        "undo",
+    ]
     request_id: str = Field(min_length=8, max_length=80)
     expected_revision: int = Field(ge=1)
     question_id: str | None = None
@@ -70,6 +80,8 @@ class OutlineAction(BaseModel):
 
     @model_validator(mode="after")
     def valid_answer(self):
+        if self.action == "revise" and not self.other_text.strip():
+            raise ValueError("请输入补充想法或希望修改的设定")
         if self.action == "save" and (self.content is None or not self.content.strip()):
             raise ValueError("大纲内容不能为空")
         if self.action in {"answer", "rewrite"}:
@@ -87,6 +99,9 @@ def new_session() -> dict:
         "status": "writing",
         "segments": [],
         "decisions": [],
+        "canon": [],
+        "changes": [],
+        "undo_stack": [],
         "pending_question": None,
         "unresolved": [],
         "questions_asked": 0,

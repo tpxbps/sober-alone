@@ -106,6 +106,7 @@ class SingleCharacterResult(BaseModel):
         default="",
         description="仅本人可见的真人角色速览，约200-350字，按身份、亲历、牵挂、疑问分段，只提炼个人稿，不写AI指令",
     )
+    tts_voice_id: str = Field(default="", description="从当前可用音色列表选择最贴合角色的音色 ID")
     step_voice_id: str = Field(
         default="",
         description="为该角色选择最适合的 TTS 音色 ID（从可用音色列表中选取）",

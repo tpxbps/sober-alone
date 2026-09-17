@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Literal
 
@@ -17,7 +18,7 @@ from app.game.content_quality import (
     script_content,
 )
 
-QUALITY_CHECK_VERSION = "authoring-quality-v2"
+QUALITY_CHECK_VERSION = "authoring-quality-v3"
 logger = logging.getLogger(__name__)
 
 
@@ -102,6 +103,55 @@ def quality_approved(state: dict) -> bool:
     )
 
 
+def finding_target(content: dict, field: str) -> dict:
+    """Translate canonical, ID-sorted paths once; UI never treats indexes as identity."""
+    labels = {
+        "character_script": "个人剧本",
+        "character_script_summary": "角色速览",
+        "system_prompt": "AI 扮演资料",
+        "profile": "公开简介",
+        "overview": "大厅简介",
+        "description": "详情介绍",
+        "full_truth": "完整真相",
+        "title": "标题",
+    }
+    role = re.match(r"characters\[(\d+)\]\.(.+)", field)
+    if role:
+        character = content["characters"][int(role[1])]
+        return {
+            "section": "characters",
+            "entity_id": character["character_id"],
+            "field": role[2],
+            "label": f"角色 → {character['name']} → {labels.get(role[2], '基本信息')}",
+        }
+    clue = re.match(r"clue_stages\[(\d+)\](?:\.items\[(\d+)\])?\.(.+)", field)
+    if clue:
+        stage = content["clue_stages"][int(clue[1])]
+        item = stage["items"][int(clue[2])] if clue[2] is not None else None
+        return {
+            "section": "clues",
+            "entity_id": item["id"] if item else str(stage["stage"]),
+            "stage": stage["stage"],
+            "field": clue[3],
+            "label": f"分轮线索 → 第 {stage['stage']} 轮"
+            + (f" → {item['summary']}" if item else " → 讨论提示"),
+        }
+    section = (
+        "truth"
+        if field.startswith(("full_truth", "ending_config"))
+        else "host"
+        if field.startswith("game_full_process")
+        else "public"
+    )
+    return {
+        "section": section,
+        "field": field,
+        "label": {"truth": "真相与结局", "host": "主持流程", "public": "公开介绍"}[section]
+        + " → "
+        + labels.get(field, "相关内容"),
+    }
+
+
 async def check_game_quality(state: dict) -> dict:
     import json
     import uuid
@@ -113,8 +163,9 @@ async def check_game_quality(state: dict) -> dict:
         "capability_version": CAPABILITY_VERSION,
         "check_version": QUALITY_CHECK_VERSION,
         "checked_at": datetime.now(timezone.utc).isoformat(),
-        "model": settings.SCRIPT_EDITOR_MODEL or "deepseek-flash",
+        "model": settings.get_script_review_model(),
         "findings": [],
+        "source_sections": state.get("game_data_sections", {}),
     }
     failure_reason = "model_or_parse_error"
     try:
@@ -135,13 +186,21 @@ async def check_game_quality(state: dict) -> dict:
         llm = create_llm(
             model=report["model"],
             temperature=0.1,
-            timeout=180,
-            max_retries=1,
+            timeout=240,
+            max_retries=0,
             disable_thinking=True,
         )
+        if settings.INFERENCE_BACKEND == "tokendance":
+            # Consume provider SSE internally; ainvoke still returns one fully
+            # parsed result, so an interrupted stream cannot approve partial data.
+            llm = llm.model_copy(update={"streaming": True})
         result = await asyncio.wait_for(
             llm.with_structured_output(
-                result_schema, method="function_calling", tool_choice="auto"
+                result_schema,
+                method="function_calling",
+                tool_choice=result_schema.__name__
+                if settings.INFERENCE_BACKEND == "tokendance"
+                else "auto",
             ).ainvoke(
                 [
                     {
@@ -167,7 +226,10 @@ async def check_game_quality(state: dict) -> dict:
                         "输出前逐条反证：若影响以‘如果私有字段公开/被别的角色看到’为前提，该前提不成立，删除此项。"
                         "同一角色自己的多个私有字段重复记录其已知秘密不算泄密；公开简介暗示有人隐瞒心事也不等于公布秘密。"
                         "凶手可以说谎，不能将已标明的谎言当作作者事实矛盾；合理嫌疑、误导和相互印证的证据是推理材料。"
-                        "修改建议不得发明角色没有经历过的离场、行动或物证来制造辩解。",
+                        "修改建议不得发明角色没有经历过的离场、行动或物证来制造辩解。"
+                        "本次是可选的一次性关键错误检查，只报告明确矛盾、明确泄底或投票前缺少决定性证据。"
+                        "不报告润色偏好、普通节奏建议、正常分轮悬念。声称遗漏前必须核对同字段全部片段及同义表达；"
+                        "引文已经包含该事实就不能报告缺失。无法用原文证明时不要报告。",
                     },
                     {
                         "role": "system",
@@ -186,7 +248,7 @@ async def check_game_quality(state: dict) -> dict:
                     },
                 ]
             ),
-            timeout=240,
+            timeout=300,
         )
         failure_reason = "unverifiable_evidence"
         raw = result.model_dump() if isinstance(result, BaseModel) else result
@@ -208,7 +270,11 @@ async def check_game_quality(state: dict) -> dict:
                 or finding.evidence not in source
             ):
                 raise ValueError("审稿意见无法定位到原文，请重试检查")
-        report["findings"] = [finding.model_dump() for finding in result.findings]
+        report["findings"] = [
+            {**finding.model_dump(), "target": finding_target(content, finding.field)}
+            for finding in result.findings
+            if finding.severity != "minor"
+        ]
         report["status"] = (
             "blocked"
             if any(f.severity in ("critical", "major") for f in result.findings)
@@ -222,7 +288,7 @@ async def check_game_quality(state: dict) -> dict:
         report["status"] = "incomplete"
         report["failure_reason"] = failure_reason
         report["error"] = (
-            "质量检查未完成（超时、模型异常或报告无法验证）。可重试，或明确接受未检查风险。"
+            "本次质量检查未完成（超时、模型异常或报告无法验证）。您仍可直接进入下一步。"
         )
     return {
         "current_step": "check_game_quality",
@@ -236,22 +302,10 @@ def review_quality(state: dict) -> dict:
     response = interrupt(
         {"step": "review_quality", "step_label": "质量检查结果", "quality_report": report}
     )
-    action = response.get("action", "revise")
-    acceptance = {}
-    if action == "accept_risk":
-        if response.get("quality_report_id") != report.get("report_id") or report.get(
-            "content_fingerprint"
-        ) != quality_fingerprint(state):
-            raise ValueError("质量报告已失效，请重新检查")
-        acceptance = {
-            "report_id": report["report_id"],
-            "content_fingerprint": report["content_fingerprint"],
-            "accepted_at": datetime.now(timezone.utc).isoformat(),
-        }
-    elif action not in ("retry_quality", "revise"):
-        raise ValueError("请选择修改、重新检查或明确接受风险")
+    # Legacy interrupts remain resumable, but never impose a quality gate or rerun.
     return {
         "current_step": "review_quality",
-        "_review_action": action,
-        "quality_acceptance": acceptance,
+        "_review_action": response.get("action", "revise"),
+        "quality_check_attempted": True,
+        "quality_acceptance": {},
     }

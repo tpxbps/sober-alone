@@ -4,12 +4,15 @@ import { Markdown } from "@/components/ui/Markdown";
 import { useEditorStore } from "@/stores/editorStore";
 import type { OutlineQuestion, OutlineSession } from "@/types/outline";
 import { useOutlineSession } from "./useOutlineSession";
+import { useTextDraft } from './useTextDraft';
+import { RefineButton } from './RefineButton';
 
 const statusLabels: Record<string, string> = {
   writing: "正在撰写", directing: "正在评估大纲后续发展…",
   awaiting_answer: "等待你的选择", finalizing: "正在整理完整大纲",
   checking: "正在完成大纲", ready: "大纲已整理，等待你确认",
   needs_revision: "大纲已整理，等待你确认",
+  revising: "正在修订设定与关联情节…",
 };
 type Draft = { option?: string; text: string };
 const emptyDraft: Draft = { text: "" };
@@ -56,7 +59,7 @@ export function OutlineWorkspace({ threadId }: { threadId: string | null }) {
   const [rewriting, setRewriting] = useState<OutlineQuestion | null>(null);
   const [viewVersion, setViewVersion] = useState<number | null>(null);
   const [editing, setEditing] = useState(false);
-  const [editedOutline, setEditedOutline] = useState("");
+  const [revisionInput, setRevisionInput] = useTextDraft('outline-revision-input', '', '');
   const [saved, setSaved] = useState(false);
   const [hasNew, setHasNew] = useState(false);
   const scroll = useRef<HTMLDivElement>(null);
@@ -75,6 +78,7 @@ export function OutlineWorkspace({ threadId }: { threadId: string | null }) {
   const workflowBusy = useEditorStore(s => s.isLoading);
   const disabled = busy || workflowBusy;
   const text = visible?.final_outline || (archived ? archived.outline : workflow?.outline) || visible?.segments.map(s => s.content).join("\n\n") || "";
+  const [editedOutline, setEditedOutline] = useTextDraft('review_outline', text, text);
   const activeError = error || progress?.error || storeError || "";
   const pending = session?.pending_question;
   const activeQuestion = rewriting || pending;
@@ -124,9 +128,9 @@ export function OutlineWorkspace({ threadId }: { threadId: string | null }) {
     return success;
   };
   const confirmOutline = async () => {
-    const content = editing ? editedOutline : text;
+    const content = editedOutline;
     if (disabled || !content.trim()) return;
-    if (editing && !await saveOutline()) return;
+    if (editedOutline !== text && !await saveOutline()) return;
     await resume("confirm", content);
   };
   const versions = [...new Set(history.map(cp => cp.state.outline_session?.revision).filter((v): v is number => Boolean(v)))];
@@ -203,7 +207,7 @@ export function OutlineWorkspace({ threadId }: { threadId: string | null }) {
             </div>}
           </> : editing && !archived ? <textarea aria-label="编辑完整大纲" value={editedOutline} disabled={disabled} onChange={e => { setEditedOutline(e.target.value); setSaved(false); }}
             className="min-h-[55vh] w-full rounded-xl border border-border bg-background p-4 text-sm leading-7 outline-none focus:border-primary" />
-            : <article className="rounded-xl border border-border/40 p-5"><Markdown>{live?.segment_id === "final" ? live.text : text || "正文将随创作逐段出现在这里。"}</Markdown>
+            : <article className="rounded-xl border border-border/40 p-5"><Markdown>{live?.segment_id === "final" ? live.text : (final && !archived ? editedOutline : text) || "正文将随创作逐段出现在这里。"}</Markdown>
               {live && live.segment_id !== "final" && <div className="mt-6 border-t border-border/40 pt-4"><p className="mb-2 text-xs text-primary">正在撰写</p><Markdown>{live.text}</Markdown></div>}
             </article>}
           {!archived && activeError && <div role="alert" className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm">
@@ -214,12 +218,28 @@ export function OutlineWorkspace({ threadId }: { threadId: string | null }) {
       {hasNew && <button onClick={() => { following.current = true; setHasNew(false); scroll.current?.scrollTo({ top: scroll.current.scrollHeight, behavior: "smooth" }); }}
         className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-border bg-background px-4 py-2 text-xs shadow-lg"><ArrowDown className="h-3 w-3" />回到最新</button>}
     </div>
+    {!archived && <div className="border-t border-border/40 bg-secondary/10 px-4 py-3">
+      {session?.changes?.length ? <div className="mb-2 flex items-start justify-between gap-3 text-sm">
+        <p role="status" className="text-muted-foreground">{session.changes[session.changes.length - 1].summary}</p>
+        <button disabled={disabled || !session.undo_stack?.length} onClick={() => void act({ action: 'undo' })} className="shrink-0 text-primary disabled:opacity-40">撤销修订</button>
+      </div> : null}
+      <form className="flex items-end gap-2" onSubmit={event => { event.preventDefault(); if (revisionInput.trim()) void act({ action: 'revise', other_text: revisionInput }).then(ok => { if (ok) setRevisionInput(''); }); }}>
+        <label className="min-w-0 flex-1 text-xs text-muted-foreground">补充想法或修改已有设定
+          <textarea aria-label="补充想法或修改已有设定" value={revisionInput} onChange={e => setRevisionInput(e.target.value)} disabled={disabled} rows={2} maxLength={8000}
+            placeholder="例如：他们一直是互利合作，没有长期胁迫。请同步调整相关动机和线索。"
+            className="mt-1 w-full resize-y rounded-lg border border-border bg-background p-2.5 text-sm focus:outline-primary" />
+        </label>
+        <button disabled={disabled || !revisionInput.trim()} className="mb-1 rounded-lg bg-primary px-4 py-2.5 text-sm text-primary-foreground disabled:opacity-40">应用修改</button>
+      </form>
+      <p className="mt-1 text-[11px] text-muted-foreground">随时补充或纠正前文。生成中提交修改，会从最近完整版本修订。</p>
+    </div>}
     {!archived && <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-border/40 px-4 py-3">
       <span className="text-xs text-muted-foreground" role="status">{disabled ? "正在处理…" : editing ? "修改后可保存；进入初稿时会自动保存" : saved ? "大纲已保存" : paused ? "创作已暂停" : statusLabels[session?.status || "writing"]}{stopped && !final ? " · AI将自动完成后续大纲创作" : ""}</span>
       <div className="flex flex-wrap items-center gap-2">
         {final ? <>
-          <button disabled={disabled} onClick={() => { if (!editing) { setEditedOutline(text); setTab("outline"); } setSaved(false); setEditing(!editing); }}
-            className="rounded-lg border border-border px-3 py-2 text-sm">{editing ? "取消编辑" : "编辑全文"}</button>
+          <button disabled={disabled} onClick={() => { setTab("outline"); setSaved(false); setEditing(!editing); }}
+            className="rounded-lg border border-border px-3 py-2 text-sm">{editing ? "预览" : "编辑全文"}</button>
+          <RefineButton step="review_outline" content={editedOutline} disabled={disabled} />
           {editing && <button disabled={disabled || !editedOutline.trim()} onClick={() => void saveOutline()}
             className="inline-flex items-center gap-1 rounded-lg border border-primary/40 px-3 py-2 text-sm text-primary disabled:opacity-40"><Save className="h-4 w-4" />保存大纲</button>}
           <button disabled={disabled || (editing && !editedOutline.trim())} onClick={() => void confirmOutline()}

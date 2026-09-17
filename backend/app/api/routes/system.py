@@ -31,3 +31,18 @@ async def model_health() -> dict:
 @router.post("/api/v1/system/model-health/refresh")
 async def refresh_model_health() -> dict:
     return await get_model_health(force_refresh=True, wait_for_completion=False)
+
+
+@router.get("/api/v1/system/voices")
+async def voices() -> dict:
+    from app.core.config import settings
+    from app.services.voices import MINIMAX_VOICES
+
+    return {
+        "provider": "minimax" if settings.INFERENCE_BACKEND == "tokendance" else "stepfun",
+        "voices": [
+            {"id": i, "label": label, "gender": gender} for i, label, gender in MINIMAX_VOICES
+        ]
+        if settings.INFERENCE_BACKEND == "tokendance"
+        else [],
+    }

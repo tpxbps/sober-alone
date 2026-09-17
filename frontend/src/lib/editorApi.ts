@@ -70,6 +70,10 @@ export const editorApi = {
     threadId: string,
     data: {
       action: string;
+      feedback?: string;
+      request_id?: string;
+      expected_checkpoint_id?: string;
+      asset_task_id?: string;
       content?: string;
       characters?: unknown[];
       character_scripts?: Record<string, string>;
@@ -181,6 +185,7 @@ export const editorApi = {
     onDone: () => void,
     onSafetyProgress?: (progress: { completed: number; total: number }) => void,
     onOutline?: (type: string, data: OutlineProgress | OutlineDelta) => void,
+    onWorkflow?: (data: import('@/types/editor').WorkflowProgress) => void,
   ): (() => void) => {
     const url = `${RAW_API_BASE}/script-editor/${threadId}/progress-stream`;
     const controller = new AbortController();
@@ -208,6 +213,7 @@ export const editorApi = {
             else if (parsed.type === 'convert_progress') onConvertProgress(parsed.data ?? null);
             else if (parsed.type === 'safety_progress') onSafetyProgress?.(parsed.data);
             else if (parsed.type === 'asset_progress') onAssetProgress(parsed.data ?? null);
+            else if (parsed.type === 'workflow_progress') onWorkflow?.(parsed.data);
             else if (parsed.type === 'done') {
               onDone();
               controller.abort();

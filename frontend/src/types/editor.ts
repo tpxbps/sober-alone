@@ -8,12 +8,17 @@ export interface StepInfo {
 }
 
 export interface QualityReport {
+  source_sections?: GameDataSections;
   report_id: string;
   content_fingerprint: string;
   status: "passed" | "warning" | "blocked" | "incomplete";
   error?: string;
-  findings: Array<{ severity: "critical" | "major" | "minor"; field: string; evidence: string; impact: string; suggestion: string }>;
+  findings: Array<{ severity: "critical" | "major" | "minor"; field: string; evidence: string; impact: string; suggestion: string; target?: QualityTarget }>;
 }
+
+export interface QualityTarget { section: string; entity_id?: string; stage?: number; field: string; label: string }
+export interface WorkflowProgress { operation_id: string; seq: number; current_step: string; finished: boolean }
+export interface SubmittedDraft { step: string; content?: string; gameData?: GameDataSections; humanReview?: string }
 
 export interface EditorInterruptInfo {
   failed?: boolean;
@@ -44,6 +49,10 @@ export interface EditorInterruptInfo {
 }
 
 export interface EditorWorkflowState {
+  refinement_counts?: Record<string, number>;
+  quality_check_attempted?: boolean;
+  asset_progress?: AssetProgress | null;
+  convert_progress?: AssetProgress | null;
   workflow_mode: "create" | "edit";
   script_title: string;
   script_id: string;
@@ -82,6 +91,7 @@ export interface EditorWorkflowState {
 }
 
 export interface StartWorkflowResponse {
+  checkpoint_id?: string;
   success: boolean;
   thread_id: string;
   script_id: string;
@@ -97,7 +107,7 @@ export interface EditorOperationAccepted {
   operation_id: string;
   operation_status: 'queued' | 'running' | 'complete' | 'failed' | 'paused';
   target_step: string;
-  progress?: { message?: string; percent?: number };
+  progress?: { message?: string; percent?: number; workflow?: WorkflowProgress };
   error_message?: string;
 }
 
@@ -105,6 +115,7 @@ export type EditorOperationResponse = EditorOperationAccepted &
   Partial<StartWorkflowResponse & ResumeWorkflowResponse>;
 
 export interface WorkflowStateResponse {
+  checkpoint_id?: string;
   outline_progress?: OutlineProgress | null;
   success: boolean;
   thread_id: string;
@@ -115,6 +126,7 @@ export interface WorkflowStateResponse {
 }
 
 export interface ResumeWorkflowResponse {
+  checkpoint_id?: string;
   outline_progress?: OutlineProgress | null;
   success: boolean;
   thread_id: string;
@@ -264,6 +276,9 @@ export interface AssetPhase {
 }
 
 export interface AssetProgress {
+  operation_id?: string;
+  seq?: number;
+  current_step?: string;
   phases: AssetPhase[];
   isComplete: boolean;
 }

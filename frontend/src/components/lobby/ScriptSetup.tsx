@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as Select from "@radix-ui/react-select";
 import { ArrowLeft, ArrowRight, Check, ChevronDown, Clock3, LoaderCircle, Users, Zap } from "lucide-react";
 import { getScriptDisplayTags } from "@/lib/scriptDisplay";
@@ -12,6 +12,7 @@ export function ScriptSetup({ script, quiet, onBack, onStartGame, onBusyChange }
 }) {
   const setup = useScriptSetup(script.script_id, quiet, onStartGame);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const initialModelFocus = useRef(false);
   const busy = setup.phase !== "idle";
   useEffect(() => { onBusyChange(busy); return () => onBusyChange(false); }, [busy, onBusyChange]);
   const difficulty = DIFFICULTY_COLORS[script.difficulty] || DIFFICULTY_COLORS[1];
@@ -51,15 +52,29 @@ export function ScriptSetup({ script, quiet, onBack, onStartGame, onBusyChange }
                   {expanded === char.character_id && <p className="setup-profile-full">{char.profile}</p>}
                   {setup.human && !selected && <div className="setup-model">
                     <label id={`model-label-${char.character_id}`}>AI 扮演模型</label>
-                    {setup.models.length ? <Select.Root value={modelId} onValueChange={value => setup.selectModel(char.character_id, value)} disabled={busy}>
+                    {setup.models.length ? <Select.Root value={modelId} onValueChange={value => setup.selectModel(char.character_id, value)} onOpenChange={open => { initialModelFocus.current = open; }} disabled={busy}>
                       <Select.Trigger className="setup-model-trigger" aria-label={`${char.name}的 AI 模型`}><Select.Value placeholder="选择模型" /><Select.Icon><ChevronDown size={14} /></Select.Icon></Select.Trigger>
                       <Select.Portal><Select.Content className="setup-model-menu" position="popper" sideOffset={5} collisionPadding={12} onCloseAutoFocus={event => {
                         // Radix restores focus after unmount. A newer navigation may
                         // already have focused another control during that interval.
                         const focused = document.activeElement;
                         if (focused instanceof HTMLElement && focused !== document.body && focused !== document.documentElement && !(event.target instanceof HTMLElement && event.target.contains(focused))) event.preventDefault();
-                      }}><Select.Viewport>
-                        {setup.models.map(model => <Select.Item aria-label={model.name} key={model.id} value={model.id} className="setup-model-option"><Select.ItemText>{model.name}</Select.ItemText><span>{setup.health[model.id]?.status === "normal" ? "" : setup.health[model.id]?.status === "slow" ? "响应较慢" : setup.health[model.id]?.status === "timeout" ? "测速超时" : setup.health[model.id]?.status === "unavailable" ? "当前不可用" : ""}</span><Select.ItemIndicator><Check size={13} /></Select.ItemIndicator></Select.Item>)}
+                      }}><Select.Viewport onFocusCapture={event => {
+                        if (!initialModelFocus.current) return;
+                        initialModelFocus.current = false;
+                        if (!setup.models.some(model => model.tier === "frontier")) return;
+                        // Initial focus otherwise scrolls the selected standard model
+                        // into view and clips the frontier group on short screens.
+                        event.currentTarget.querySelector<HTMLElement>('[role="option"]')?.focus({ preventScroll: true });
+                        event.currentTarget.scrollTop = 0;
+                        event.currentTarget.closest<HTMLElement>('[role="listbox"]')?.scrollTo({ top: 0 });
+                      }}>
+                        {([true, false] as const).map(frontier => {
+                          const models = setup.models.filter(model => (model.tier === "frontier") === frontier);
+                          return models.length > 0 && <Select.Group key={String(frontier)} className={frontier ? "setup-frontier-models" : undefined} aria-label={frontier ? "前沿模型" : "常用模型"}>
+                            {models.map(model => <Select.Item aria-label={model.name} key={model.id} value={model.id} className="setup-model-option"><Select.ItemText>{model.name}</Select.ItemText><span>{setup.health[model.id]?.status === "normal" ? "" : setup.health[model.id]?.status === "slow" ? "响应较慢" : setup.health[model.id]?.status === "timeout" ? "测速超时" : setup.health[model.id]?.status === "unavailable" ? "当前不可用" : ""}</span><Select.ItemIndicator><Check size={13} /></Select.ItemIndicator></Select.Item>)}
+                          </Select.Group>;
+                        })}
                       </Select.Viewport></Select.Content></Select.Portal>
                     </Select.Root> : <p role="status" className="setup-model-warning">暂不可分配 AI 模型：{setup.modelReason}</p>}
                     {health && health.status !== "normal" && <p role="status" className="setup-model-warning">{health.status === "unavailable" ? "模型暂不可用，建议选择其他模型" : health.message}</p>}

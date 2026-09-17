@@ -7,6 +7,7 @@ from langchain.tools import ToolRuntime, tool
 from langgraph.config import get_stream_writer
 from pydantic import BaseModel, Field
 
+from app.core.inference import InferenceRecoveryError, raise_for_inference_recovery
 from app.rag.retriever import get_retriever
 
 
@@ -59,7 +60,10 @@ async def recall_personal_script_memory(query: str, runtime: ToolRuntime) -> str
             if personal_script
             else []
         )
-    except Exception:
+    except InferenceRecoveryError:
+        raise
+    except Exception as exc:
+        raise_for_inference_recovery(exc)
         results = []
     if not results:
         return (

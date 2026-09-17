@@ -6,6 +6,7 @@ export interface ProviderCapability {
   model: string;
   configured: boolean;
   reason: string;
+  tier?: 'standard' | 'frontier';
 }
 
 export interface FeatureCapability {

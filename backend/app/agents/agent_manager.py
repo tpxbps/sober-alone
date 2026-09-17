@@ -11,6 +11,11 @@ from typing import Any, cast
 from app.agents.agent_player import AgentPlayer
 from app.agents.reaction import REACTION_TASK_TIMEOUT_SECONDS
 from app.core.config import settings
+from app.core.inference import (
+    InferenceRecoveryError,
+    gather_inference,
+    raise_for_inference_recovery,
+)
 
 
 @dataclass
@@ -99,7 +104,7 @@ class AgentManager:
 
             if not is_human:
                 rag_enabled = False
-                if settings.ZHIPUAI_API_KEY:
+                if settings.get_api_key("zhipuai"):
                     try:
                         from app.rag.retriever import get_retriever
                         from app.rag.revision import script_digest
@@ -109,7 +114,10 @@ class AgentManager:
                             character_id,
                             script_digest(char.get("character_script", "")),
                         )
-                    except Exception:
+                    except InferenceRecoveryError:
+                        raise
+                    except Exception as exc:
+                        raise_for_inference_recovery(exc)
                         pass
                 # 创建AI Agent
                 agent = AgentPlayer(
@@ -256,10 +264,12 @@ class AgentManager:
 
         if agent_tasks:
             # 使用wait_for给每个任务添加超时，并收集结果
-            results = await asyncio.gather(*agent_tasks, return_exceptions=True)
+            results = await gather_inference(*agent_tasks, return_exceptions=True)
 
             for i, char_id in enumerate(agent_ids):
                 result = results[i]
+                if isinstance(result, InferenceRecoveryError):
+                    raise result
                 if isinstance(result, Exception):
                     reactions[char_id] = {"error": str(result)}
                 elif isinstance(result, dict) and "error" in result:
@@ -308,7 +318,10 @@ class AgentManager:
                 return cast(dict[str, Any], dict(result))
         except TimeoutError:
             return {"error": f"Reaction timed out after {timeout}s"}
+        except InferenceRecoveryError:
+            raise
         except Exception as e:
+            raise_for_inference_recovery(e)
             return {"error": str(e)}
 
     async def make_ai_speak(self, character_id: str, game_state: dict[str, Any], stage: str):

@@ -41,6 +41,7 @@ from app.agents.reaction import (
     build_reaction_system_prompt,
 )
 from app.core.config import settings
+from app.core.inference import InferenceRecoveryError, raise_for_inference_recovery
 from app.core.llm_factory import create_summary_llm
 from app.game.clues import stage_public_clues
 
@@ -148,7 +149,9 @@ class AgentPlayer:
         self.session_id = session_id
         self.system_prompt = system_prompt
         self.personal_script = personal_script
-        self.rag_enabled = bool(settings.ZHIPUAI_API_KEY) if rag_enabled is None else rag_enabled
+        self.rag_enabled = (
+            bool(settings.get_api_key("zhipuai")) if rag_enabled is None else rag_enabled
+        )
 
         # LLM配置
         self.llm_provider = llm_provider or settings.DEFAULT_LLM_PROVIDER
@@ -173,7 +176,10 @@ class AgentPlayer:
             return create_game_model(
                 self.llm_model, "speech", api_key=settings.get_api_key(self.llm_provider.lower())
             )
-        except Exception:
+        except InferenceRecoveryError:
+            raise
+        except Exception as exc:
+            raise_for_inference_recovery(exc)
             # 如果初始化失败，使用默认模型
             return create_game_model(settings.get_llm_model_name(), "speech")
 
@@ -181,7 +187,10 @@ class AgentPlayer:
         """初始化用于摘要的轻量级LLM模型"""
         try:
             return create_summary_llm()
-        except Exception:
+        except InferenceRecoveryError:
+            raise
+        except Exception as exc:
+            raise_for_inference_recovery(exc)
             # 回退到主模型
             return self._init_model()
 
@@ -211,7 +220,10 @@ class AgentPlayer:
                 "reaction",
                 api_key=settings.get_api_key(self.llm_provider.lower()),
             )
-        except Exception:
+        except InferenceRecoveryError:
+            raise
+        except Exception as exc:
+            raise_for_inference_recovery(exc)
             reaction_model = self._init_model()
 
         # Reactions are typed inference results, not optional business-tool calls.
@@ -397,7 +409,10 @@ submit_final_vote(suspect_name="角色全名", reasoning="1-2句投票理由")
             else:
                 return ""
 
+        except InferenceRecoveryError:
+            raise
         except Exception as e:
+            raise_for_inference_recovery(e)
             print(f"Error building knowledge context: {e}")
             return ""
 
@@ -492,7 +507,10 @@ submit_final_vote(suspect_name="角色全名", reasoning="1-2句投票理由")
                     async for result in self._process_custom_stream(data):
                         yield result
 
+        except InferenceRecoveryError:
+            raise
         except Exception as e:
+            raise_for_inference_recovery(e)
             print(f"Error in stream: {e}")
             yield StreamError(message=str(e))
         finally:
@@ -561,7 +579,8 @@ submit_final_vote(suspect_name="角色全名", reasoning="1-2句投票理由")
 
 【格式纠正】上次返回格式不符合要求。suspicion_changes 和
 suspected_by_changes 必须是数组；没有变化时返回空数组。main_perspective 必须是字符串，
-不要返回数组或对象；score 必须是 0 到 1 的绝对怀疑程度。请重新返回完整结构。"""
+不要返回数组或对象；score 必须是 0 到 1 的绝对怀疑程度。
+target 和 suspecter 只能是合法的其他角色，禁止填自己的名字。请重新返回完整结构。"""
                 if is_human:
                     prompt = prompt.replace("main_perspective 必须是字符串，", "")
                 try:
@@ -611,7 +630,10 @@ suspected_by_changes 必须是数组；没有变化时返回空数组。main_per
                         self.reaction_llm_model,
                         type(exc).__name__,
                     )
+                except InferenceRecoveryError:
+                    raise
                 except Exception as exc:
+                    raise_for_inference_recovery(exc)
                     logger.warning(
                         "Reaction analysis failed character=%s model=%s error=%s "
                         "status=%s request_id=%s",

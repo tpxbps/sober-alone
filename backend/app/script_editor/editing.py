@@ -574,13 +574,13 @@ def prepare_asset_plan(state: ScriptGenState) -> dict[str, Any]:
         missing = _artifact_missing(script_id, task_id)
         phase = task["phase"]
         if phase == "vectorize":
-            available = bool(settings.ZHIPUAI_API_KEY)
+            available = bool(settings.get_api_key("zhipuai"))
             reason = "未配置 ZHIPUAI_API_KEY"
         elif phase == "image":
-            available = bool(settings.DOUBAO_API_KEY)
+            available = bool(settings.get_api_key("bytedance"))
             reason = "未配置 DOUBAO_API_KEY"
         else:
-            available = bool(settings.MIMO_API_KEY)
+            available = bool(settings.get_api_key("mimo"))
             reason = "未配置 MIMO_API_KEY"
             if task_id.startswith("tts_") and not task_id.startswith(("tts_sys_", "tts_ending_")):
                 if not task["dependencies"].get("script"):

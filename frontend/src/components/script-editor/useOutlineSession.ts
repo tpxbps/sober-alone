@@ -30,6 +30,7 @@ export function useOutlineSession(threadId: string | null) {
     if (session) {
       useEditorStore.setState({
         workflowState: response.state, interruptInfo: response.interrupt, isStarting: false,
+        checkpointId: response.checkpoint_id,
         currentStep: response.current_step === "init" ? "generate_outline" : response.current_step, scriptTitle: response.state.script_title,
         error: response.outline_progress?.error || null,
       });
@@ -90,7 +91,7 @@ export function useOutlineSession(threadId: string | null) {
           if (result.operation_status === "failed") throw new Error(result.error_message || "大纲保存失败，请重试");
           if (result.operation_status === "complete" && result.state) {
             if (result.outline_progress) update(result.outline_progress);
-            useEditorStore.setState({ workflowState: result.state, interruptInfo: result.interrupt, error: null });
+            useEditorStore.setState({ workflowState: result.state, interruptInfo: result.interrupt, checkpointId: result.checkpoint_id, error: null });
             break;
           }
           if (Date.now() >= deadline) throw new Error("尚未确认保存结果，请稍后重试；编辑内容已保留");

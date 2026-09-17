@@ -9,6 +9,7 @@ import logging
 import re
 from collections.abc import Callable, Coroutine
 
+from app.core.inference import gather_inference, raise_for_inference_recovery
 from app.game.clues import render_clue_tts
 from app.game.endings import ending_audio_tasks
 from app.services.tts_service import TTSService
@@ -331,11 +332,12 @@ async def generate_script_tts(
             await coro
             if task_callback:
                 task_callback(task_id, "complete")
-        except Exception:
+        except Exception as error:
+            raise_for_inference_recovery(error)
             if task_callback:
                 task_callback(task_id, "failed")
 
-    await asyncio.gather(
+    await gather_inference(
         *[_run_with_callback(tid, coro, delay=i * 0.2) for i, (tid, coro) in enumerate(tasks)],
         return_exceptions=True,
     )

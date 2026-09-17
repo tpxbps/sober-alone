@@ -8,6 +8,8 @@ import logging
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
+from app.core.config import settings
+from app.core.inference import raise_for_inference_recovery
 from app.script_editor.nodes.utils import call_llm
 from app.script_editor.prompts.templates import get_prompt
 from app.script_editor.state import STEP_GENERATE_OUTLINE, ScriptGenState
@@ -33,6 +35,10 @@ async def generate_outline(state: ScriptGenState) -> dict:
     system_prompt = get_prompt("generate_outline", state)
     user_content = f"我的剧本创意：\n\n{state.get('user_idea', '')}"
 
+    from app.script_editor.services.execution import creative_context
+
+    user_content += creative_context(state, "generate_outline")
+
     # 尝试结构化输出（获取标题+大纲）
     title = ""
     outline = ""
@@ -40,10 +46,17 @@ async def generate_outline(state: ScriptGenState) -> dict:
         from app.core.llm_factory import create_llm
 
         llm = create_llm(
-            model="deepseek-flash", temperature=0.85, timeout=180, disable_thinking=True
+            model=settings.SCRIPT_EDITOR_MODEL or "deepseek-flash",
+            temperature=0.85,
+            timeout=180,
+            disable_thinking=True,
         )
         structured_llm = llm.with_structured_output(
-            OutlineResult, method="function_calling", tool_choice="auto"
+            OutlineResult,
+            method="function_calling",
+            tool_choice=OutlineResult.__name__
+            if settings.INFERENCE_BACKEND == "tokendance"
+            else "auto",
         )
         result = await asyncio.wait_for(
             structured_llm.ainvoke(
@@ -58,6 +71,7 @@ async def generate_outline(state: ScriptGenState) -> dict:
         outline = result.content.strip()  # type: ignore[union-attr]
         logger.info(f"Outline structured output OK, title: {title}")
     except Exception as e:
+        raise_for_inference_recovery(e)
         logger.warning(f"Outline structured output failed, falling back to text: {e}")
         outline = await call_llm(system_prompt, user_content)
 

@@ -1,10 +1,12 @@
 """Durable speech commit, per-listener reactions and exact observation consumption."""
 
+import asyncio
 from datetime import datetime
 
 from sqlalchemy import select
 
 from app.agents.role_state import apply_beliefs, normalize_beliefs, observations, put_observation
+from app.core.inference import InferenceRecoveryError, raise_for_inference_recovery
 from app.db.models import GameRecord, GameSession, PlayerState
 from app.game.clues import parse_clue_citations, stage_public_clues
 
@@ -161,8 +163,19 @@ async def finish_pending(controller, db):
                 contexts=contexts,
                 target_ids=targets,
             )
-        except Exception:
-            pass
+        except asyncio.CancelledError:
+            session.pending_speech = pending
+            await db.commit()
+            raise
+        except Exception as error:
+            try:
+                raise_for_inference_recovery(error)
+            except InferenceRecoveryError:
+                # Account recovery is not a failed reaction attempt. Keep the
+                # committed speech pending until its funding can be restored.
+                session.pending_speech = pending
+                await db.commit()
+                raise
     for cid in remaining:
         player = players[cid]
         value = reactions.get(cid, {})

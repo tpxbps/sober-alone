@@ -123,6 +123,11 @@ async def test_conversion_retries_only_failed_tasks_and_preserves_successes(monk
     monkeypatch.setattr(service.asyncio, "sleep", no_sleep)
     monkeypatch.setattr(service, "_get_structured_llm", lambda: None)
 
+    async def plan(_llm, state):
+        return {"characters": state["characters"], "facts": []}
+
+    monkeypatch.setattr(service, "extract_plan", plan)
+
     async def scenes(*args):
         counts["scenes"] += 1
         if counts["scenes"] <= 3:

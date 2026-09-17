@@ -18,6 +18,13 @@ logger = logging.getLogger(__name__)
 class StreamingTTSSession:
     """管理一个 StepFun WebSocket TTS 流式会话"""
 
+    def __new__(cls):
+        if settings.INFERENCE_BACKEND == "tokendance":
+            from app.services.minimax_tts import MiniMaxTTSSession
+
+            return MiniMaxTTSSession()
+        return super().__new__(cls)
+
     def __init__(self):
         self._ws = None
         self._session_id: str | None = None

@@ -14,7 +14,7 @@ export function PromptSection({
   hideRegenerate?: boolean;
   editedPromptRef?: { current: string };
 }) {
-  const [showPrompt, setShowPrompt] = useState(true);
+  const [showPrompt, setShowPrompt] = useState(false);
   const [promptEditing, setPromptEditing] = useState(false);
   const [promptDraft, setPromptDraft] = useState("");
   const [savedPrompt, setSavedPrompt] = useState<string | null>(null);

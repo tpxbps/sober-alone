@@ -10,6 +10,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.core.config import settings
+from app.core.inference import raise_for_inference_recovery
 from app.core.llm_factory import create_llm
 
 logger = logging.getLogger(__name__)
@@ -24,7 +25,9 @@ BASE_DELAY = 5  # 秒，指数退避基数
 def get_script_llm() -> BaseChatModel:
     """获取剧本创作用的 LLM 实例"""
     model_name = getattr(settings, "SCRIPT_EDITOR_MODEL", None) or DEFAULT_SCRIPT_MODEL
-    return create_llm(model=model_name, temperature=0.85)
+    # A full draft may take longer than a game utterance. Allow the provider to
+    # finish before retrying an otherwise healthy long-form request.
+    return create_llm(model=model_name, temperature=0.85, timeout=240, max_retries=0)
 
 
 async def call_llm(
@@ -55,6 +58,9 @@ async def call_llm(
     for attempt in range(MAX_RETRIES):
         try:
             response = await llm.ainvoke(messages)
+            from app.script_editor.services.execution import observe_model
+
+            observe_model(response)
             content = response.content
             if isinstance(content, list):
                 # Extract text from content blocks
@@ -64,6 +70,7 @@ async def call_llm(
                 )
             return content
         except Exception as e:
+            raise_for_inference_recovery(e)
             last_error = e
             error_str = str(e)
 

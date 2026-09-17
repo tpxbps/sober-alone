@@ -1,12 +1,15 @@
 """Conversion orchestration behind the LangGraph node facade."""
 
 import asyncio
+import json
 import logging
 import uuid
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from app.core.config import settings
+from app.core.inference import gather_inference, raise_for_inference_recovery
 from app.game.clues import derive_game_process, normalize_clue_stages, render_clue_markdown
 from app.script_editor.conversion.contracts import (
     CharacterDiscoveryResult,
@@ -14,6 +17,16 @@ from app.script_editor.conversion.contracts import (
     ScenesResult,
     ScriptMetadata,
     SingleCharacterResult,
+)
+from app.script_editor.conversion.disclosure import (
+    PersonalScript,
+    PublicCharacter,
+    PublicScenes,
+    RoleReading,
+    TruthScenes,
+    audience_material,
+    extract_plan,
+    invoke,
 )
 from app.script_editor.conversion.progress import (
     _add_character_tasks,
@@ -35,11 +48,22 @@ from app.script_editor.state import STEP_CONVERT, ScriptGenState
 logger = logging.getLogger(__name__)
 
 
+def _character_prompt(name: str) -> str:
+    prompt = CHARACTER_SYSTEM.format(char_name=name)
+    if settings.INFERENCE_BACKEND == "tokendance":
+        from app.services.voices import MINIMAX_VOICES
+
+        prompt = prompt.split("### step_voice_id")[0]
+        prompt += "\n### tts_voice_id\n结合性别、年龄、职业与性格，从以下音色选择一项：\n"
+        prompt += "\n".join(f"{i}: {label}（{gender}）" for i, label, gender in MINIMAX_VOICES)
+    return prompt
+
+
 def _get_structured_llm():
     from app.core.llm_factory import create_llm
 
     return create_llm(
-        model="deepseek-flash",
+        model=settings.SCRIPT_EDITOR_MODEL or "deepseek-flash",
         temperature=0.5,
         timeout=180,
         max_retries=0,
@@ -106,6 +130,10 @@ def _fallback_step_voice(gender: str) -> str:
 
 def _validate_step_voice(voice_id: str, gender: str) -> str:
     """Validate LLM-returned step_voice_id; fallback if invalid."""
+    if settings.INFERENCE_BACKEND == "tokendance":
+        from app.services.voices import resolve_minimax_voice
+
+        return resolve_minimax_voice(voice_id, {"gender": gender})
     if voice_id and voice_id in ALL_STEP_VOICES:
         # Cross-check: male voices for male chars, female voices for female chars
         g = (gender or "").strip()
@@ -138,7 +166,11 @@ async def _discover_characters(
     """
     base_llm = _get_structured_llm()
     llm = base_llm.with_structured_output(
-        CharacterDiscoveryResult, method="function_calling", tool_choice="auto"
+        CharacterDiscoveryResult,
+        method="function_calling",
+        tool_choice=CharacterDiscoveryResult.__name__
+        if settings.INFERENCE_BACKEND == "tokendance"
+        else "auto",
     )
 
     user_prompt = (
@@ -214,12 +246,16 @@ async def _run_game_clues(base_llm, script_id: str, state: ScriptGenState, chars
     num_rounds = state.get("num_clue_rounds", 2)
     try:
         llm = base_llm.with_structured_output(
-            ClueStagesResult, method="function_calling", tool_choice="auto"
+            ClueStagesResult,
+            method="function_calling",
+            tool_choice=ClueStagesResult.__name__
+            if settings.INFERENCE_BACKEND == "tokendance"
+            else "auto",
         )
         user_msg = (
             f"## 剧本标题\n{state.get('script_title', '')}\n\n"
             f"## 角色列表（{state.get('player_count', 4)}人）\n{chars_summary}\n\n"
-            f"## 终稿全文\n---\n{state.get('final_draft', '')}\n---\n\n"
+            f"## 按轮次披露的材料\n{json.dumps(audience_material(state, scope='clues'), ensure_ascii=False)}\n"
             f"请设计恰好 {num_rounds} 轮线索发现阶段。"
         )
         result = await asyncio.wait_for(
@@ -239,6 +275,7 @@ async def _run_game_clues(base_llm, script_id: str, state: ScriptGenState, chars
             _update_convert_task(script_id, "game_flow", "failed")
             return None
     except Exception as e:
+        raise_for_inference_recovery(e)
         logger.error(f"game_clues failed: {e}", exc_info=True)
         _update_convert_task(script_id, "game_flow", "failed")
         return None
@@ -248,24 +285,24 @@ async def _run_game_scenes(base_llm, script_id: str, state: ScriptGenState, char
     """并行任务：生成开场/投票/真相等非线索场景"""
     _update_convert_task(script_id, "game_scenes", "running")
     try:
-        llm = base_llm.with_structured_output(
-            ScenesResult, method="function_calling", tool_choice="auto"
-        )
-        user_msg = (
-            f"## 剧本标题\n{state.get('script_title', '')}\n\n"
-            f"## 角色列表（{state.get('player_count', 4)}人）\n{chars_summary}\n\n"
-            f"## 终稿全文\n---\n{state.get('final_draft', '')}\n---\n\n"
-            "请生成开场、投票和真相揭晓的系统消息，采用单一结局。"
-        )
-        result = await asyncio.wait_for(
-            llm.ainvoke(
-                [
-                    SystemMessage(content=SCENES_SYSTEM),
-                    HumanMessage(content=user_msg),
-                ]
+        public, truth = await gather_inference(
+            invoke(
+                base_llm,
+                PublicScenes,
+                SCENES_SYSTEM + "\n本次只写开场、总结邀请和投票提示，严格仅使用提供的公开材料。",
+                audience_material(state),
             ),
-            timeout=300,
+            invoke(
+                base_llm,
+                TruthScenes,
+                SCENES_SYSTEM + "\n本次只写真相和揭晓。",
+                {
+                    "终稿": state.get("final_draft", ""),
+                    "已确认事实": audience_material(state, scope="truth"),
+                },
+            ),
         )
+        result = ScenesResult(**public.model_dump(), **truth.model_dump())
         if result:
             _update_convert_task(script_id, "game_scenes", "complete")
             return result
@@ -274,6 +311,7 @@ async def _run_game_scenes(base_llm, script_id: str, state: ScriptGenState, char
             _update_convert_task(script_id, "game_scenes", "failed")
             return None
     except Exception as e:
+        raise_for_inference_recovery(e)
         logger.error(f"game_scenes failed: {e}", exc_info=True)
         _update_convert_task(script_id, "game_scenes", "failed")
         return None
@@ -398,12 +436,15 @@ async def _run_metadata(base_llm, script_id: str, state: ScriptGenState):
     _update_convert_task(script_id, "metadata", "running")
     try:
         llm = base_llm.with_structured_output(
-            ScriptMetadata, method="function_calling", tool_choice="auto"
+            ScriptMetadata,
+            method="function_calling",
+            tool_choice=ScriptMetadata.__name__
+            if settings.INFERENCE_BACKEND == "tokendance"
+            else "auto",
         )
         user_msg = (
             f"## 剧本标题\n{state.get('script_title', '')}\n\n"
-            f"## 终稿概要\n---\n{state.get('final_draft', '')[:1500]}\n---\n\n"
-            f"## 大纲\n---\n{state.get('outline', '')[:800]}\n---\n\n"
+            f"## 开局公开材料\n{json.dumps(audience_material(state), ensure_ascii=False)}\n"
             f"请生成概述、标签和描述。"
         )
         result = await asyncio.wait_for(
@@ -423,6 +464,7 @@ async def _run_metadata(base_llm, script_id: str, state: ScriptGenState):
             _update_convert_task(script_id, "metadata", "failed")
             return None
     except Exception as e:
+        raise_for_inference_recovery(e)
         logger.error(f"metadata failed: {e}", exc_info=True)
         _update_convert_task(script_id, "metadata", "failed")
         return None
@@ -440,26 +482,32 @@ async def _run_character(
     task_id = f"char_{char_name}"
     _update_convert_task(script_id, task_id, "running")
     try:
-        llm = base_llm.with_structured_output(
-            SingleCharacterResult, method="function_calling", tool_choice="auto"
-        )
-        user_msg = (
-            f"## 剧本标题\n{state.get('script_title', '')}\n\n"
-            f"## 所有角色（{state.get('player_count', 4)}人）\n{chars_summary}\n\n"
-            f"## 当前要生成的角色\n"
-            f"姓名：{char_name}\n性别：{char.get('gender', '')}\n"
-            f"年龄：{char.get('age', '')}\n职业：{char.get('occupation', '')}\n\n"
-            f"## 终稿全文\n---\n{state.get('final_draft', '')}\n---\n\n"
-            f"请为角色「{char_name}」生成完整数据。"
-        )
-        result = await asyncio.wait_for(
-            llm.ainvoke(
-                [
-                    SystemMessage(content=CHARACTER_SYSTEM.format(char_name=char_name)),
-                    HumanMessage(content=user_msg),
-                ]
+        identity = {key: char.get(key) for key in ("name", "gender", "age", "occupation")}
+        personal, public = await gather_inference(
+            invoke(
+                base_llm,
+                PersonalScript,
+                _character_prompt(char_name)
+                + "\n本次只写个人剧本。通常400至600字，亲历充足时适度扩展。材料已经按本人开局所知筛选，不能补充其他事实，也不能用否定句透露他人未知秘密。保留全部本人实际行为。",
+                {"角色": identity, **audience_material(state, role=char_name)},
             ),
-            timeout=240,
+            invoke(
+                base_llm,
+                PublicCharacter,
+                _character_prompt(char_name)
+                + "\n本次只写公开选角简介、外貌和音色；只用公开材料，不猜测秘密。",
+                {"角色": identity, **audience_material(state)},
+            ),
+        )
+        derived = await invoke(
+            base_llm,
+            RoleReading,
+            "仅从个人稿派生角色速览（约150–300字，禁止全文复述）和AI扮演资料，不能补充外部事实。保留本人关键行为和作案记忆；"
+            "不强制加入疑问、指定要问谁、虚构目标或推理结论。速览自然分段，AI资料忠实身份经历与关系。",
+            {"角色": identity, "个人剧本": personal.character_script},
+        )
+        result = SingleCharacterResult(
+            **identity, **personal.model_dump(), **public.model_dump(), **derived.model_dump()
         )
         if result:
             result.name = char_name
@@ -470,6 +518,7 @@ async def _run_character(
             _update_convert_task(script_id, task_id, "failed")
             return char_name, None
     except Exception as e:
+        raise_for_inference_recovery(e)
         logger.error(f"char '{char_name}' failed: {e}", exc_info=True)
         _update_convert_task(script_id, task_id, "failed")
         return char_name, None
@@ -479,10 +528,9 @@ async def _run_character(
 
 
 async def convert_to_game_data(state: ScriptGenState) -> dict:
-    characters = list(state.get("characters", []))
+    characters = []  # Always discover from the latest confirmed final, never draft regex output.
     player_count = state.get("player_count", 4)
     num_rounds = state.get("num_clue_rounds", 2)
-    final_draft = state.get("final_draft", "")
     script_title = state.get("script_title", "")
     outline = state.get("outline", "")
 
@@ -507,6 +555,8 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
             "difficulty",
             "ending_mode",
             "prompts",
+            "refinement",
+            "game_data_sections",
         )
     }
     fingerprint = hashlib.sha256(
@@ -516,9 +566,6 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
     cache = (
         dict(previous.get("results") or {}) if previous.get("fingerprint") == fingerprint else {}
     )
-    if cache.get("discovery"):
-        characters = cache["discovery"]
-        _add_character_tasks(script_id, characters)
 
     def failure():
         return {
@@ -529,13 +576,13 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
             "convert_progress": get_convert_progress(script_id) or {},
         }
 
-    async def cached(key, factory, schema, validate=lambda value: True):
+    async def cached(key, factory, schema, validate=lambda value: True, attempts=3):
         if key in cache:
             value = schema.model_validate(cache[key]) if schema else cache[key]
             if validate(value):
                 _update_convert_task(script_id, key, "complete")
                 return value
-        for attempt in range(3):
+        for attempt in range(attempts):
             try:
                 value = await factory()
                 if isinstance(value, tuple):
@@ -544,9 +591,16 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
                     raise ValueError("转换结果不完整")
                 cache[key] = value.model_dump() if schema else value
                 return value
-            except Exception:
-                pass
-            if attempt < 2:
+            except Exception as error:
+                raise_for_inference_recovery(error)
+                logger.warning(
+                    "Conversion task %s attempt %s failed (%s): %s",
+                    key,
+                    attempt + 1,
+                    type(error).__name__,
+                    str(error)[:500],
+                )
+            if attempt < attempts - 1:
                 await asyncio.sleep(attempt + 1)
         _update_convert_task(script_id, key, "failed")
         return None
@@ -556,18 +610,21 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
         _update_convert_task(script_id, "discover_chars", "running")
         try:
             discovered = await cached(
-                "discovery",
-                lambda: _discover_characters(final_draft, player_count, max_retries=1),
+                "disclosure",
+                lambda: extract_plan(base_llm, state),
                 None,
-                lambda value: len(value) == player_count,
+                lambda value: len(value.get("characters", [])) == player_count,
+                attempts=1,
             )
             if discovered:
-                characters = discovered
+                characters = discovered["characters"]
+                state = {**state, "disclosure_plan": discovered}
                 _update_convert_task(script_id, "discover_chars", "complete")
                 _add_character_tasks(script_id, characters)
             else:
                 _update_convert_task(script_id, "discover_chars", "failed")
         except Exception as e:
+            raise_for_inference_recovery(e)
             logger.error(f"Character discovery failed: {e}", exc_info=True)
             _update_convert_task(script_id, "discover_chars", "failed")
 
@@ -627,7 +684,7 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
                 ),
             )
         )
-    values = await asyncio.gather(*jobs)
+    values = await gather_inference(*jobs)
     if any(value is None for value in values):
         return failure()
     results = [
@@ -665,7 +722,9 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
             )
             char_mimo_voices[name] = mimo_voice
             char_results.append(char_result)
-            step_voice = _validate_step_voice(char_result.step_voice_id, char_result.gender)
+            step_voice = _validate_step_voice(
+                char_result.tts_voice_id or char_result.step_voice_id, char_result.gender
+            )
             logger.info(
                 f"char '{name}' OK: script={len(char_result.character_script)}chars, "
                 f"mimo_voice={mimo_voice}, step_voice={step_voice}"
@@ -717,7 +776,7 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
         if r:
             character_scripts[name] = r.character_script
             system_prompts_map[name] = r.system_prompt
-            step_voice = _validate_step_voice(r.step_voice_id, r.gender)
+            step_voice = _validate_step_voice(r.tts_voice_id or r.step_voice_id, r.gender)
             character_data.append(
                 {
                     "character_id": c["character_id"],
@@ -734,6 +793,10 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
                         name, _assign_mimo_voice(c.get("gender", ""))
                     ),
                     "step_voice_id": step_voice,
+                    "tts_voice_id": step_voice,
+                    "voice_provider": "minimax"
+                    if settings.INFERENCE_BACKEND == "tokendance"
+                    else "stepfun",
                 }
             )
             c["profile"] = r.profile
@@ -810,6 +873,7 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
     persisted_progress = get_convert_progress(script_id) or {}
 
     return {
+        "disclosure_plan": state.get("disclosure_plan", {}),
         "game_full_process": game_full_process,
         "clue_stages": clue_stages,
         "full_truth": full_truth,

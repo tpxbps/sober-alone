@@ -6,6 +6,7 @@ import re
 
 from app.script_editor.nodes.utils import call_llm
 from app.script_editor.prompts.templates import get_prompt
+from app.script_editor.services.execution import creative_context
 from app.script_editor.state import STEP_GENERATE_FIRST_DRAFT, ScriptGenState
 
 
@@ -22,7 +23,9 @@ async def generate_first_draft(state: ScriptGenState) -> dict:
 玩家人数：{state.get("player_count", 4)}人
 """
 
-    first_draft = await call_llm(system_prompt, user_content)
+    first_draft = await call_llm(
+        system_prompt, user_content + creative_context(state, "generate_first_draft")
+    )
 
     # 尝试从初稿中提取角色信息
     characters = _extract_characters(first_draft, state.get("player_count", 4))

@@ -158,3 +158,5 @@
   .lobby-card,.card-cover-media,.card-overview { transition:none; }
 }
 @media(prefers-reduced-motion:reduce) { .game-entry-overlay,.game-entry-overlay::before { animation:none; } }
+
+.setup-frontier-models { border:1px dashed var(--primary); border-radius:5px; padding:4px; margin-bottom:5px; }

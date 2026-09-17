@@ -2,8 +2,9 @@ import { useState } from "react";
 import { Markdown } from "@/components/ui/Markdown";
 import type { EditorInterruptInfo, EditorWorkflowState } from "@/types/editor";
 import { useTextDraft } from "./useTextDraft";
+import { RefineButton } from './RefineButton';
 
-export function ReviewFinalStage({ interruptInfo, workflowState, isLoading, onConfirm, onRegenerate, error }: {
+export function ReviewFinalStage({ interruptInfo, workflowState, isLoading, onConfirm, error }: {
   interruptInfo: EditorInterruptInfo; workflowState: EditorWorkflowState | null; isLoading: boolean;
   onConfirm: (content: string, human: string) => Promise<void>;
   onRegenerate: (human: string, prompt?: string) => Promise<void>; error: string | null;
@@ -22,7 +23,7 @@ export function ReviewFinalStage({ interruptInfo, workflowState, isLoading, onCo
         className="w-full h-full min-h-64 bg-transparent resize-none text-sm focus:outline-none" /> : <Markdown className="text-sm">{draft}</Markdown>}
     </div>
     <div className="p-3 border-t border-border flex flex-wrap gap-2">
-      <button disabled={isLoading} onClick={() => onRegenerate(human)} className="px-4 py-2.5 rounded-lg bg-secondary disabled:opacity-50">重新生成终稿</button>
+      <RefineButton step="review_final" content={draft} humanReview={human} disabled={isLoading} />
       <button disabled={isLoading || !draft.trim()} onClick={() => onConfirm(draft, human)}
         className="flex-1 px-4 py-2.5 rounded-lg bg-primary text-primary-foreground disabled:opacity-50">{isLoading ? "处理中…" : "确认终稿并拆分"}</button>
     </div>

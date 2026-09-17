@@ -34,6 +34,19 @@ const capabilities: SystemCapabilities = {
 }
 
 describe('capability adapters', () => {
+  it('keeps frontier models first and prioritizes common models with lowercase labels', () => {
+    const source = { ...capabilities, models: [
+      { ...capabilities.models[0], id: 'ling-3.0-flash', name: 'Ling-3.0-flash' },
+      { ...capabilities.models[0], id: 'glm-5.3-flash', name: 'GLM-5.3-flash' },
+      { ...capabilities.models[0], id: 'kimi-k3', name: 'Kimi K3', tier: 'frontier' as const },
+      capabilities.models[0],
+      { ...capabilities.models[0], id: 'qwen3.8-flash', name: 'Qwen3.8-flash' },
+    ] }
+    const models = configuredModels(source)
+    expect(models.map(model => model.id)).toEqual(['kimi-k3', 'deepseek-flash', 'qwen3.8-flash', 'glm-5.3-flash', 'ling-3.0-flash'])
+    expect(models.every(model => model.name === model.name.toLowerCase())).toBe(true)
+  })
+
   it('normalizes the legacy deepSeek V4 display name without changing model IDs', () => {
     const source = { ...capabilities, models: [{ ...capabilities.models[0], name: 'deepSeek-v4.1-flash' }] }
     expect(configuredModels(source)[0]).toMatchObject({ id: 'deepseek-flash', name: 'deepseek-v4.1-flash' })

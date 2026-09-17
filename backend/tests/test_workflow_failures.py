@@ -5,7 +5,7 @@ from app.script_editor.nodes import safety_check as safety_module
 
 
 def test_save_error_skips_optional_asset_generation():
-    assert _route_after_save({"error_message": "database is locked"}) == "end"
+    assert _route_after_save({"error_message": "database is locked"}) == "review_failure"
     assert _route_after_save({"error_message": ""}) == "generate_assets"
 
 

@@ -3,6 +3,7 @@ import { Markdown } from "@/components/ui/Markdown";
 import type { EditorInterruptInfo, EditorWorkflowState } from "@/types/editor";
 import { PromptSection } from "./EditorControls";
 import { useTextDraft } from "./useTextDraft";
+import { RefineButton } from './RefineButton';
 
 export function ReviewReportStage({ interruptInfo, workflowState, isLoading, onConfirm, onRegenerate, error }: {
   interruptInfo: EditorInterruptInfo; workflowState: EditorWorkflowState | null; isLoading: boolean;
@@ -41,7 +42,7 @@ export function ReviewReportStage({ interruptInfo, workflowState, isLoading, onC
       </div>
     </div>
     <div className="border-t border-border p-3 flex flex-wrap gap-2">
-      <button disabled={isLoading} onClick={() => onRegenerate(draft.human, prompt.current || undefined)} className="px-4 py-2.5 rounded-lg bg-secondary disabled:opacity-50">重新审稿</button>
+      <RefineButton step="review_report" content={draft.opinion} humanReview={draft.human} getPrompt={() => prompt.current || undefined} disabled={isLoading} />
       <button disabled={isLoading || !draft.opinion.trim()} onClick={() => onConfirm(draft.opinion, draft.human)}
         className="flex-1 px-4 py-2.5 rounded-lg bg-primary text-primary-foreground disabled:opacity-50">{isLoading ? "处理中…" : "确认意见并生成终稿"}</button>
     </div>
