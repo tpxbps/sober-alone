@@ -41,7 +41,7 @@ export function ReviewReportStage({ interruptInfo, workflowState, isLoading, onC
         </label>
       </div>
     </div>
-    <div className="border-t border-border p-3 flex flex-wrap gap-2">
+    <div className="border-t border-border p-3 grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] gap-2">
       <RefineButton step="review_report" content={draft.opinion} humanReview={draft.human} getPrompt={() => prompt.current || undefined} disabled={isLoading} />
       <button disabled={isLoading || !draft.opinion.trim()} onClick={() => onConfirm(draft.opinion, draft.human)}
         className="flex-1 px-4 py-2.5 rounded-lg bg-primary text-primary-foreground disabled:opacity-50">{isLoading ? "处理中…" : "确认意见并生成终稿"}</button>

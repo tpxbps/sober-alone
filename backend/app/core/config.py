@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -55,6 +56,7 @@ class Settings(BaseSettings):
     DEFAULT_LLM_PROVIDER: str = "deepseek"
     DEFAULT_LLM_MODEL: str | None = "deepseek-flash"  # 为None时使用DEFAULT_MODELS中的默认值
     SCRIPT_EDITOR_MODEL: str | None = "deepseek-flash"
+    SCRIPT_EDITOR_INFERENCE_BACKEND: Literal["inherit", "deepseek_official"] = "inherit"
     SCRIPT_REVIEW_MODEL: str | None = None
     DISABLED_LLM_MODELS: str = ""  # Comma-separated canonical IDs or legacy aliases.
 

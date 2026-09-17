@@ -107,7 +107,8 @@ export interface EditorOperationAccepted {
   operation_id: string;
   operation_status: 'queued' | 'running' | 'complete' | 'failed' | 'paused';
   target_step: string;
-  progress?: { message?: string; percent?: number; workflow?: WorkflowProgress };
+  progress?: { message?: string; percent?: number; workflow?: WorkflowProgress; convert_progress?: AssetProgress; asset_progress?: AssetProgress };
+  outline_progress?: OutlineProgress | null;
   error_message?: string;
 }
 

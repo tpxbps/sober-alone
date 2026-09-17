@@ -19,8 +19,10 @@ FRONTIER = [spec for spec in MODEL_SPECS if spec.tier == "frontier"]
 
 def test_frontier_cannot_be_selected_for_creator_assistant():
     for spec in FRONTIER:
-        with pytest.raises(ValueError, match="前沿模型仅供游戏"):
-            ChatRequest(message="hello", model=spec.id, chat_session_id="test")
+        assert (
+            ChatRequest(message="hello", model=spec.id, chat_session_id="test").model
+            == "deepseek-flash"
+        )
     assert ChatRequest(message="hello", chat_session_id="test").model == "deepseek-flash"
 
 

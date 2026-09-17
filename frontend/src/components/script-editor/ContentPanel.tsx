@@ -1,7 +1,6 @@
 import { useEditorStore } from "@/stores/editorStore";
 import { useEffect, useState } from "react";
 import { AlertTriangle, Check } from "lucide-react";
-import { WhackAMole, MoleTrigger } from "./WhackAMole";
 import {
   AssetGenerationProgress,
   ConvertProgressPanel,
@@ -183,12 +182,6 @@ function ContentPanelBody({
   const [difficulty, setDifficulty] = useState(1);
   const [numClueRounds, setNumClueRounds] = useState(2);
 
-  // Global mole game (decoupled from buttons)
-  const [showMoleGame, setShowMoleGame] = useState(false);
-  const isWorking =
-    (isLoading || isStarting) && !isComplete && !isSafetyRejected;
-  const moleActive = isWorking && !showMoleGame;
-
   // Content editing state
   const [editing, setEditing] = useState(false);
   const [editedContent, setEditedContent] = useTextDraft(interruptInfo?.step || currentStep,
@@ -216,23 +209,6 @@ function ContentPanelBody({
 
   /* eslint-enable react-hooks/set-state-in-effect */
 
-  // SSE progress stream is now managed by the store (opened before POST, closed on done/error)
-  // No longer using useEffect to avoid timing gap between POST and SSE connection
-
-  // === Main content ===
-  // hasActionBar: whether current view has a bottom action bar (for mole trigger padding)
-  const hasActionBar =
-    !!viewingCheckpoint ||
-    isIdeaPhase ||
-    isReviewFinal ||
-    isReviewGameData ||
-    isReviewAssetPlan ||
-    (interruptInfo &&
-      !isComplete &&
-      !isSafetyRejected &&
-      !isConvertProgress &&
-      !isAssetGeneration);
-
   const content = (() => {
     // === Viewing historical checkpoint (also shown during fork loading) ===
     if (viewingCheckpoint) {
@@ -240,7 +216,6 @@ function ContentPanelBody({
         <CheckpointView
           viewingCheckpoint={viewingCheckpoint}
           error={error}
-          moleActive={moleActive}
         />
       );
     }
@@ -291,7 +266,6 @@ function ContentPanelBody({
           error={error}
           isStarting={isStarting}
           onStart={onStart}
-          moleActive={moleActive}
         />
       );
     }
@@ -369,7 +343,6 @@ function ContentPanelBody({
 
     if (isLoading && submitted && !isReviewGameData) {
       return <div className="flex h-full flex-col">
-        <p role="status" className="border-b border-border bg-primary/5 p-4 text-sm">{getButtonLoadingMessage(currentStep)} · 当前显示本次提交内容</p>
         <div className="flex-1 overflow-y-auto p-6"><Markdown>{submitted.content || '游戏数据已提交，正在处理下一阶段。'}</Markdown></div>
       </div>;
     }
@@ -409,7 +382,6 @@ function ContentPanelBody({
           error={error}
           scriptTitle={scriptTitle}
           workflowState={workflowState}
-          moleActive={moleActive}
         />
       );
     }
@@ -464,40 +436,9 @@ function ContentPanelBody({
         error={error}
         onConfirm={onConfirm}
         onRegenerate={onRegenerate}
-        moleActive={moleActive}
       />
     );
   })();
 
-  // === Shared return with mole game trigger ===
-  return (
-    <div className="h-full relative">
-      {content}
-      {isWorking && !showMoleGame && (
-        <div className="absolute bottom-3 left-3 z-50 flex max-w-[calc(100%-1.5rem)] flex-col items-start gap-2">
-          <div className="flex items-center gap-1.5">
-            <MoleTrigger onClick={() => setShowMoleGame(true)} />
-            {!hasActionBar && (
-              <span className="text-xs text-muted-foreground whitespace-nowrap">
-                等累了？来玩打地鼠吧 ~
-              </span>
-            )}
-          </div>
-        </div>
-      )}
-      {isWorking && showMoleGame && (
-        <>
-          <div className="hidden lg:block fixed bottom-4 left-4 z-50">
-            <WhackAMole
-              onClose={() => setShowMoleGame(false)}
-              isModal={false}
-            />
-          </div>
-          <div className="lg:hidden">
-            <WhackAMole onClose={() => setShowMoleGame(false)} isModal={true} />
-          </div>
-        </>
-      )}
-    </div>
-  );
+  return <div className="h-full relative">{content}</div>;
 }

@@ -57,6 +57,8 @@ class OutlineRuntime:
         self.storage_lock = asyncio.Lock()
         self.progress_seq = (progress or {}).get("event_seq", 0)
         self.stage = (progress or {}).get("workflow", {}).get("current_step", "")
+        self.disclosure_cache = (progress or {}).get("disclosure_cache", {})
+        self.convert_cache = (progress or {}).get("convert_cache", {})
         self.pending_progress: dict = {}
         self.progress_writer: asyncio.Task | None = None
 

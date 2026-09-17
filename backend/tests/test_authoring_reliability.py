@@ -49,7 +49,7 @@ async def test_safety_covers_tail_short_text_and_new_clue_fields(monkeypatch):
                 else SafetyResult(status="PASS")
             )
 
-    monkeypatch.setattr("app.core.llm_factory.create_llm", lambda **kwargs: Judge())
+    monkeypatch.setattr("app.script_editor.llm.create_llm", lambda **kwargs: Judge())
     state = {
         "game_data_sections": {
             "character_data": [{"character_script": "甲" * 7100 + "TAIL_REJECT"}],
@@ -83,7 +83,7 @@ async def test_short_safety_checks_call_model_and_content_changes_invalidate_pas
             calls.append(messages)
             return SafetyResult(status="PASS")
 
-    monkeypatch.setattr("app.core.llm_factory.create_llm", lambda **kwargs: Judge())
+    monkeypatch.setattr("app.script_editor.llm.create_llm", lambda **kwargs: Judge())
     state = {"game_data_sections": {"description": "字"}}
     state.update(await safety_check(state))
     assert len(calls) == 1 and safety_approved(state)
@@ -114,7 +114,8 @@ def test_missing_scenes_never_publish_outline():
 
 
 @pytest.mark.asyncio
-async def test_conversion_retries_only_failed_tasks_and_preserves_successes(monkeypatch):
+@pytest.mark.parametrize("restart", [False, True])
+async def test_conversion_retries_only_failed_tasks_and_preserves_successes(monkeypatch, restart):
     counts = {"scenes": 0, "clues": 0, "metadata": 0, "characters": 0}
 
     async def no_sleep(*args):
@@ -130,7 +131,7 @@ async def test_conversion_retries_only_failed_tasks_and_preserves_successes(monk
 
     async def scenes(*args):
         counts["scenes"] += 1
-        if counts["scenes"] <= 3:
+        if counts["scenes"] <= 1:
             return None
         return ScenesResult(
             opening_notice="公开开场",
@@ -180,9 +181,34 @@ async def test_conversion_retries_only_failed_tasks_and_preserves_successes(monk
     state["num_clue_rounds"] = 1
     state["final_draft"] = "终稿"
     first = await service.convert_to_game_data(deepcopy(state))
-    assert first["error_message"] == GENERIC_ERROR and counts["scenes"] == 3
+    assert first["error_message"] == GENERIC_ERROR and counts["scenes"] == 1
     assert "game_data_sections" not in first
-    second = await service.convert_to_game_data({**state, **first})
+    from app.script_editor.outline.runtime import current_runtime
+
+    runtime = SimpleNamespace(
+        convert_cache=first["convert_cache"],
+        queue_progress=lambda *_: None,
+        drain_progress=no_sleep,
+    )
+    token = current_runtime.set(runtime) if restart else None
+    try:
+        second = await service.convert_to_game_data(state if restart else {**state, **first})
+    finally:
+        if token is not None:
+            current_runtime.reset(token)
     assert second["error_message"] == ""
-    assert counts == {"scenes": 4, "clues": 1, "metadata": 1, "characters": 2}
+    assert counts == {"scenes": 2, "clues": 1, "metadata": 1, "characters": 2}
     assert second["game_data_sections"]["opening"] == "公开开场"
+
+
+@pytest.mark.parametrize("notice", [None, "", "   "])
+def test_generated_clue_discussion_is_executable_when_notice_omitted(notice):
+    payload = {"items": [{"summary": "窗边划痕", "content": "窗边留有一道划痕。"}]}
+    if notice is not None:
+        payload["free_discussion_notice"] = notice
+    clues = ClueStagesResult(clue_stages=[ClueStageItem.model_validate(payload)])
+    process, _, _, _, stages = service._merge_game_process(
+        clues, ScenesResult(opening_notice="开场"), 1, "标题", "大纲", "test-script"
+    )
+    assert stages[0]["free_discussion_notice"] == "请结合已公开的线索自由讨论。"
+    assert process[1]["children"][1]["system_notice"] == stages[0]["free_discussion_notice"]

@@ -24,8 +24,8 @@ export function RefineButton({ step, content, gameData, humanReview, prompt, get
     setOpen(value);
   };
   return <Dialog.Root open={open} onOpenChange={changeOpen} modal={!desktop}>
-    <Dialog.Trigger ref={trigger} disabled={disabled || loading} className="inline-flex items-center justify-center gap-2 rounded-lg border border-border px-3 py-2.5 text-sm hover:bg-secondary disabled:opacity-40">
-      <RotateCcw className="size-3.5" />输入改进方向 · 重新生成
+    <Dialog.Trigger ref={trigger} disabled={disabled || loading} className="inline-flex min-w-0 whitespace-normal items-center justify-center gap-2 rounded-lg border border-border px-3 py-2.5 text-sm hover:bg-secondary disabled:opacity-40">
+      <RotateCcw className="size-3.5 shrink-0" /><span>输入改进方向 · 重新生成</span>
     </Dialog.Trigger>
     <Dialog.Portal>
       {!desktop && <Dialog.Overlay className="fixed inset-0 z-50 bg-background/70" />}

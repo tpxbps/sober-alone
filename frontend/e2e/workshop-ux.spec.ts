@@ -148,3 +148,33 @@ test('生成失败后的未保存编辑稿刷新仍可恢复', async ({ page }) 
   await page.getByRole('button', { name: '编辑', exact: true }).click();
   await expect(page.getByLabel('剧本正文')).toHaveValue('失败也应保留的作者新版');
 });
+
+
+for (const width of [390, 1280]) {
+  test(`各文本节点操作按钮保持同排 ${width}`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 844 });
+    for (const step of ['review_first_draft', 'review_report', 'review_final']) {
+      await setup(page, step);
+      const refine = page.getByRole('button', { name: '输入改进方向 · 重新生成' });
+      const confirm = page.getByRole('button', { name: /^(确认并继续|确认意见并生成终稿|确认终稿并拆分)$/ });
+      await expect(refine).toBeVisible();
+      await expect(confirm).toBeVisible();
+      const left = (await refine.boundingBox())!, right = (await confirm.boundingBox())!;
+      expect(Math.abs((left.y + left.height / 2) - (right.y + right.height / 2))).toBeLessThan(2);
+      expect(left.x + left.width).toBeLessThan(right.x);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      await page.screenshot({ path: info.outputPath(`${step}-${width}.png`) });
+    }
+  });
+}
+
+test('长等待显示静态提示且不显示小游戏或提交横幅', async ({ page }) => {
+  await page.clock.install();
+  const fixture = await setup(page, 'review_first_draft');
+  fixture.setBusy(true);
+  await page.getByRole('button', { name: '确认并继续' }).click();
+  await expect.poll(() => fixture.submissions.length).toBe(1);
+  await page.clock.fastForward(11000);
+  await expect(page.getByText('单个节点可能耗时数分钟，且剧本越复杂耗时越久，请耐心等待～', { exact: true })).toBeVisible();
+  await expect(page.getByText(/打地鼠|当前显示本次提交内容|稳定执行/)).toHaveCount(0);
+});

@@ -26,7 +26,7 @@ export function ReviewGameDataStage({ editedGameData: draft, setEditedGameData, 
   editedGameData: GameDataSections | null; setEditedGameData: (value: GameDataSections | null) => void;
   isLoading: boolean; currentStep: string; onConfirmGameData: (value: GameDataSections) => Promise<void>;
   interruptInfo: EditorInterruptInfo; error: string | null; scriptTitle: string;
-  workflowState: EditorWorkflowState | null; moleActive: boolean;
+  workflowState: EditorWorkflowState | null;
 }) {
   const [view, setView] = useTextDraft('game-data-navigation', '', { section: 'public', role: '', round: 1, reportOpen: false });
   const [preview, setPreview] = useState(false);
@@ -173,7 +173,7 @@ export function ReviewGameDataStage({ editedGameData: draft, setEditedGameData, 
     </fieldset>
     <footer className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-border/50 bg-background px-4 py-3">
       <button disabled={isLoading} onClick={() => void check()} className="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2.5 text-sm disabled:opacity-40"><FileSearch className="size-4" />{report || workflowState?.quality_check_attempted ? '质检报告' : '质量检查（可选）'}</button>
-      <div className="flex flex-wrap gap-2"><RefineButton step="review_game_data" gameData={submissionData(data)} disabled={isLoading} />
+      <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] gap-2"><RefineButton step="review_game_data" gameData={submissionData(data)} disabled={isLoading} />
         <button disabled={isLoading} onClick={() => void onConfirmGameData(submissionData(data))} className="rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground disabled:opacity-40">{isLoading ? currentStep === 'check_game_quality' ? '正在检查…' : '正在进行合规评估…' : '下一步 · 生成资源'}</button>
       </div>
     </footer>

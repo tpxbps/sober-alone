@@ -11,7 +11,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.core.config import settings
 from app.core.inference import raise_for_inference_recovery
-from app.core.llm_factory import create_llm
+from app.script_editor.llm import create_editor_llm as create_llm
 
 logger = logging.getLogger(__name__)
 

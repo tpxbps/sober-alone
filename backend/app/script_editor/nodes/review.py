@@ -3,7 +3,7 @@ review_by_llm node — 独立 LLM 审稿（自动步骤，无需用户确认）
 """
 
 from app.core.config import settings
-from app.core.llm_factory import create_llm
+from app.script_editor.llm import create_editor_llm as create_llm
 from app.script_editor.nodes.utils import call_llm
 from app.script_editor.prompts.templates import get_prompt
 from app.script_editor.services.execution import creative_context

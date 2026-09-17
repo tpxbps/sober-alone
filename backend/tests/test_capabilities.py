@@ -58,13 +58,13 @@ def test_explicit_model_outage_blocks_aliases_without_disabling_other_providers(
     assert capabilities.settings.is_model_enabled("deepseek-flash")
 
 
-def test_conversion_honors_creator_model_configuration(monkeypatch):
+def test_conversion_uses_fixed_creator_model(monkeypatch):
     from app.script_editor.conversion import service
 
     monkeypatch.setattr(capabilities.settings, "SCRIPT_EDITOR_MODEL", "step-3.5-flash")
-    monkeypatch.setattr(llm_factory, "create_llm", lambda **kwargs: kwargs)
+    monkeypatch.setattr("app.script_editor.llm.create_llm", lambda **kwargs: kwargs)
     options = service._get_structured_llm()
-    assert options["model"] == "step-3.5-flash"
+    assert options["model"] == "deepseek-flash"
     assert options["disable_thinking"] is True
 
 

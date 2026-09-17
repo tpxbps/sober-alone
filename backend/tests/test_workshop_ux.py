@@ -23,6 +23,69 @@ env = workshop_env
 
 
 @pytest.mark.asyncio
+async def test_business_failure_is_a_failed_operation_and_closes_progress(env, monkeypatch):
+    from app.api.schemas.script_editor import StartWorkflowRequest
+    from app.db.models import EditorOperation
+    from app.script_editor.services import workflow_service
+
+    runner, factory, *_ = env
+    monkeypatch.setattr(
+        workflow_service.ScriptEditorWorkflowService,
+        "start",
+        AsyncMock(
+            return_value={
+                "current_step": "convert_to_game_data",
+                "state": {"error_message": "数据任务未完成"},
+            }
+        ),
+    )
+    accepted = await runner.queue_start(StartWorkflowRequest(user_idea="旅馆谜案"), "owner")
+    await settle(runner)
+    async with factory() as db:
+        operation = await db.get(EditorOperation, accepted["operation_id"])
+        assert operation.status == "failed"
+        assert operation.progress["workflow"]["finished"]
+        assert operation.progress["workflow"]["outcome"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_late_progress_subscriber_receives_terminal_event_without_waiting(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+
+    from app.api.routes.script_editor_routes import assets
+    from app.script_editor.outline import runtime
+
+    monkeypatch.setattr(assets.editor_operation_runner, "authorize", AsyncMock())
+    monkeypatch.setattr(
+        assets.editor_operation_runner,
+        "get",
+        AsyncMock(
+            return_value={
+                "operation_status": "complete",
+                "current_step": "outline_wait",
+                "progress": {},
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        ScriptEditorWorkflowService,
+        "_get_snapshot",
+        AsyncMock(return_value=SimpleNamespace(values={})),
+    )
+    monkeypatch.setattr(runtime, "projection", AsyncMock(return_value=None))
+    monkeypatch.setattr(assets, "_script_id_for_thread", AsyncMock(return_value=None))
+    response = await assets.progress_stream("thread", "owner", "operation")
+
+    async def collect():
+        return [chunk async for chunk in response.body_iterator]
+
+    messages = await asyncio.wait_for(collect(), timeout=1)
+    assert '"finished": true' in "".join(messages)
+    assert '"type": "done"' in messages[-1]
+
+
+@pytest.mark.asyncio
 async def test_combined_answer_replaces_relation_motive_and_clue_without_touching_other_paragraph(
     monkeypatch,
 ):
@@ -39,7 +102,7 @@ async def test_combined_answer_replaces_relation_motive_and_clue_without_touchin
         },
     )
 
-    async def model(schema, system, content):
+    async def model(schema, system, content, **kwargs):
         material = json.loads(content)
         assert material["本次作者输入"]["choice"] == "共同秘密"
         assert "从未逼迫" in material["本次作者输入"]["other_text"]
@@ -56,7 +119,8 @@ async def test_combined_answer_replaces_relation_motive_and_clue_without_touchin
     result = await apply_outline_input(state)
     assert "胁迫" not in result["outline"]
     assert result["outline"].endswith("暴雨封闭了旅馆。")
-    assert result["outline_session"]["undo_stack"][-1]["outline"] == state["outline"]
+    assert result["outline_session"]["undo_stack"] == []
+    assert result["outline_session"]["events"][-1]["kind"] == "revision"
     context = nodes.context({**state, **result}, result["outline_session"])
     assert "长期胁迫阿乙" not in context
     assert "无预谋" in context
@@ -97,36 +161,29 @@ async def test_unselected_director_options_never_become_effective_facts(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_revision_undo_is_durable_and_stale_revision_is_rejected(env):
+async def test_answer_correction_keeps_chronological_events_and_survives_reload(env):
     runner, _, graph, _, _ = env
     thread, state = await start(env)
-    before = state["state"]["outline"]
-    await actions.queue_action(
-        runner, thread, command("revise", state, other_text="改为合作关系"), "owner"
-    )
-    await settle(runner)
-    service = ScriptEditorWorkflowService()
-    revised = await service.get_state(thread)
-    assert revised["state"]["outline_session"]["revision"] == 2
-    assert revised["state"]["outline_session"]["canon"] == [
-        *state["state"]["outline_session"]["canon"],
-        "改为合作关系",
-    ]
-    with pytest.raises(ValueError, match="版本"):
-        await actions.queue_action(
-            runner, thread, command("revise", state, other_text="过期修改"), "owner"
-        )
-    undo = command("undo", revised)
-    await actions.queue_action(runner, thread, undo, "owner")
+    q = state["state"]["outline_session"]["pending_question"]
+    request = command("answer", state, question_id=q["id"], other_text="改为合作关系")
+    await actions.queue_action(runner, thread, request, "owner")
     await settle(runner)
     restored = await ScriptEditorWorkflowService(graph).get_state(thread)
-    assert restored["state"]["outline"] == before
-    assert (
-        restored["state"]["outline_session"]["canon"] == state["state"]["outline_session"]["canon"]
-    )
-    assert restored["state"]["outline_session"]["revision"] == 3
-    duplicate = await actions.queue_action(runner, thread, undo, "owner")
-    assert duplicate["operation_id"] == undo.request_id
+    session = restored["state"]["outline_session"]
+    assert "改为合作关系" in session["canon"]
+    assert [e["kind"] for e in session["events"]] == [
+        "passage",
+        "question",
+        "answer",
+        "revision",
+        "passage",
+        "question",
+    ]
+    assert session["events"][2]["content"] == "改为合作关系"
+    assert len({e["id"] for e in session["events"]}) == len(session["events"])
+    assert not session["undo_stack"]
+    duplicate = await actions.queue_action(runner, thread, request, "owner")
+    assert duplicate["operation_id"] == request.request_id
 
 
 def disclosure():
@@ -189,9 +246,7 @@ def test_personal_public_and_reveal_inputs_are_physically_separated():
     assert "药物" in json.dumps(audience_material(state, scope="clues"), ensure_ascii=False)
 
 
-@pytest.mark.parametrize(
-    "mutation", ["source", "unknown_role", "own_action", "future", "round", "count"]
-)
+@pytest.mark.parametrize("mutation", ["source", "unknown_role", "future", "round", "count"])
 def test_invalid_disclosure_fails_closed(mutation):
     plan = disclosure()
     source = "".join(f["quote"] for f in plan["facts"])
@@ -199,8 +254,6 @@ def test_invalid_disclosure_fails_closed(mutation):
         plan["facts"][1]["quote"] = "编造的事实"
     if mutation == "unknown_role":
         plan["facts"][1]["known_by"] += ["不存在的人"]
-    if mutation == "own_action":
-        plan["facts"][1]["known_by"] = []
     if mutation == "future":
         plan["facts"][3]["known_by"] = ["甲"]
     if mutation == "round":
@@ -498,68 +551,62 @@ def test_negative_knowledge_cannot_leak_through_role_or_public_material(quote):
 
 
 @pytest.mark.asyncio
-async def test_disclosure_repairs_source_reference_without_exposing_unknown_clause(monkeypatch):
+async def test_batched_disclosure_retains_own_action_without_unknown_clause(monkeypatch):
     from app.script_editor.conversion import disclosure as module
 
     class Model:
         def model_copy(self, update):
-            assert update["max_tokens"] >= 16000
+            assert update["max_tokens"] == 8192
             return self
 
     source = "晚餐开始。甲调换了杯子，却不知道乙已进过仓库。乙独自到过仓库。"
     calls = []
 
-    async def extract(_model, _schema, _system, material):
-        calls.append(deepcopy(material))
+    async def extract(_model, schema, _system, material, **kwargs):
+        calls.append(material)
         assert "甲必须死在序幕" not in json.dumps(material, ensure_ascii=False)
-        return DisclosurePlan.model_validate(
-            {
-                "characters": [{"name": "甲"}, {"name": "乙"}],
-                "game_start": "晚餐开始",
-                "start_source_id": 1,
-                "facts": [
+        if schema is module.CastAndStart:
+            value = schema(
+                characters=[{"name": "甲"}, {"name": "乙"}],
+                game_start="晚餐开始",
+                start_source_id=1,
+            )
+        else:
+            value = schema(
+                facts=[
+                    {"source_id": 1, "before_start": True, "release": "public"},
                     {
-                        "id": "f1",
-                        "source_id": 1,
-                        "known_by": [],
-                        "actors": [],
-                        "before_start": True,
-                        "release": "public",
-                    },
-                    {
-                        "id": "f2",
                         "source_id": 2,
-                        "quote": "甲调换了杯子" if len(calls) > 1 else "",
+                        "quote": "甲调换了杯子",
                         "known_by": ["甲"],
                         "actors": ["甲"],
                         "before_start": True,
                         "release": "reveal",
                     },
                     {
-                        "id": "f3",
                         "source_id": 3,
                         "known_by": ["乙"],
                         "actors": ["乙"],
                         "before_start": True,
                         "release": "reveal",
                     },
-                ],
-            }
-        )
+                ]
+            )
+        kwargs["validate"](value)
+        return value
 
     monkeypatch.setattr(module, "invoke", extract)
-    plan = await module.extract_plan(
-        Model(),
-        {
-            "final_draft": source,
-            "player_count": 2,
-            "num_clue_rounds": 1,
-            "outline_session": {"canon": ["甲必须死在序幕"]},
-        },
-    )
+    state = {
+        "final_draft": source,
+        "player_count": 2,
+        "num_clue_rounds": 1,
+        "outline_session": {"canon": ["甲必须死在序幕"]},
+    }
+    plan = await module.extract_plan(Model(), state)
     assert len(calls) == 2
-    assert "不知情" in calls[1]["必须修复的校验问题"]
     material = json.dumps(
         audience_material({"disclosure_plan": plan}, role="甲"), ensure_ascii=False
     )
     assert "调换了杯子" in material and "仓库" not in material
+    assert await module.extract_plan(Model(), state) == plan
+    assert len(calls) == 2

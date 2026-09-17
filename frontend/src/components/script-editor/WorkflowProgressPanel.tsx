@@ -1,6 +1,7 @@
 import { Check, Circle, Loader2, RefreshCw, X } from "lucide-react";
 
 import type { AssetPhase, AssetProgress } from "@/types/editor";
+import { useEditorStore } from "@/stores/editorStore";
 
 export function ConvertProgressPanel({
   convertProgress,
@@ -10,6 +11,7 @@ export function ConvertProgressPanel({
   onRetry?: () => Promise<void>;
 }) {
   const phases = convertProgress?.phases || [];
+  const busy = useEditorStore(state => state.isLoading);
   const hasFailures = phases.some((phase) =>
     phase.tasks.some((task) => task.status === "failed")
   );
@@ -18,8 +20,7 @@ export function ConvertProgressPanel({
     <div className="h-full flex flex-col p-5 overflow-y-auto scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
       <h3 className="text-base font-bold mb-1">结构化数据转化</h3>
       <p className="text-xs text-muted-foreground mb-5">
-        正在通过多步 LLM
-        调用将终稿转化为结构化游戏数据，全部完成后将展示数据供您审阅和修改
+        正在整理角色、线索与主持流程，完成后可集中审阅和修改。
       </p>
 
       {phases.length > 0 ? (
@@ -30,15 +31,16 @@ export function ConvertProgressPanel({
           {hasFailures && onRetry && (
             <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
               <p className="mb-2 text-xs leading-relaxed text-muted-foreground">
-                结构化结果由多个任务共同组成。为避免只更新进度、遗漏数据合并，失败后会重新执行完整转换。
+                已完成的内容会保留，重试将继续处理未完成的任务。
               </p>
               <button
                 type="button"
+                disabled={busy}
                 onClick={() => void onRetry()}
                 className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90"
               >
                 <RefreshCw className="h-3.5 w-3.5" />
-                重新执行结构化转换
+                重试未完成的任务
               </button>
             </div>
           )}
@@ -139,11 +141,6 @@ function PhaseCard({
               {completedCount}/{total}
             </span>
           </div>
-          {phase.model && (
-            <span className="text-[9px] text-muted-foreground/40">
-              powered by {phase.model}
-            </span>
-          )}
         </div>
       </div>
       <div className="space-y-1.5">
@@ -166,6 +163,7 @@ function TaskRow({
   task: { id: string; label: string; status: string; reason?: string };
   onRetry?: (taskId: string) => Promise<void>;
 }) {
+  const busy = useEditorStore(state => state.isLoading);
   return (
     <div
       className={`flex items-center justify-between py-1.5 px-2.5 rounded ${
@@ -201,11 +199,13 @@ function TaskRow({
           {task.status === "skipped" && task.reason
             ? `（已跳过：${task.reason}）`
             : ""}
+          {task.status === "failed" && task.reason && <span className="mt-1 block text-muted-foreground">{task.reason}</span>}
         </span>
       </div>
       {task.status === "failed" && onRetry && (
         <button
           onClick={() => onRetry(task.id)}
+          disabled={busy}
           className="flex items-center gap-1 text-xs text-primary hover:text-primary/80 transition-colors"
         >
           <RefreshCw className="w-3 h-3" />

@@ -23,13 +23,25 @@ def prepare():
     parser.add_argument("--env-file", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--resources", action="store_true")
+    parser.add_argument("--backend", choices=["direct", "tokendance"], default="direct")
+    parser.add_argument("--players", type=int, choices=[3, 4], default=3)
+    parser.add_argument("--rounds", type=int, choices=[1, 2], default=1)
+    parser.add_argument("--questions", type=int, default=2)
+    parser.add_argument("--conversion-only", action="store_true")
     parser.add_argument("--retry-failed", action="store_true")
     args = parser.parse_args()
+    if args.backend == "tokendance" and not (args.resources or args.conversion_only):
+        parser.error(
+            "TokenDance acceptance requires --resources or --conversion-only; optional direct keys do not disable gateway resources"
+        )
     root = Path(args.output_dir).resolve()
     root.mkdir(parents=True, exist_ok=True)
     load_dotenv(args.env_file, override=True)
     os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{(root / 'app.db').as_posix()}"
     os.environ["CHROMA_PERSIST_DIR"] = str(root / "chroma")
+    os.environ["INFERENCE_BACKEND"] = args.backend
+    if args.backend == "tokendance":
+        os.environ["TOKENDANCE_API_KEY"] = os.environ.get("TOKENDANCE_CREATOR_API_KEY", "")
     from app.core import config
 
     config.LOCAL_DATA_DIR = root
@@ -86,7 +98,9 @@ async def run(args, root):
                 )
                 response.raise_for_status()
                 value = response.json()
-                stage = value.get("current_step", value.get("target_step", ""))
+                stage = (value.get("progress") or {}).get("workflow", {}).get(
+                    "current_step"
+                ) or value.get("current_step", value.get("target_step", ""))
                 if stage != last:
                     print(
                         json.dumps({"stage": stage, "status": value["operation_status"]}),
@@ -95,7 +109,14 @@ async def run(args, root):
                     last = stage
                 if value["operation_status"] == "failed":
                     record["failure"] = value.get("error_message", "failed")
+                    record.setdefault("failures", []).append(record["failure"])
+                    record.pop("operation_id", None)
+                    (root / "latest-state.json").write_text(
+                        json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8"
+                    )
                     save()
+                    if args.retry_failed:
+                        return value
                     raise RuntimeError("Operation failed; inspect the private acceptance artifact")
                 if value["operation_status"] in {"complete", "paused"}:
                     record.pop("operation_id", None)
@@ -113,10 +134,10 @@ async def run(args, root):
             accepted = await post(
                 "/script-editor/start",
                 {
-                    "player_count": 3,
-                    "num_clue_rounds": 1,
+                    "player_count": args.players,
+                    "num_clue_rounds": args.rounds,
                     "difficulty": 1,
-                    "user_idea": "写一个简洁可游玩的旅馆悬疑短本，三个可扮演角色：许舟、陆宁、顾青；死者是馆主。暴雨告别宴后馆主死在书房，开局为次日清晨众人得知死亡但鉴定尚未公布。许舟昨晚为掩盖账目调换杯子，他知道自己的行为；陆宁曾独自到仓库拿旧账册，他人当时没有看见；顾青寄过匿名举报信。馆主和陆宁长期自愿互利合作，从来没有胁迫关系。馆主意外喝下许舟调换的杯中毒物而死，固定真相、无预谋主题。唯一一轮线索公布账本、杯底残留检验与门廊记录，使玩家可推出换杯行为，个人稿不能提前知道其他人到场或次日鉴定。请保持角色本各约400字、全文紧凑，不加支线。",
+                    "user_idea": "暴雨封航的海岛旅馆，告别宴后老板死在书房，几位老客人各有秘密。主题是长期自愿互利的伙伴因意外陷入困局，不存在长期胁迫。希望逐步决定核心冲突和真相，至少让我选择两个关键问题。采用单一结局，人物与线索精简，个人稿不能提前知道他人秘密和后续鉴定。请保持每人个人本约400字，整体紧凑可玩。",
                 },
             )
             record["thread_id"] = accepted["thread_id"]
@@ -130,6 +151,26 @@ async def run(args, root):
             step = state["current_step"]
             if state.get("is_complete"):
                 break
+            if state["state"].get("data_validation_errors"):
+                raise RuntimeError(
+                    "Generated data failed structural validation; inspect latest-state.json"
+                )
+            if args.conversion_only and step == "review_game_data":
+                record.update(
+                    conversion_verified=True, questions_answered=record.get("questions_answered", 0)
+                )
+                record.pop("failure", None)
+                save()
+                print(
+                    json.dumps(
+                        {
+                            "conversion_verified": True,
+                            "questions_answered": record["questions_answered"],
+                        }
+                    ),
+                    flush=True,
+                )
+                return
             if args.retry_failed and state["state"].get("error_message"):
                 accepted = await post(
                     f"/script-editor/{record['thread_id']}/resume",
@@ -142,14 +183,22 @@ async def run(args, root):
                 args.retry_failed = False
             elif step in {"outline_wait", "generate_outline"}:
                 session = state["state"]["outline_session"]
-                accepted = await post(
-                    f"/script-editor/{record['thread_id']}/outline/actions",
-                    {
-                        "action": "stop_questions",
-                        "request_id": str(uuid.uuid4()),
-                        "expected_revision": session["revision"],
-                    },
-                )
+                question = session.get("pending_question")
+                answered = record.get("questions_answered", 0)
+                body = {"request_id": str(uuid.uuid4()), "expected_revision": session["revision"]}
+                if question and answered < args.questions:
+                    body.update(
+                        action="answer",
+                        question_id=question["id"],
+                        option_id=question["options"][0]["id"],
+                        other_text="补充并纠正：角色之间始终自愿互利合作，没有长期胁迫；请同步调整相关动机和线索。"
+                        if answered == 0
+                        else "保持精简，后续鉴定只能在线索轮次公开。",
+                    )
+                    record["questions_answered"] = answered + 1
+                else:
+                    body["action"] = "stop_questions"
+                accepted = await post(f"/script-editor/{record['thread_id']}/outline/actions", body)
             elif step in {
                 "review_outline",
                 "review_first_draft",
@@ -178,7 +227,7 @@ async def run(args, root):
                     f"Unfinished acceptance stage: {step}; inspect latest-state.json"
                 )
             state = await wait(accepted)
-            if state["state"].get("error_message"):
+            if state["state"].get("error_message") and not args.retry_failed:
                 raise RuntimeError("Workflow reported a failure; inspect latest-state.json")
         if not state.get("is_complete"):
             raise RuntimeError("Workflow did not complete")

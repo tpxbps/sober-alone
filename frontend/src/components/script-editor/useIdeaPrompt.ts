@@ -18,7 +18,7 @@ export function useIdeaPrompt(paused: boolean) {
   useEffect(() => {
     if (paused || motionReduced) return;
     const complete = cursor.length >= IDEA_EXAMPLES[cursor.example].length;
-    const timer = setTimeout(() => setCursor(complete ? { example: (cursor.example + 1) % IDEA_EXAMPLES.length, length: 0 } : { ...cursor, length: cursor.length + 1 }), complete ? 8000 : 45);
+    const timer = setTimeout(() => setCursor(complete ? { example: (cursor.example + 1) % IDEA_EXAMPLES.length, length: 0 } : { ...cursor, length: cursor.length + 1 }), complete ? 8000 : 15);
     return () => clearTimeout(timer);
   }, [cursor, paused, motionReduced]);
   return motionReduced ? IDEA_EXAMPLES[0] : IDEA_EXAMPLES[cursor.example].slice(0, cursor.length);

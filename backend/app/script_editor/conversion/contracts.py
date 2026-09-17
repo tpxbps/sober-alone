@@ -1,6 +1,6 @@
 """Structured output contracts for script conversion."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ClueItemResult(BaseModel):
@@ -19,9 +19,14 @@ class ClueStageItem(BaseModel):
         description="本轮逐条拆分的公开线索，至少一条；不得合并无关事实",
     )
     free_discussion_notice: str = Field(
-        default="",
-        description="自由讨论阶段系统消息（引导玩家讨论的方向）",
+        default="请结合已公开的线索自由讨论。",
+        description="简短的讨论邀请，不替玩家推理；没有额外引导时使用中性提示",
     )
+
+    @field_validator("free_discussion_notice")
+    @classmethod
+    def discussion_invitation(cls, value: str) -> str:
+        return value.strip() or "请结合已公开的线索自由讨论。"
 
 
 class ClueStagesResult(BaseModel):

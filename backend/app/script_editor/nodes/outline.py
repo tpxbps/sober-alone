@@ -2,10 +2,8 @@
 generate_outline node — 根据用户创意生成剧本大纲（结构化输出，含标题）
 """
 
-import asyncio
 import logging
 
-from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
@@ -28,7 +26,7 @@ class OutlineResult(BaseModel):
 
 async def generate_outline(state: ScriptGenState) -> dict:
     """根据用户创意生成结构化大纲（含标题）"""
-    if (state.get("outline_session") or {}).get("protocol_version") == 2:
+    if (state.get("outline_session") or {}).get("protocol_version", 0) >= 2:
         from app.script_editor.outline.nodes import write_segment
 
         return await write_segment(state)
@@ -43,7 +41,8 @@ async def generate_outline(state: ScriptGenState) -> dict:
     title = ""
     outline = ""
     try:
-        from app.core.llm_factory import create_llm
+        from app.script_editor.llm import create_editor_llm as create_llm
+        from app.script_editor.llm import invoke_structured
 
         llm = create_llm(
             model=settings.SCRIPT_EDITOR_MODEL or "deepseek-flash",
@@ -51,22 +50,7 @@ async def generate_outline(state: ScriptGenState) -> dict:
             timeout=180,
             disable_thinking=True,
         )
-        structured_llm = llm.with_structured_output(
-            OutlineResult,
-            method="function_calling",
-            tool_choice=OutlineResult.__name__
-            if settings.INFERENCE_BACKEND == "tokendance"
-            else "auto",
-        )
-        result = await asyncio.wait_for(
-            structured_llm.ainvoke(
-                [
-                    SystemMessage(content=system_prompt),
-                    HumanMessage(content=user_content),
-                ]
-            ),
-            timeout=240,
-        )
+        result = await invoke_structured(llm, OutlineResult, system_prompt, user_content)
         title = result.script_title.strip()  # type: ignore[union-attr]
         outline = result.content.strip()  # type: ignore[union-attr]
         logger.info(f"Outline structured output OK, title: {title}")

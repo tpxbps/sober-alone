@@ -14,7 +14,6 @@ export function IdeaStage({
   error,
   isStarting,
   onStart,
-  moleActive,
 }: {
   userIdea: string;
   setUserIdea: (value: string) => void;
@@ -32,7 +31,6 @@ export function IdeaStage({
     difficulty: number;
     num_clue_rounds: number;
   }) => void;
-  moleActive: boolean;
 }) {
   const [focused, setFocused] = useState(false);
   const placeholder = useIdeaPrompt(focused || Boolean(userIdea));
@@ -114,9 +112,7 @@ export function IdeaStage({
         {error && <p className="text-red-400 text-sm mt-3">{error}</p>}
       </div>
       <div
-        className={`p-4 ${
-          moleActive ? "pl-12" : ""
-        } border-t border-border/30`}
+        className={`p-4  border-t border-border/30`}
       >
         <LoadingButton
           isLoading={isStarting}

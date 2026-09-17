@@ -29,10 +29,17 @@ does not itself add public-host authentication or multi-user billing to the loca
 recovery and stop the affected operation rather than falling back to another payer.
 Ordinary CI uses offline protocol fixtures. Real provider verification is separate.
 
-`SCRIPT_EDITOR_MODEL` selects the model for writing, conversion and content review.
-Optionally set `SCRIPT_REVIEW_MODEL` to use a separate model for review and safety
-checks; it defaults to the creator model and uses the same operation's credential.
+Workshop writing, conversion, review and its assistant all use `deepseek-flash`.
+The old `SCRIPT_EDITOR_MODEL` / `SCRIPT_REVIEW_MODEL` values are accepted for
+configuration compatibility but no longer select workshop models. By default
+`SCRIPT_EDITOR_INFERENCE_BACKEND=inherit` follows `INFERENCE_BACKEND` and the
+operation credential. An explicit `deepseek_official` override routes only
+workshop text to `DEEPSEEK_API_KEY` / `DEEPSEEK_API_BASE_URL`; media and embeddings
+keep their existing route. This override is never an automatic fallback.
 Long-form draft requests have a 240-second timeout, separate from gameplay.
+Structured calls share a limit of four concurrent requests per worker and at
+most one corrective retry; truncation splits the fact task instead of repeating
+an oversized response. See [workshop validation](SCRIPT_WORKSHOP_STABILITY.md).
 For a confirmed provider outage, `DISABLED_LLM_MODELS` accepts comma-separated
 model IDs (including legacy aliases). Disabled models are excluded from selection
 and health probes, and the server rejects direct calls to them. Clear the setting

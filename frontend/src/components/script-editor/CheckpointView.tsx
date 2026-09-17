@@ -5,11 +5,9 @@ import type { CheckpointInfo, GameDataSections } from "@/types/editor";
 export function CheckpointView({
   viewingCheckpoint,
   error,
-  moleActive,
 }: {
   viewingCheckpoint: CheckpointInfo;
   error: string | null;
-  moleActive: boolean;
 }) {
   const cpState = viewingCheckpoint.state;
   const cpInterrupt = viewingCheckpoint.interrupt;
@@ -302,9 +300,7 @@ export function CheckpointView({
         </div>
       )}
       <div
-        className={`p-3 ${
-          moleActive ? "pl-12" : ""
-        } border-t border-border/30`}
+        className={`p-3  border-t border-border/30`}
       />
     </div>
   );

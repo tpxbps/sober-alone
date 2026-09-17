@@ -227,3 +227,39 @@ test('刷新后仍展示未完成的资源任务而不是误报创作完成', as
   await expect(page.getByText('甲 个人剧本向量化')).toBeVisible()
   await expect(page.getByText('剧本创建完成！')).toHaveCount(0)
 })
+
+
+for (const pendingKind of ['start', 'outline']) {
+  test(`失败的${pendingKind}操作刷新后解除输入锁并停止观察`, async ({ page }) => {
+    let operationReads = 0;
+    await page.addInitScript(kind => localStorage.setItem('editorSession', JSON.stringify({
+      threadId: 'failed-outline', currentStep: 'generate_outline', operationId: 'failed-op',
+      ...(kind === 'start' ? { pendingKind: 'start' } : {}),
+    })), pendingKind);
+    const question = { id: 'q1', title: '请决定方向', question: '人物关系如何发展？', options: [
+      { id: 'a', label: '自愿合作', impact: '保留共同经历' }, { id: 'b', label: '昔日竞争', impact: '增加旧事' },
+    ] };
+    const session = { protocol_version: 3, revision: 1, status: 'awaiting_answer', segments: [], events: [],
+      pending_question: question, decisions: [], final_outline: '', questions_asked: 1 };
+    const state = { workflow_mode: 'create', script_title: '恢复输入测试', outline: '', outline_session: session, prompts: {}, error_message: '' };
+    const result = { success: true, thread_id: 'failed-outline', current_step: 'outline_wait', is_complete: false,
+      state, interrupt: { step: 'outline_wait', question },
+      outline_progress: { revision: 1, seq: 1, session, live: null, control: { revision: 1, paused: false } } };
+    await page.route('**/api/v1/**', async route => {
+      const path = new URL(route.request().url()).pathname;
+      if (path.includes('/operations/')) { operationReads++; return json(route, { ...result, operation_id: 'failed-op', operation_status: 'failed', error_message: '本轮提问未完成' }); }
+      if (path.endsWith('/state')) return json(route, result);
+      if (path.endsWith('/convert-progress') || path.endsWith('/asset-progress')) return json(route, { success: true, progress: null });
+      if (path.endsWith('/progress-stream')) return route.fulfill({ contentType: 'text/event-stream', body: 'data: {"type":"done"}\n\n' });
+      return json(route, { success: true, scripts: [], checkpoints: [], models: [] });
+    });
+    await page.goto('/?editor=resume');
+    await expect(page.getByLabel('其他想法或补充说明')).toBeEnabled();
+    await page.getByLabel('其他想法或补充说明').fill('继续保持自愿合作');
+    await expect(page.getByRole('button', { name: '提交想法' })).toBeEnabled();
+    const reads = operationReads;
+    await page.waitForTimeout(6000);
+    expect(operationReads).toBe(reads);
+    expect(JSON.parse(await page.evaluate(() => localStorage.getItem('editorSession') || '{}')).operationId).toBeUndefined();
+  });
+}
