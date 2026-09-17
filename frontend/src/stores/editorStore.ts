@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { editorApi } from '@/lib/editorApi';
-import type { EditorInterruptInfo, EditorWorkflowState, AssetProgress, CheckpointInfo, EditorOperationResponse, StartWorkflowResponse, ResumeWorkflowResponse } from '@/types/editor';
+import type { EditorInterruptInfo, EditorWorkflowState, AssetProgress, CheckpointInfo, EditorOperationResponse, StartWorkflowResponse, ResumeWorkflowResponse, SubmittedDraft, GameDataSections } from '@/types/editor';
 
 const EDITOR_SESSION_KEY = 'editorSession';
 
@@ -99,6 +99,7 @@ interface EditorSession {
   targetStep?: string;
   currentStep?: string;
   pendingKind?: 'start' | 'edit' | 'resume';
+  submitted?: SubmittedDraft;
 }
 
 function loadSession(): EditorSession | null {
@@ -122,6 +123,7 @@ export function hasStoredEditorSession(): boolean {
 }
 
 class OperationPollCancelled extends Error {}
+class OperationFailed extends Error {}
 
 let _operationPollEpoch = 0;
 const OPERATION_POLL_INTERVAL_MS = 5000;
@@ -148,7 +150,7 @@ async function waitForOperation(
   threadId: string,
   operationId: string,
   epoch: number,
-  onPending?: () => Promise<void>,
+  onPending?: (result: EditorOperationResponse) => Promise<void>,
 ): Promise<EditorOperationResponse & (StartWorkflowResponse | ResumeWorkflowResponse)> {
   for (;;) {
     if (epoch !== _operationPollEpoch) throw new OperationPollCancelled();
@@ -162,12 +164,12 @@ async function waitForOperation(
     }
     if (epoch !== _operationPollEpoch) throw new OperationPollCancelled();
     if (result.operation_status === 'failed') {
-      throw new Error(result.error_message || '后台操作失败');
+      throw new OperationFailed(result.error_message || '后台操作失败');
     }
     if ((result.operation_status === 'complete' || result.operation_status === 'paused') && result.state && result.current_step) {
       return result as EditorOperationResponse & (StartWorkflowResponse | ResumeWorkflowResponse);
     }
-    await onPending?.();
+    await onPending?.(result);
     await pollDelay(epoch);
   }
 }
@@ -198,11 +200,15 @@ async function loadProgressSnapshots(threadId: string): Promise<{
     editorApi.getConvertProgress(threadId),
     editorApi.getAssetProgress(threadId),
   ]);
+  const current = useEditorStore.getState();
+  const newer = (previous: AssetProgress | null, incoming: AssetProgress | null) =>
+    previous?.operation_id === incoming?.operation_id && (previous?.seq || 0) > (incoming?.seq || 0)
+      ? previous : incoming;
   return {
     convertProgress:
-      convertResult.status === 'fulfilled' ? convertResult.value.progress : null,
+      convertResult.status === 'fulfilled' ? newer(current.convertProgress, convertResult.value.progress) : current.convertProgress,
     assetProgress:
-      assetResult.status === 'fulfilled' ? assetResult.value.progress : null,
+      assetResult.status === 'fulfilled' ? newer(current.assetProgress, assetResult.value.progress) : current.assetProgress,
   };
 }
 
@@ -219,6 +225,9 @@ async function waitForWorkflowState(threadId: string, epoch: number) {
 }
 
 interface EditorState {
+  checkpointId?: string;
+  operationId?: string;
+  submitted: SubmittedDraft | null;
   // Workflow state
   threadId: string | null;
   scriptId: string | null;
@@ -256,7 +265,7 @@ interface EditorState {
     ending_mode?: "single" | "multiple";
   }) => Promise<void>;
   startEditWorkflow: (scriptId: string) => Promise<void>;
-  resumeWorkflow: (action: string, content?: string, prompt?: string, gameDataSections?: unknown, humanReview?: string, selectedAssetIds?: string[], qualityReportId?: string) => Promise<void>;
+  resumeWorkflow: (action: string, content?: string, prompt?: string, gameDataSections?: unknown, humanReview?: string, selectedAssetIds?: string[], qualityReportId?: string, feedback?: string, assetTaskId?: string) => Promise<void>;
   fetchState: () => Promise<void>;
   restoreSession: () => Promise<boolean>;
   openProgressStream: () => void;
@@ -275,6 +284,7 @@ interface EditorState {
 let _sseClose: (() => void) | null = null;
 
 export const useEditorStore = create<EditorState>((set, get) => ({
+  submitted: null,
   threadId: null,
   scriptId: null,
   scriptTitle: '',
@@ -313,6 +323,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         threadId: result.thread_id,
         scriptId: result.script_id,
         scriptTitle: result.script_title,
+        checkpointId: result.checkpoint_id,
         currentStep: result.current_step,
         workflowMode: result.state.workflow_mode || 'create',
         isComplete: false,
@@ -346,6 +357,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         threadId: result.thread_id,
         scriptId: result.script_id,
         scriptTitle: result.script_title,
+        checkpointId: result.checkpoint_id,
         currentStep: result.current_step,
         workflowMode: 'edit',
         isComplete: false,
@@ -360,91 +372,58 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }
   },
 
-  resumeWorkflow: async (action, content, prompt, gameDataSections, humanReview, selectedAssetIds, qualityReportId) => {
-    const { threadId, currentStep, workflowMode } = get();
-    if (!threadId) return;
+  resumeWorkflow: async (action, content, prompt, gameDataSections, humanReview, selectedAssetIds, qualityReportId, feedback, assetTaskId) => {
+    const before = get();
+    const { threadId, currentStep } = before;
+    if (!threadId || before.isLoading) return;
     const pollEpoch = ++_operationPollEpoch;
-
-    // Optimistic: on confirm, immediately advance timeline to next generation step
-    const optimisticStep = workflowMode === 'edit' && currentStep === 'review_game_data'
-      ? currentStep
-      : action === "confirm" && currentStep
-      ? (OPTIMISTIC_STEP_MAP[currentStep] || currentStep)
-      : currentStep;
-
-    // Pre-open SSE stream for progress-heavy steps (BEFORE POST, so events aren't missed)
-    const needsSSE = optimisticStep === "convert_to_game_data"
-      || optimisticStep === "check_game_quality"
-      || optimisticStep === "safety_check"
-      || optimisticStep === "save_to_database"
-      || optimisticStep === "generate_assets";
-    if (needsSSE) {
-      _sseClose?.();
-      _sseClose = editorApi.openProgressStream(
-        threadId,
-        (convertData) => set({ convertProgress: convertData }),
-        (assetData) => set({ assetProgress: assetData }),
-        () => { _sseClose = null; },
-        (progress) => set({ safetyProgress: progress }),
-      );
-    }
-
-    set({ isLoading: true, error: null, currentStep: optimisticStep });
+    const requestId = crypto.randomUUID();
+    const submitted: SubmittedDraft = { step: before.interruptInfo?.step || currentStep, content,
+      gameData: gameDataSections as GameDataSections | undefined, humanReview };
+    const optimisticStep = action === 'quality_check' ? 'check_game_quality' : action === 'retry_asset' ? 'generate_assets'
+      : action === 'confirm' ? OPTIMISTIC_STEP_MAP[currentStep] || currentStep : currentStep;
+    const interruptInfo = before.interruptInfo ? { ...before.interruptInfo,
+      ...(content !== undefined ? { generated_content: content } : {}),
+      ...(gameDataSections ? { game_data_sections: gameDataSections as GameDataSections } : {}),
+    } : null;
+    set({ isLoading: true, error: null, currentStep: optimisticStep, submitted, interruptInfo, operationId: requestId });
+    get().openProgressStream();
+    const payload = { action, content, prompt, game_data_sections: gameDataSections,
+      human_review: humanReview, selected_asset_ids: selectedAssetIds, quality_report_id: qualityReportId,
+      feedback, asset_task_id: assetTaskId, request_id: requestId, expected_checkpoint_id: before.checkpointId };
     try {
-      const accepted = await editorApi.resume(threadId, {
-        action,
-        content,
-        prompt,
-        game_data_sections: gameDataSections,
-        human_review: humanReview,
-        selected_asset_ids: selectedAssetIds,
-        quality_report_id: qualityReportId,
+      let accepted;
+      try { accepted = await editorApi.resume(threadId, payload); }
+      catch (error) {
+        if (operationErrorStatus(error) !== null) throw error;
+        accepted = await editorApi.resume(threadId, payload);
+      }
+      set({ operationId: accepted.operation_id });
+      saveSession({ threadId, operationId: accepted.operation_id, targetStep: accepted.target_step,
+        currentStep: optimisticStep, pendingKind: 'resume', submitted });
+      const result = await waitForOperation(threadId, accepted.operation_id, pollEpoch, async pending => {
+        if (get().threadId !== threadId) return;
+        const stage = pending.progress?.workflow?.current_step || pending.current_step;
+        if (stage) set({ currentStep: stage });
+        set(await loadProgressSnapshots(threadId));
       });
-      saveSession({
-        threadId,
-        operationId: accepted.operation_id,
-        targetStep: accepted.target_step,
-        currentStep: optimisticStep,
-        pendingKind: 'resume',
-      });
-      const result = await waitForOperation(threadId, accepted.operation_id, pollEpoch);
+      if (get().threadId !== threadId) return;
+      const progress = await loadProgressSnapshots(threadId);
+      set({ currentStep: result.current_step, isComplete: result.is_complete && !hasIncompleteTasks(progress.assetProgress),
+        workflowState: result.state, interruptInfo: result.interrupt, checkpointId: result.checkpoint_id,
+        scriptId: result.state.script_id, scriptTitle: result.state.script_title || get().scriptTitle,
+        isLoading: false, submitted: null, operationId: undefined, ...progress });
       saveSession({ threadId, currentStep: result.current_step });
-
-      // Clear session on completion
-      if (result.is_complete) {
-        clearSession();
-      }
-
-      // Close simple SSE, but re-open with completion handling if there are failures
-      _sseClose?.();
-      _sseClose = null;
-
-      // Check if convert/asset progress has incomplete tasks — keep SSE open for retries
-      const { convertProgress: cp, assetProgress: ap } = get();
-      const convertHasIncomplete = cp?.phases?.some((p) => p.tasks?.some((t) => !["complete", "skipped"].includes(t.status)));
-      const assetHasIncomplete = ap?.phases?.some((p) => p.tasks?.some((t) => !["complete", "skipped"].includes(t.status)));
-
-      if (convertHasIncomplete || assetHasIncomplete) {
-        // Re-open SSE with completion-handling callbacks so retries can trigger state transitions
-        get().openProgressStream();
-      }
-
-      set({
-        currentStep: convertHasIncomplete && !result.state?.error_message ? optimisticStep : result.current_step,
-        isComplete: assetHasIncomplete ? false : result.is_complete,
-        workflowState: result.state,
-        interruptInfo: convertHasIncomplete && !result.state?.error_message ? null : result.interrupt,
-        scriptTitle: result.state?.script_title || get().scriptTitle,
-        isLoading: false,
-        assetProgress: assetHasIncomplete ? ap : null,
-      });
-
-      // Refresh checkpoint history so timeline nodes for new phases are clickable
-      get().fetchHistory();
+      if (get().isComplete) clearSession();
+      get().closeProgressStream();
+      void get().fetchHistory();
     } catch (err: unknown) {
       if (err instanceof OperationPollCancelled) return;
-      const message = err instanceof Error ? err.message : '操作失败';
-      set({ error: message, isLoading: false, currentStep });
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      set({ error: detail || (err instanceof Error ? err.message : '操作失败'), isLoading: false,
+        currentStep: submitted.step, operationId: undefined });
+      saveSession({ threadId, currentStep: submitted.step, submitted });
+      get().closeProgressStream();
     }
   },
 
@@ -455,6 +434,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     try {
       const result = await editorApi.getState(threadId);
       set({
+        checkpointId: result.checkpoint_id,
         currentStep: result.current_step,
         isComplete: result.is_complete,
         workflowState: result.state,
@@ -474,7 +454,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const pendingStart = session.pendingKind === 'start' || session.pendingKind === 'edit';
     set({
       threadId: session.threadId,
-      currentStep: session.targetStep || session.currentStep || '',
+      currentStep: session.currentStep || session.targetStep || '',
+      submitted: session.submitted || null, operationId: session.operationId,
       isStarting: Boolean(session.operationId && pendingStart),
       isLoading: Boolean(session.operationId && !pendingStart) || !session.operationId,
       error: null,
@@ -482,7 +463,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
     try {
       const refreshProgress = async () => {
-        if (!needsDetailedProgress(session.currentStep || session.targetStep)) {
+        if (!needsDetailedProgress(get().currentStep) && !session.operationId) {
           return { convertProgress: null, assetProgress: null };
         }
         const progress = await loadProgressSnapshots(session.threadId);
@@ -491,12 +472,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       };
 
       if (session.operationId) {
+        get().openProgressStream();
         await refreshProgress();
         const pending = await waitForOperation(
           session.threadId,
           session.operationId,
           pollEpoch,
-          async () => {
+          async status => {
+            const stage = status.progress?.workflow?.current_step || status.current_step;
+            if (stage) set({ currentStep: stage });
             await refreshProgress();
           },
         );
@@ -514,6 +498,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
               ? 'generate_assets'
               : pending.current_step,
           isComplete: restoredComplete,
+          checkpointId: pending.checkpoint_id, submitted: null, operationId: undefined,
           workflowState: pending.state,
           interruptInfo: (convertIncomplete || assetIncomplete) && !pending.state?.error_message ? null : pending.interrupt,
           scriptId: pending.state?.script_id || null,
@@ -524,6 +509,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           isLoading: false,
           isStarting: false,
         });
+        get().closeProgressStream();
         return !restoredComplete;
       }
       const result = await waitForWorkflowState(session.threadId, pollEpoch);
@@ -539,7 +525,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         result.state,
       );
 
+      const restoredInterrupt = session.submitted && interruptInfo?.step === session.submitted.step ? {
+        ...interruptInfo,
+        ...(session.submitted.content !== undefined ? { generated_content: session.submitted.content } : {}),
+        ...(session.submitted.gameData ? { game_data_sections: session.submitted.gameData } : {}),
+      } : interruptInfo;
       set({
+        checkpointId: result.checkpoint_id,
         currentStep: convertIncomplete
           ? 'convert_to_game_data'
           : assetIncomplete
@@ -548,7 +540,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         workflowMode: result.state.workflow_mode || 'create',
         isComplete: restoredComplete,
         workflowState: result.state,
-        interruptInfo: (convertIncomplete || assetIncomplete) && !result.state?.error_message ? null : interruptInfo,
+        interruptInfo: (convertIncomplete || assetIncomplete) && !result.state?.error_message ? null : restoredInterrupt,
         scriptTitle: result.state?.script_title || '',
         scriptId: result.state?.script_id || null,
         convertProgress: progress.convertProgress,
@@ -559,6 +551,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return !restoredComplete;
     } catch (error) {
       if (error instanceof OperationPollCancelled) return false;
+      if (error instanceof OperationFailed && session.submitted) {
+        saveSession({ threadId: session.threadId, currentStep: session.submitted.step, submitted: session.submitted });
+        get().closeProgressStream();
+        const restored = await get().restoreSession();
+        set({ error: error.message });
+        return restored;
+      }
       if (isFatalRestoreError(error)) {
         clearSession();
         set({ threadId: null, isLoading: false, isStarting: false });
@@ -574,52 +573,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   retryAsset: async (taskId: string) => {
-    const { threadId, assetProgress } = get();
-    if (!threadId) return;
-
-    // Optimistically set the task to "running"
-    if (assetProgress?.phases) {
-      const updated = JSON.parse(JSON.stringify(assetProgress));
-      for (const phase of updated.phases) {
-        for (const task of phase.tasks) {
-          if (task.id === taskId) {
-            task.status = "running";
-          }
-        }
-      }
-      set({ assetProgress: updated });
-    }
-
-    try {
-      const result = await editorApi.retryAsset(threadId, taskId);
-      // Update with actual status from backend
-      if (result.task_status && assetProgress?.phases) {
-        const updated = JSON.parse(JSON.stringify(get().assetProgress || assetProgress));
-        for (const phase of updated.phases) {
-          for (const task of phase.tasks) {
-            if (task.id === taskId) {
-              task.status = result.task_status;
-            }
-          }
-        }
-        set({ assetProgress: updated });
-      }
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : '重试失败';
-      set({ error: message });
-      // Revert on error
-      if (assetProgress?.phases) {
-        const reverted = JSON.parse(JSON.stringify(get().assetProgress || assetProgress));
-        for (const phase of reverted.phases) {
-          for (const task of phase.tasks) {
-            if (task.id === taskId && task.status === "running") {
-              task.status = "failed";
-            }
-          }
-        }
-        set({ assetProgress: reverted });
-      }
-    }
+    await get().resumeWorkflow('retry_asset', undefined, undefined, undefined, undefined, undefined, undefined, undefined, taskId);
   },
 
   updateTitle: async (title: string) => {
@@ -637,6 +591,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     _operationPollEpoch += 1;
     clearSession();
     set({
+      submitted: null, checkpointId: undefined, operationId: undefined,
       threadId: null,
       scriptId: null,
       scriptTitle: '',
@@ -662,52 +617,34 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   openProgressStream: () => {
     const { threadId } = get();
     if (!threadId) return;
-
-    // Close existing connection if any
     _sseClose?.();
-
-    const handleAllComplete = () => {
-      const tid = get().threadId;
-      if (!tid) return;
-
-      // Don't advance if there are still incomplete tasks in progress data
-      const { convertProgress: cp, assetProgress: ap } = get();
-      const convertIncomplete = cp?.phases?.some((p) => p.tasks?.some((t) => !["complete", "skipped"].includes(t.status)));
-      const assetIncomplete = ap?.phases?.some((p) => p.tasks?.some((t) => !["complete", "skipped"].includes(t.status)));
-      if (convertIncomplete || assetIncomplete) return;
-
-      editorApi.getState(tid).then((r) => {
-        set({
-          isComplete: r.is_complete,
-          currentStep: r.current_step,
-          interruptInfo: r.interrupt,
-          workflowState: r.state,
-          isLoading: false,
-        });
-      }).catch(() => {});
+    let disposed = false;
+    let close: (() => void) | undefined;
+    let reconnect: ReturnType<typeof setTimeout> | undefined;
+    let seq = 0;
+    const taskSeq: Record<string, number> = {};
+    const acceptProgress = (kind: string, data: AssetProgress | null) => {
+      if (disposed || !data) return false;
+      if (data.operation_id && get().operationId && data.operation_id !== get().operationId) return false;
+      if (data.seq !== undefined && data.seq <= (taskSeq[kind] || 0)) return false;
+      if (data.seq !== undefined) taskSeq[kind] = data.seq;
+      return true;
     };
-
-    _sseClose = editorApi.openProgressStream(
-      threadId,
-      (convertData) => {
-        set({ convertProgress: convertData });
-        if (convertData?.isComplete) {
-          // Convert all done — fetch state to transition to review_game_data
-          handleAllComplete();
-        }
-      },
-      (assetData) => {
-        set({ assetProgress: assetData });
-        if (assetData?.isComplete) {
-          // Asset generation all done — fetch full state
-          handleAllComplete();
-        }
-      },
-      () => {
-        _sseClose = null;
-      },
-      (progress) => set({ safetyProgress: progress }),
-    );
+    const connect = () => {
+      if (disposed || get().threadId !== threadId) return;
+      close = editorApi.openProgressStream(threadId,
+        data => { if (acceptProgress('convert', data)) set({ convertProgress: data }); },
+        data => { if (acceptProgress('assets', data)) set({ assetProgress: data }); },
+        () => { if (!disposed) reconnect = setTimeout(connect, 1500); },
+        progress => { if (!disposed) set({ safetyProgress: progress }); }, undefined,
+        event => {
+          if (disposed || event.operation_id !== get().operationId || event.seq <= seq) return;
+          seq = event.seq;
+          set({ currentStep: event.current_step });
+        });
+    };
+    connect();
+    _sseClose = () => { disposed = true; close?.(); clearTimeout(reconnect); };
   },
 
   closeProgressStream: () => {
@@ -747,6 +684,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const isIdeaRestart = result.current_step === "init" && !result.interrupt;
 
       set({
+        checkpointId: result.checkpoint_id,
         currentStep: result.current_step,
         isComplete: result.is_complete,
         workflowState: result.state,
@@ -778,7 +716,7 @@ const OPTIMISTIC_STEP_MAP: Record<string, string> = {
   review_first_draft: "review_by_llm",
   review_report: "generate_final_draft",
   review_final: "convert_to_game_data",
-  review_game_data: "check_game_quality",
+  review_game_data: "safety_check",
   safety_check: "generate_assets",
   review_asset_plan: "generate_assets",
 };

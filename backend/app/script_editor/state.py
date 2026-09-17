@@ -25,6 +25,12 @@ class ScriptGenState(TypedDict, total=False):
     human_review: str  # 真人审稿意见
     quality_report: dict
     quality_acceptance: dict
+    quality_check_attempted: bool
+    refinement: dict
+    refinement_counts: dict
+    completed_refinements: list[str]
+    generation_audit: list[dict]
+    disclosure_plan: dict
     final_draft: str  # 终稿全文
     character_scripts: dict  # {角色名: 个人剧本文本}
     system_prompts_map: dict  # {角色名: system_prompt文本}

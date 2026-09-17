@@ -262,7 +262,9 @@ async def test_edit_save_updates_in_place_and_preserves_sessions_and_resources(
     state["quality_report"] = {"content_fingerprint": quality_fingerprint(state)}
     state["script_title"] = "与已审查结构化内容不一致的缓存标题"
     rejected = await ScriptRepository.save_generated_script(state)
-    assert "内容检查缺失或已失效" in rejected["error_message"]
+    assert (
+        rejected["error_message"] == ""
+    )  # canonical submitted title overrides stale cache; optional report never gates saving
 
     async with factory() as session:
         persisted = await session.scalar(select(Script).where(Script.script_id == "script-1"))

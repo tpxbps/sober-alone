@@ -35,6 +35,10 @@ async def generate_outline(state: ScriptGenState) -> dict:
     system_prompt = get_prompt("generate_outline", state)
     user_content = f"我的剧本创意：\n\n{state.get('user_idea', '')}"
 
+    from app.script_editor.services.execution import creative_context
+
+    user_content += creative_context(state, "generate_outline")
+
     # 尝试结构化输出（获取标题+大纲）
     title = ""
     outline = ""

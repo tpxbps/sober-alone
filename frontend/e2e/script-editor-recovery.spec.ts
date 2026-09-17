@@ -133,7 +133,7 @@ test('创作长任务在刷新和返回大厅后仍恢复到同一工作流', as
 
   await page.goto('/')
   await page.getByRole('button', { name: '创作工坊', exact: true }).click()
-  await page.getByPlaceholder(/描述你想要创作的剧本杀故事构想/).fill('一座封闭灯塔中的失踪案')
+  await page.getByLabel("故事创意", { exact: true }).fill('一座封闭灯塔中的失踪案')
   await page.getByRole('button', { name: '开始创作' }).click()
 
   await expect(page).toHaveURL(/editor=resume/)

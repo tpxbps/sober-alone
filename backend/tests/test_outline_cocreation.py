@@ -43,6 +43,9 @@ async def env(tmp_path, monkeypatch):
         await conn.run_sync(Base.metadata.create_all)
     for module in (actions, runtime, operation_service):
         monkeypatch.setattr(module, "AsyncSessionLocal", factory)
+    from app.db import session as db_session
+
+    monkeypatch.setattr(db_session, "AsyncSessionLocal", factory)
     calls = []
     blocker = {"event": None, "fail": False}
 
@@ -64,9 +67,21 @@ async def env(tmp_path, monkeypatch):
         )
 
     async def structured(schema, system, content):
+        from app.script_editor.outline.revisions import OutlineRevision
+
+        if schema is OutlineRevision:
+            data = json.loads(content)
+            incoming = data["本次作者输入"]
+            return OutlineRevision(
+                canon=[*data["有效设定"], incoming.get("other_text") or incoming.get("choice", "")],
+                summary="已更新设定",
+            )
         assert schema is Direction, "大纲阶段不应调用审阅模型"
         data = json.JSONDecoder().raw_decode(content)[0]
-        if len(data["已确认决策"]) >= 2 or "允许提问：False" in content:
+        if (
+            len([item for item in data["已确认决策"] if item != "雾港旧案"]) >= 2
+            or "允许提问：False" in content
+        ):
             return Direction(action="finalize")
         return Direction(
             action="ask", next_task="根据刚确认的方向继续推进人物关系", question=QUESTION
@@ -202,7 +217,8 @@ async def test_stop_questions_survives_rewrite_and_archives_old_version(env):
     await settle(runner)
     live = await workflow_service.ScriptEditorWorkflowService().get_state(thread)
     assert live["current_step"] == "review_outline"
-    assert live["state"]["outline_session"]["decisions"][0]["source"] == "ai"
+    assert live["state"]["outline_session"]["decisions"] == []
+    assert live["state"]["outline_session"]["canon"] == state["state"]["outline_session"]["canon"]
     await actions.queue_action(
         runner,
         thread,
@@ -364,7 +380,8 @@ async def test_question_and_automatic_segment_limits_are_enforced(monkeypatch):
     session["questions_asked"] = 5
     result = await nodes.direct_outline({"outline_session": session})
     assert result["outline_session"]["pending_question"] is None
-    assert result["outline_session"]["next_action"] == "write"
+    assert result["outline_session"]["next_action"] == "finalize"
+    assert result["outline_session"]["decisions"] == []
     session["automatic_segments"] = 4
     result = await nodes.direct_outline({"outline_session": session})
     assert result["outline_session"]["next_action"] == "finalize"

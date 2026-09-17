@@ -36,6 +36,8 @@ def review_outline(state: ScriptGenState) -> dict:
     }
     if state.get("outline_session"):
         result["outline_session"] = {**state["outline_session"], "final_outline": content}
+        if content != state.get("outline", ""):
+            result["outline_session"]["canon"] = []
     return result
 
 

@@ -42,9 +42,13 @@ class ScriptEditorWorkflowService:
             return await self.graph.aget_state(config)
         return self.graph.get_state(config)
 
-    async def _update_state(self, config: RunnableConfig, values: dict[str, Any]):
+    async def _update_state(
+        self, config: RunnableConfig, values: dict[str, Any], *, as_node: str | None = None
+    ):
         if hasattr(self.graph, "aupdate_state"):
-            return await self.graph.aupdate_state(config, values)
+            return await self.graph.aupdate_state(
+                config, values, **({"as_node": as_node} if as_node else {})
+            )
         return self.graph.update_state(config, values)
 
     async def _history(self, config: RunnableConfig) -> list[Any]:
@@ -61,7 +65,9 @@ class ScriptEditorWorkflowService:
         script_id = snapshot.values.get("script_id")
         progress = get_asset_progress(script_id) if script_id else None
         if progress:
-            await self._update_state(config, {"asset_progress": progress})
+            await self._update_state(
+                config, {"asset_progress": progress}, as_node="generate_assets"
+            )
 
     async def start(
         self,
@@ -83,6 +89,7 @@ class ScriptEditorWorkflowService:
         from app.script_editor.outline.contracts import new_session
 
         initial_state["outline_session"] = new_session()
+        initial_state["outline_session"]["canon"] = [initial_state["user_idea"]]
         if request.prompts:
             initial_state["prompts"] = request.prompts
         await self.graph.ainvoke(cast(ScriptGenState, initial_state), config)
@@ -125,6 +132,38 @@ class ScriptEditorWorkflowService:
 
     async def resume(self, thread_id: str, request: ResumeWorkflowRequest) -> dict[str, Any]:
         config = self.config(thread_id)
+        snapshot = await self._get_snapshot(config)
+        self._register_from_values(snapshot.values, thread_id)
+        if (
+            request.action == "retry_failed"
+            and not snapshot.next
+            and snapshot.values.get("error_message")
+            and snapshot.values.get("current_step") == "save_to_database"
+        ):
+            # Restore terminal save failures created by older graph versions.
+            await self.graph.aupdate_state(
+                config,
+                {"error_message": "", "retry_step": "save_to_database"},
+                as_node="review_failure",
+            )
+            await self.graph.ainvoke(None, config)
+            return self._live_response(thread_id, await self._get_snapshot(config))
+        if request.action == "quality_check":
+            return await self._quality_check(thread_id, request, snapshot)
+        if request.action == "retry_asset":
+            return await self._retry_asset(thread_id, request, snapshot)
+        if request.action == "regenerate":
+            target = (self.extract_interrupt(snapshot) or {}).get("step", "")
+            await self._update_state(
+                config,
+                {
+                    "refinement": {
+                        "target": target,
+                        "feedback": (request.feedback or "").strip(),
+                        "request_id": request.request_id or str(uuid.uuid4()),
+                    }
+                },
+            )
         resume_data: dict[str, Any] = {"action": request.action}
         for field in (
             "content",
@@ -156,6 +195,66 @@ class ScriptEditorWorkflowService:
         response.pop("script_id", None)
         response.pop("script_title", None)
         return response
+
+    async def _quality_check(self, thread_id, request, snapshot):
+        from app.script_editor.nodes.quality_check import check_game_quality, quality_fingerprint
+        from app.script_editor.services.execution import report_stage
+
+        config = self.config(thread_id)
+        values = dict(snapshot.values)
+        if values.get("quality_check_attempted") or values.get("quality_report"):
+            return self._live_response(thread_id, snapshot)
+        if request.game_data_sections is not None:
+            values["game_data_sections"] = request.game_data_sections
+        # Commit the attempt before the external call. A restart never spends a second check.
+        pending = {
+            "status": "incomplete",
+            "findings": [],
+            "report_id": str(uuid.uuid4()),
+            "content_fingerprint": quality_fingerprint(values),
+            "error": "本次检查未完成，可以继续创作。",
+        }
+        await self._update_state(
+            config,
+            {
+                "quality_check_attempted": True,
+                "quality_report": pending,
+                "game_data_sections": values.get("game_data_sections", {}),
+            },
+        )
+        await report_stage("check_game_quality")
+        result = await check_game_quality(values)
+        result["current_step"] = "review_game_data"
+        await self._update_state(config, result)
+        return self._live_response(thread_id, await self._get_snapshot(config))
+
+    async def _retry_asset(self, thread_id, request, snapshot):
+        from app.script_editor.nodes.save import get_asset_progress, retry_single_asset
+        from app.script_editor.services.execution import report_stage
+
+        values = snapshot.values
+        script_id = values.get("script_id")
+        task_id = request.asset_task_id
+        progress = get_asset_progress(script_id) or values.get("asset_progress") or {}
+        task = next(
+            (
+                task
+                for phase in progress.get("phases", [])
+                for task in phase.get("tasks", [])
+                if task.get("id") == task_id
+            ),
+            None,
+        )
+        if not task or task.get("status") not in {"failed", "running", "complete", "skipped"}:
+            raise ValueError("该资源当前不可重试，请刷新进度")
+        if task["status"] not in {"complete", "skipped"}:
+            await report_stage("generate_assets")
+            try:
+                await retry_single_asset(script_id, task_id, values)
+            finally:
+                await self.persist_asset_progress(thread_id)
+        # Do not schedule the graph again: only the selected failed task is retried.
+        return self._live_response(thread_id, await self._get_snapshot(self.config(thread_id)))
 
     async def update_prompt(self, thread_id: str, step: str, prompt: str) -> dict[str, Any]:
         config = self.config(thread_id)
@@ -242,11 +341,29 @@ class ScriptEditorWorkflowService:
     async def fork(
         self, thread_id: str, checkpoint_id: str, state_updates: dict | None = None
     ) -> dict[str, Any]:
+        latest = await self._get_snapshot(self.config(thread_id))
+        workflow_history = {
+            key: latest.values[key]
+            for key in (
+                "quality_check_attempted",
+                "quality_report",
+                "refinement_counts",
+                "completed_refinements",
+                "generation_audit",
+            )
+            if key in latest.values
+        }
         checkpoint_config = self.config(thread_id, checkpoint_id)
         if state_updates:
             private_fields = {
                 "quality_report",
                 "quality_acceptance",
+                "quality_check_attempted",
+                "refinement",
+                "refinement_counts",
+                "completed_refinements",
+                "generation_audit",
+                "disclosure_plan",
                 "safety_report",
                 "safety_passed",
                 "safety_rejection_reason",
@@ -291,6 +408,8 @@ class ScriptEditorWorkflowService:
                 None,
             )
             await self.graph.ainvoke(None, matching.config if matching else checkpoint_config)
+        if workflow_history:
+            await self._update_state(self.config(thread_id), workflow_history)
         response = self._live_response(thread_id, await self._get_snapshot(self.config(thread_id)))
         response.pop("script_id", None)
         response.pop("script_title", None)
@@ -301,13 +420,34 @@ class ScriptEditorWorkflowService:
         interrupt = self.extract_interrupt(snapshot)
         self._register_from_values(values, thread_id)
         has_error = bool(values.get("error_message"))
+        if has_error and not interrupt and values.get("current_step") == "save_to_database":
+            interrupt = {
+                "step": "save_to_database",
+                "retry_step": "save_to_database",
+                "failed": True,
+                "generated_content": "",
+                "prompt_used": "",
+            }
+        progress = values.get("asset_progress") or {}
+        unfinished_assets = any(
+            task.get("status") not in {"complete", "skipped"}
+            for phase in progress.get("phases", [])
+            for task in phase.get("tasks", [])
+        )
+        if interrupt and interrupt.get("step") == "review_game_data":
+            interrupt = {
+                **interrupt,
+                "game_data_sections": values.get("game_data_sections", {}),
+                "quality_report": values.get("quality_report", {}),
+            }
         return {
             "success": True,
             "thread_id": thread_id,
             "script_id": values.get("script_id", ""),
             "script_title": values.get("script_title", ""),
             "current_step": interrupt["step"] if interrupt else values.get("current_step", ""),
-            "is_complete": snapshot.next == () and not has_error,
+            "checkpoint_id": snapshot.config.get("configurable", {}).get("checkpoint_id", ""),
+            "is_complete": snapshot.next == () and not has_error and not unfinished_assets,
             "interrupt": interrupt,
             "state": self.serialize_state(values),
         }
@@ -422,6 +562,10 @@ class ScriptEditorWorkflowService:
             "human_review": "",
             "quality_report": {},
             "quality_acceptance": {},
+            "quality_check_attempted": False,
+            "refinement_counts": {},
+            "asset_progress": None,
+            "convert_progress": None,
             "final_draft": "",
             "character_scripts": {},
             "game_data_sections": {},

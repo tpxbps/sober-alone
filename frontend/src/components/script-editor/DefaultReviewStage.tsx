@@ -2,6 +2,7 @@ import { Markdown } from "@/components/ui/Markdown";
 import type { EditorInterruptInfo } from "@/types/editor";
 import { LoadingButton, PromptSection } from "./EditorControls";
 import { getButtonLoadingMessage } from "./editorMessages";
+import { RefineButton } from './RefineButton';
 
 export function DefaultReviewStage({
   interruptInfo,
@@ -28,9 +29,7 @@ export function DefaultReviewStage({
   onRegenerate: (prompt?: string) => Promise<void>;
   moleActive: boolean;
 }) {
-  const displayContent = editing
-    ? editedContent
-    : editedContent || interruptInfo.generated_content;
+  const displayContent = editedContent;
 
   return (
     <div className="h-full flex flex-col">
@@ -44,6 +43,7 @@ export function DefaultReviewStage({
         promptUsed={interruptInfo.prompt_used}
         onRegenerate={onRegenerate}
         isLoading={isLoading}
+        hideRegenerate
       />
 
       <div className="flex-1 min-h-0 flex flex-col">
@@ -52,7 +52,6 @@ export function DefaultReviewStage({
           {!editing ? (
             <button
               onClick={() => {
-                setEditedContent(editedContent || interruptInfo.generated_content);
                 setEditing(true);
               }}
               className="text-xs text-muted-foreground hover:text-foreground transition-colors"
@@ -69,7 +68,7 @@ export function DefaultReviewStage({
               </button>
               <button
                 onClick={() => {
-                  setEditedContent("");
+                  setEditedContent(interruptInfo.generated_content);
                   setEditing(false);
                 }}
                 className="text-xs text-muted-foreground hover:text-foreground transition-colors"
@@ -86,13 +85,15 @@ export function DefaultReviewStage({
         >
           {editing ? (
             <textarea
+              disabled={isLoading}
+              aria-label="剧本正文"
               value={editedContent}
               onChange={(event) => setEditedContent(event.target.value)}
               className="w-full h-full bg-transparent text-sm resize-none focus:outline-none scrollbar-thin"
             />
           ) : (
             <Markdown className="text-sm">
-              {displayContent || interruptInfo.generated_content}
+              {displayContent}
             </Markdown>
           )}
         </div>
@@ -103,11 +104,13 @@ export function DefaultReviewStage({
           moleActive ? "pl-12" : ""
         } border-t border-border/30`}
       >
+        <div className="mb-2"><RefineButton step={interruptInfo.step} content={displayContent} disabled={isLoading} /></div>
         <LoadingButton
           isLoading={isLoading}
           loadingText={getButtonLoadingMessage(currentStep)}
           onClick={() => onConfirm(editing ? editedContent : displayContent)}
           label="确认并继续"
+          disabled={!displayContent.trim()}
         />
       </div>
     </div>

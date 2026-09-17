@@ -25,6 +25,10 @@ class LegacyOwnershipClaimRequest(BaseModel):
 
 class ResumeWorkflowRequest(BaseModel):
     action: str
+    request_id: str | None = Field(default=None, min_length=8, max_length=80)
+    expected_checkpoint_id: str | None = None
+    feedback: str | None = Field(default=None, max_length=8000)
+    asset_task_id: str | None = None
     content: str | None = None
     characters: list | None = None
     character_scripts: dict | None = None

@@ -38,6 +38,7 @@ class OutlineRuntime:
     ):
         self.thread_id = thread_id
         self.operation_id = operation_id
+        self.input_checkpoint_id: str | None = None
         self.operation_created_at = operation_created_at or (progress or {}).get("outline", {}).get(
             "operation_created_at", ""
         )
@@ -47,11 +48,48 @@ class OutlineRuntime:
         self.saved_at = 0.0
         self.started_at = time.monotonic()
         self.calls = 0
+        self.model_responses: list[dict] = []
         self.first_token_ms: int | None = None
         self.first_question_ms: int | None = None
         self.control: dict = {}
         self.error = ""
         self.answer: dict | None = None
+        self.storage_lock = asyncio.Lock()
+        self.progress_seq = (progress or {}).get("event_seq", 0)
+        self.stage = (progress or {}).get("workflow", {}).get("current_step", "")
+        self.pending_progress: dict = {}
+        self.progress_writer: asyncio.Task | None = None
+
+    def queue_progress(self, kind: str, data: dict) -> dict:
+        self.progress_seq += 1
+        event = {
+            **data,
+            "operation_id": self.operation_id,
+            "seq": self.progress_seq,
+            "current_step": self.stage,
+        }
+        self.pending_progress[kind] = event
+        if self.progress_writer is None or self.progress_writer.done():
+            self.progress_writer = asyncio.create_task(self.flush_progress())
+        return event
+
+    async def flush_progress(self):
+        while self.pending_progress:
+            batch, self.pending_progress = self.pending_progress, {}
+            async with self.storage_lock:
+                async with AsyncSessionLocal() as db:
+                    operation = await db.get(EditorOperation, self.operation_id)
+                    if operation:
+                        operation.progress = {
+                            **(operation.progress or {}),
+                            **batch,
+                            "event_seq": self.progress_seq,
+                        }
+                        await db.commit()
+
+    async def drain_progress(self):
+        if self.progress_writer:
+            await finish_database_access(self.progress_writer)
 
     async def read_control(self) -> dict:
         return await finish_database_access(self._read_control())

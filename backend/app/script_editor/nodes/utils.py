@@ -58,6 +58,9 @@ async def call_llm(
     for attempt in range(MAX_RETRIES):
         try:
             response = await llm.ainvoke(messages)
+            from app.script_editor.services.execution import observe_model
+
+            observe_model(response)
             content = response.content
             if isinstance(content, list):
                 # Extract text from content blocks

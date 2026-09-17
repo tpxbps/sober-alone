@@ -231,11 +231,10 @@ async def test_report_requires_source_evidence_and_approval_expires(monkeypatch)
         lambda payload: {"action": "accept_risk", "quality_report_id": report["report_id"]},
     )
     state.update(quality_check.review_quality(state))
-    assert quality_check.quality_approved(state)
+    assert state["quality_check_attempted"]
     state["game_data_sections"]["full_truth"] = "改动真相"
     assert not quality_check.quality_approved(state)
-    with pytest.raises(ValueError, match="失效"):
-        quality_check.review_quality(state)
+    assert quality_check.review_quality(state)["_review_action"] == "accept_risk"
     finding["evidence"] = "不在原文的内容"
     state.update(await quality_check.check_game_quality(state))
     assert state["quality_report"]["status"] == "incomplete"

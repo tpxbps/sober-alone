@@ -48,38 +48,27 @@ test('审稿独立确认、意见草稿刷新保留、终稿单独编辑', async
   await expect(page.getByText('人工编辑的终稿', { exact: true })).toBeVisible()
 })
 
-test('质量检查失败明确标识，重试后风险确认失效', async ({ page }) => {
-  let reportId = 'first-report'
-  let acceptedId = ''
+test('旧质检节点可直接返回游戏数据，不要求接受风险或重新检查', async ({ page }) => {
+  let action = '';
   const response = () => ({ success: true, thread_id: 'quality-check', current_step: 'review_quality', is_complete: false,
-    state: { prompts: {}, quality_report: { report_id: reportId, content_fingerprint: 'fp', status: 'incomplete', findings: [], error: '模型暂时不可用' } },
-    interrupt: { step: 'review_quality', generated_content: '', quality_report: { report_id: reportId, content_fingerprint: 'fp', status: 'incomplete', findings: [], error: '模型暂时不可用' } } })
-  await page.addInitScript(() => localStorage.setItem('editorSession', JSON.stringify({ threadId: 'quality-check', currentStep: 'review_quality' })))
-  await page.route('**/api/v1/**', async (route) => {
-    const path = new URL(route.request().url()).pathname
-    let body: unknown = { success: true, checkpoints: [], models: [], scripts: [] }
-    if (path.endsWith('/state')) body = response()
-    if (path.endsWith('/resume')) {
-      const request = route.request().postDataJSON()
-      if (request.action === 'retry_quality') reportId = 'second-report'
-      if (request.action === 'accept_risk') acceptedId = request.quality_report_id
-      body = { success: true, operation_id: 'op', operation_status: 'queued' }
-    }
-    if (path.endsWith('/operations/op')) body = { ...response(), operation_status: 'complete' }
-    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) })
-  })
-  await page.goto('/?editor=resume')
-  await expect(page.getByRole('heading', { name: '质量检查未完成' })).toBeVisible()
-  const acceptance = page.getByRole('button', { name: '接受风险并继续保存' })
-  await expect(acceptance).toBeDisabled()
-  await page.getByRole('checkbox').check()
-  await page.getByRole('button', { name: '重新检查' }).click()
-  await expect(page.getByRole('checkbox')).not.toBeChecked()
-  await expect(acceptance).toBeDisabled()
-  await page.getByRole('checkbox').check()
-  await acceptance.click()
-  await expect.poll(() => acceptedId).toBe('second-report')
-})
+    state: { prompts: {}, quality_report: { report_id: 'old', status: 'incomplete', findings: [], error: '模型暂时不可用' } },
+    interrupt: { step: 'review_quality', generated_content: '', quality_report: { report_id: 'old', status: 'incomplete', findings: [], error: '模型暂时不可用' } } });
+  await page.addInitScript(() => localStorage.setItem('editorSession', JSON.stringify({ threadId: 'quality-check', currentStep: 'review_quality' })));
+  await page.route('**/api/v1/**', async route => {
+    const path = new URL(route.request().url()).pathname;
+    let body: unknown = { success: true, checkpoints: [], models: [], scripts: [], progress: null };
+    if (path.endsWith('/state')) body = response();
+    if (path.endsWith('/resume')) { action = route.request().postDataJSON().action; body = { operation_id: 'op', operation_status: 'queued' }; }
+    if (path.endsWith('/operations/op')) body = { ...response(), operation_status: 'complete' };
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
+  });
+  await page.goto('/?editor=resume');
+  await expect(page.getByRole('heading', { name: '质量检查未完成' })).toBeVisible();
+  await expect(page.getByRole('checkbox')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '重新检查' })).toHaveCount(0);
+  await page.getByRole('button', { name: '返回游戏数据 · 继续创作' }).click();
+  await expect.poll(() => action).toBe('revise');
+});
 
 async function ratingFixture(page: import('@playwright/test').Page) {
   await page.route('**/api/v1/**', async (route) => {

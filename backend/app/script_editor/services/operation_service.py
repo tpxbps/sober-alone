@@ -78,20 +78,30 @@ class EditorOperationRunner:
     ) -> dict[str, Any]:
         service = ScriptEditorWorkflowService()
         snapshot = await service._get_snapshot(service.config(thread_id))
-        if snapshot.values.get("outline_session") and (
-            snapshot.values["outline_session"].get("pending_question")
-            or (
-                snapshot.values.get("current_step") == "generate_outline"
-                and not (service.extract_interrupt(snapshot) or {}).get("step") == "review_outline"
-            )
-        ):
-            raise ValueError("请通过大纲共创操作继续当前流程")
         async with AsyncSessionLocal() as db:
             workflow = await db.get(EditorWorkflow, thread_id)
             if not workflow:
                 raise WorkflowNotFoundError("工作流不存在")
             if not owner_hash_matches(workflow.owner_key_hash, owner_key_hash):
                 raise WorkflowAuthorizationError("无权访问该工作流")
+            if request.request_id:
+                previous = await db.get(EditorOperation, request.request_id)
+                if previous:
+                    if (
+                        previous.thread_id != thread_id
+                        or previous.request_payload != request.model_dump(exclude_none=True)
+                    ):
+                        raise ValueError("请求编号已用于其他提交，请刷新后重试")
+                    return self._accepted(previous)
+            if snapshot.values.get("outline_session") and (
+                snapshot.values["outline_session"].get("pending_question")
+                or (
+                    snapshot.values.get("current_step") == "generate_outline"
+                    and not (service.extract_interrupt(snapshot) or {}).get("step")
+                    == "review_outline"
+                )
+            ):
+                raise ValueError("请通过大纲共创操作继续当前流程")
             active = await db.scalar(
                 select(EditorOperation).where(
                     EditorOperation.thread_id == thread_id,
@@ -99,12 +109,31 @@ class EditorOperationRunner:
                 )
             )
             if active:
-                return self._accepted(active)
+                if not request.request_id:
+                    return self._accepted(active)
+                raise ValueError("当前操作尚未结束，请等待完成后继续")
+            actual_checkpoint = snapshot.config.get("configurable", {}).get("checkpoint_id")
+            if (
+                request.expected_checkpoint_id
+                and request.expected_checkpoint_id != actual_checkpoint
+            ):
+                raise ValueError("内容已有新版本，请刷新后再提交；您的草稿仍会保留")
+            interrupt = service.extract_interrupt(snapshot) or {}
+            step = interrupt.get("step") or snapshot.values.get("current_step", "")
+            if request.action == "regenerate":
+                if not (request.feedback or "").strip():
+                    raise ValueError("请先输入希望改进的方向")
+                if snapshot.values.get("refinement_counts", {}).get(step, 0) >= 3:
+                    raise ValueError("多次改写可能难以继续改善，建议直接修改内容或进入下一阶段")
+            if request.action == "quality_check" and step != "review_game_data":
+                raise ValueError("请在游戏数据工作区使用质量检查")
+            if request.action == "retry_asset" and not request.asset_task_id:
+                raise ValueError("请选择要重试的资源")
             operation = EditorOperation(
-                operation_id=str(uuid.uuid4()),
+                operation_id=request.request_id or str(uuid.uuid4()),
                 thread_id=thread_id,
                 kind="resume",
-                target_step=workflow.current_step,
+                target_step=step,
                 request_payload=request.model_dump(exclude_none=True),
                 progress={"message": "等待后台执行"},
             )
@@ -208,6 +237,11 @@ class EditorOperationRunner:
             if not owner_hash_matches(workflow.owner_key_hash, owner_key_hash):
                 raise WorkflowAuthorizationError("无权访问该工作流")
             response = self._accepted(operation)
+            response["current_step"] = (
+                (operation.progress or {})
+                .get("workflow", {})
+                .get("current_step", workflow.current_step)
+            )
             if operation.error_message:
                 response["error_message"] = operation.error_message
         if response["operation_status"] in {"complete", "paused"}:
@@ -268,6 +302,22 @@ class EditorOperationRunner:
             token = current_runtime.set(runtime)
             service = ScriptEditorWorkflowService()
             existing = await service._get_snapshot(service.config(thread_id))
+            runtime.input_checkpoint_id = payload.get("expected_checkpoint_id") or (
+                (existing.config or {}).get("configurable", {}).get("checkpoint_id")
+            )
+            persisted_assets = (operation.progress or {}).get("asset_progress")
+            if persisted_assets and existing.values:
+                await service._update_state(
+                    service.config(thread_id),
+                    {"asset_progress": persisted_assets},
+                    as_node="generate_assets"
+                    if payload.get("action") == "retry_asset"
+                    else "save_to_database",
+                )
+                existing = await service._get_snapshot(service.config(thread_id))
+            runtime.input_checkpoint_id = payload.get("expected_checkpoint_id") or (
+                (existing.config or {}).get("configurable", {}).get("checkpoint_id")
+            )
             existing_interrupt = service.extract_interrupt(existing) if existing.values else None
             if kind == "start":
                 if existing_interrupt:
@@ -296,7 +346,19 @@ class EditorOperationRunner:
                         thread_id, await service._get_snapshot(service.config(thread_id))
                     )
             else:
-                if existing_interrupt and existing_interrupt.get("step") != target_step:
+                if payload.get("action") == "regenerate" and operation_id in existing.values.get(
+                    "completed_refinements", []
+                ):
+                    result = service._live_response(thread_id, existing)
+                elif payload.get("action") in {"quality_check", "retry_asset"} or (
+                    payload.get("action") == "retry_failed"
+                    and not existing.next
+                    and existing.values.get("error_message")
+                ):
+                    result = await service.resume(
+                        thread_id, ResumeWorkflowRequest.model_validate(payload)
+                    )
+                elif existing_interrupt and existing_interrupt.get("step") != target_step:
                     result = service._live_response(thread_id, existing)
                 elif existing.values and existing_interrupt is None:
                     await service.graph.ainvoke(None, service.config(thread_id))
@@ -309,6 +371,7 @@ class EditorOperationRunner:
                     )
 
             result = await finish_automatic_answers(service, thread_id, result)
+            await runtime.drain_progress()
             if result.get("state", {}).get("outline_session"):
                 await emit_final(runtime, result["state"]["outline_session"])
             async with AsyncSessionLocal() as db:
@@ -329,6 +392,9 @@ class EditorOperationRunner:
                 workflow.status = "complete" if result.get("is_complete") else "idle"
                 workflow.updated_at = datetime.now()
                 await db.commit()
+            from app.script_editor.services.execution import report_stage
+
+            await report_stage(result.get("current_step", ""), finished=True)
         except asyncio.CancelledError:
             raise
         except Exception as error:
@@ -352,6 +418,8 @@ class EditorOperationRunner:
                         workflow.status = "failed"
                     await db.commit()
         finally:
+            if runtime:
+                await runtime.drain_progress()
             if token is not None:
                 current_runtime.reset(token)
             if runtime:

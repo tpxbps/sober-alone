@@ -24,6 +24,7 @@ import { cloneGameDataSections, workflowDraftKey } from "./contentDrafts";
 import { DefaultReviewStage } from "./DefaultReviewStage";
 import { AssetPlanDialog } from "./AssetPlanDialog";
 import { useTextDraft } from "./useTextDraft";
+import { Markdown } from '@/components/ui/Markdown';
 
 // === Props ===
 
@@ -146,7 +147,8 @@ function ContentPanelBody({
   const isIdeaPhase = phase === "idea" && !interruptInfo;
   const isReviewFinal = currentStep === "review_final" && !!interruptInfo;
   const isReviewGameData =
-    currentStep === "review_game_data" && !!interruptInfo;
+    ["review_game_data", "check_game_quality"].includes(currentStep) && interruptInfo?.step === "review_game_data";
+  const submitted = useEditorStore(s => s.submitted);
   const safetyProgress = useEditorStore((state) => state.safetyProgress);
   const isSafetyRejected =
     interruptInfo?.step === "safety_check" && interruptInfo?.rejected === true;
@@ -189,7 +191,8 @@ function ContentPanelBody({
 
   // Content editing state
   const [editing, setEditing] = useState(false);
-  const [editedContent, setEditedContent] = useState("");
+  const [editedContent, setEditedContent] = useTextDraft(interruptInfo?.step || currentStep,
+    interruptInfo?.generated_content || '', interruptInfo?.generated_content || '');
 
 
   // Game data review state
@@ -245,7 +248,7 @@ function ContentPanelBody({
     if (isLoading && currentStep === "safety_check") {
       return <div className="h-full flex flex-col items-center justify-center gap-4">
         <div className="w-10 h-10 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-        <p>正在审查全部剧本内容{safetyProgress ? `（${safetyProgress.completed} / ${safetyProgress.total}）` : ""}</p>
+        <p>正在进行合规评估{safetyProgress ? `（${safetyProgress.completed} / ${safetyProgress.total}）` : ""}</p>
       </div>;
     }
 
@@ -305,6 +308,7 @@ function ContentPanelBody({
           </h3>
           <p className="text-muted-foreground text-center text-sm max-w-sm">
             剧本「{scriptTitle}」已保存为最新版本，你可以返回剧本大厅开始新对局。
+            感谢您的创作和贡献！
           </p>
           <button
             onClick={onBack}
@@ -361,6 +365,13 @@ function ContentPanelBody({
           onRetry={onRetryAsset}
         />
       );
+    }
+
+    if (isLoading && submitted && !isReviewGameData) {
+      return <div className="flex h-full flex-col">
+        <p role="status" className="border-b border-border bg-primary/5 p-4 text-sm">{getButtonLoadingMessage(currentStep)} · 当前显示本次提交内容</p>
+        <div className="flex-1 overflow-y-auto p-6"><Markdown>{submitted.content || '游戏数据已提交，正在处理下一阶段。'}</Markdown></div>
+      </div>;
     }
 
     if (currentStep === "review_report" && interruptInfo) {

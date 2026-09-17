@@ -1,4 +1,6 @@
 import { LoadingButton } from "./EditorControls";
+import { useState } from 'react';
+import { useIdeaPrompt } from './useIdeaPrompt';
 
 export function IdeaStage({
   userIdea,
@@ -32,6 +34,8 @@ export function IdeaStage({
   }) => void;
   moleActive: boolean;
 }) {
+  const [focused, setFocused] = useState(false);
+  const placeholder = useIdeaPrompt(focused || Boolean(userIdea));
   return (
     <div className="h-full flex flex-col">
       <div className="p-5 flex-1 overflow-y-auto scrollbar-thin">
@@ -40,11 +44,16 @@ export function IdeaStage({
           描述你的剧本创意、故事背景、核心设定等。越详细，AI生成的大纲越贴合你的想法。
         </p>
         <textarea
+          aria-label="故事创意"
+          aria-describedby="idea-description"
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           value={userIdea}
           onChange={(e) => setUserIdea(e.target.value)}
-          placeholder="描述你想要创作的剧本杀故事构想。可以包含：故事背景、人物关系、核心冲突、悬疑元素等。例如：一所与世隔绝的山间别墅中，六位受邀而来的客人发现主人离奇失踪，暴风雪封山之夜，他们必须找出真相……"
+          placeholder={placeholder}
           className="w-full h-[30vh] px-4 py-3 rounded-lg border border-border/50 bg-card text-sm resize-none focus:outline-none focus:border-primary/50 transition-colors placeholder:text-muted-foreground/50 scrollbar-thin"
         />
+        <p id="idea-description" className="sr-only">写下故事背景、人物关系或一个悬念。示例仅用于启发，不会作为输入提交。</p>
         <div className="grid grid-cols-3 gap-3 mt-4">
           <div>
             <label className="block text-xs font-medium mb-1">
@@ -142,4 +151,3 @@ function estimateDuration(
   if (hours > 0) return `约${hours}小时`;
   return `约${mins}分钟`;
 }
-

@@ -4,12 +4,16 @@ generate_final_draft node — 根据审稿意见生成终稿
 
 from app.script_editor.nodes.utils import call_llm
 from app.script_editor.prompts.templates import get_prompt
+from app.script_editor.services.execution import creative_context
 from app.script_editor.state import STEP_GENERATE_FINAL_DRAFT, ScriptGenState
 
 
 async def generate_final_draft(state: ScriptGenState) -> dict:
     """根据审稿意见生成终稿"""
-    system_prompt = get_prompt("generate_final_draft", state)
+    system_prompt = (
+        get_prompt("generate_final_draft", state)
+        + "\n作者确认的核心主题、关系和结局优先于审稿建议。不得擅自推翻；终稿仍是作者可读的全知文稿，后续负责拆分。"
+    )
 
     # 构建角色列表
     characters_summary = ""
@@ -54,7 +58,9 @@ async def generate_final_draft(state: ScriptGenState) -> dict:
 请根据以上审稿意见修改并输出完整终稿。注意终稿应同时考虑初稿生成时对各轮线索分阶段设计的考量。
 """
 
-    final_draft = await call_llm(system_prompt, user_content)
+    final_draft = await call_llm(
+        system_prompt, user_content + creative_context(state, "generate_final_draft")
+    )
 
     return {
         "final_draft": final_draft,

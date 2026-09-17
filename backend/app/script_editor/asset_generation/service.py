@@ -153,12 +153,46 @@ async def _generate_assets(state: ScriptGenState) -> dict:
         },
     ]
 
+    from app.script_editor.services.execution import digest
+
+    resource_input = digest(
+        {
+            key: state.get(key)
+            for key in (
+                "characters",
+                "character_scripts",
+                "game_full_process",
+                "clue_stages",
+                "ending_config",
+                "game_data_sections",
+                "selected_asset_ids",
+            )
+        }
+    )
+    previous_progress = state.get("asset_progress") or {}
+    if previous_progress.get("input_fingerprint") != resource_input:
+        previous_progress = {}
+    restored = {
+        task["id"]: task
+        for phase in previous_progress.get("phases", [])
+        for task in phase.get("tasks", [])
+        if task.get("status") in {"complete", "skipped"}
+    }
+    for phase in phases:
+        for task in phase["tasks"]:
+            if task["id"] in restored:
+                task.update(restored[task["id"]])
     _init_asset_progress(script_id, phases)
+    asset_progress_registry.mutate(
+        script_id, lambda progress: progress.update(input_fingerprint=resource_input)
+    )
+    _publish_asset_progress(script_id)
 
     all_task_ids = {task["id"] for phase in phases for task in phase.get("tasks", [])}
     if selected is not None:
         for task_id in all_task_ids - selected:
             _update_task_status(script_id, task_id, "skipped", "本次编辑未选择更新")
+    selected = (all_task_ids if selected is None else selected) - set(restored)
 
     updates = {
         "current_step": STEP_GENERATE_ASSETS,

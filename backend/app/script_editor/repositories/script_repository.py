@@ -27,7 +27,6 @@ async def _save_generated_script(state: ScriptGenState) -> dict:
     import aiosqlite
 
     from app.script_editor.editing import normalize_game_data
-    from app.script_editor.nodes.quality_check import quality_approved
     from app.script_editor.nodes.safety_check import safety_approved
 
     normalized = normalize_game_data(state)
@@ -37,10 +36,10 @@ async def _save_generated_script(state: ScriptGenState) -> dict:
             "error_message": "；".join(normalized["data_validation_errors"]),
         }
     state = {**state, **normalized}
-    if not quality_approved(state) or not safety_approved(state):
+    if not safety_approved(state):
         return {
             "current_step": STEP_SAVE,
-            "error_message": "内容检查缺失或已失效，请重新检查后保存",
+            "error_message": "合规评估缺失或已失效，请重新评估后保存",
         }
 
     script_id = state.get("script_id", str(uuid.uuid4()))
@@ -229,7 +228,7 @@ async def _save_generated_script(state: ScriptGenState) -> dict:
             fingerprint = content_fingerprint(saved_script, saved_characters)
             quality = dict(state.get("quality_report") or {})
             if quality and quality.get("content_fingerprint") != fingerprint:
-                raise ValueError("实际保存内容与质量报告不一致，请返回数据确认重新检查")
+                quality["outdated"] = True
             quality["acceptance"] = state.get("quality_acceptance") or {}
             await db.execute(
                 "UPDATE scripts SET content_fingerprint = ?, quality_report = ? WHERE script_id = ?",
