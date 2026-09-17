@@ -1,7 +1,5 @@
 import { useState, useEffect, useRef, useCallback, memo } from "react";
-import { Send, Loader2, ArrowRight, Plus, X, CircleHelp } from "lucide-react";
-import * as Tooltip from "@radix-ui/react-tooltip";
-import { Switch } from "@/components/ui/switch";
+import { Send, Loader2, ArrowRight, Plus, X, Pause, Play } from "lucide-react";
 import { speechClues } from "@/lib/clueScope";
 import { DynamicDot } from "@/components/ui/DynamicDot";
 import type { Character, PublicClue } from "@/types/game";
@@ -178,6 +176,32 @@ export const ChatInputArea = memo(function ChatInputArea({
           </div>
         ) : stage === "free_discussion" || isHumanTurn ? (
           <form onSubmit={handleSubmit} className="space-y-3">
+            {stage === "free_discussion" && (
+              <div className={`flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border p-2 sm:px-3 ${
+                pauseAutoSpeak ? "border-primary/60 bg-primary/10" : "border-primary/30 bg-secondary/30"
+              }`}>
+                <button
+                  type="button"
+                  aria-pressed={pauseAutoSpeak}
+                  onClick={() => onPauseAutoSpeakChange(!pauseAutoSpeak)}
+                  className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                >
+                  {pauseAutoSpeak ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
+                  {pauseAutoSpeak ? "继续讨论" : "让我想想"}
+                </button>
+                <div className="min-w-0 flex-1 text-xs leading-relaxed" role="status">
+                  <p className={pauseAutoSpeak ? "text-primary" : "text-foreground/80"}>
+                    {pauseAutoSpeak
+                      ? (isStreaming || isProcessingReactions ? "当前回应结束后暂停" : "AI 已暂停，慢慢写")
+                      : "暂停 AI 接着发言"}
+                  </p>
+                  {pauseAutoSpeak && <p className="text-muted-foreground">发送后自动恢复讨论</p>}
+                </div>
+                {humanRemainingSpeechCount !== undefined && (
+                  <span className="text-xs text-muted-foreground">剩余发言次数: {humanRemainingSpeechCount}</span>
+                )}
+              </div>
+            )}
             {/* AI speaking status indicator */}
             {(isStreaming || isProcessingReactions) && (
               <div className="flex items-center justify-center gap-2 py-2 text-sm text-muted-foreground">
@@ -306,48 +330,9 @@ export const ChatInputArea = memo(function ChatInputArea({
                 </button>
               </div>
             </div>
-            {/* Free-discussion controls and speech count share one compact row. */}
-            {stage === "free_discussion" && (
-              <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-                <div className="inline-flex items-center gap-1.5">
-                  <Switch compact checked={pauseAutoSpeak} onCheckedChange={onPauseAutoSpeakChange} aria-label="让我想想" />
-                  <span>让我想想</span>
-                  <Tooltip.Provider delayDuration={200}>
-                    <Tooltip.Root>
-                      <Tooltip.Trigger asChild>
-                        <button
-                          type="button"
-                          aria-label="让我想想功能说明"
-                          className="rounded-full hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                        >
-                          <CircleHelp className="h-3.5 w-3.5" />
-                        </button>
-                      </Tooltip.Trigger>
-                      <Tooltip.Portal>
-                        <Tooltip.Content side="top" className="z-[70] max-w-xs rounded-lg border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-xl">
-                          开启后会暂停自由讨论中 AI 角色的主动发言；当您完成一次发言后会自动关闭并恢复讨论。
-                          <Tooltip.Arrow className="fill-popover" />
-                        </Tooltip.Content>
-                      </Tooltip.Portal>
-                    </Tooltip.Root>
-                  </Tooltip.Provider>
-                </div>
-                {humanRemainingSpeechCount !== undefined && (
-                  <>
-                    <span aria-hidden="true">·</span>
-                    <span>剩余发言次数: {humanRemainingSpeechCount}</span>
-                  </>
-                )}
-                <span className="hidden lg:inline">
-                  · Enter 添加更多内容 · Ctrl+Enter 发送全部发言并完成
-                </span>
-              </div>
-            )}
-            {stage !== "free_discussion" && (
-              <p className="text-xs text-muted-foreground text-center hidden lg:block">
-                Enter 添加更多内容 · Ctrl+Enter 发送全部发言并完成
-              </p>
-            )}
+            <p className="text-xs text-muted-foreground text-center hidden lg:block">
+              Enter 添加更多内容 · Ctrl+Enter 发送全部发言并完成
+            </p>
           </form>
         ) : /* Can advance stage — only when no current speaker and nothing processing */
         currentSpeakerId === null &&

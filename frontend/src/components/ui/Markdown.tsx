@@ -1,6 +1,6 @@
 import { memo } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { markdownPlugins } from "@/lib/markdownPlugins";
 
 interface MarkdownProps {
   children: string;
@@ -78,7 +78,7 @@ export const Markdown = memo(function Markdown({ children, className }: Markdown
   return (
     <div className={`markdown-content max-w-none break-words overflow-hidden ${className || ""}`}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={markdownPlugins}
         components={MARKDOWN_COMPONENTS}
       >
         {children}

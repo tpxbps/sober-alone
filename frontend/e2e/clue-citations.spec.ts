@@ -26,7 +26,7 @@ test('斜杠选择公开线索并在发言气泡展示可访问引用', async ({
     {
       id: 'c02',
       summary: '窗台红泥',
-      content: '窗台留有只在北岸出现的红泥。',
+      content: '窗台留有只在北岸出现的红泥。\n\n- **20:00—20:10**：一道人影经过。\n- **这是谁？**画面不清。',
       stage: 1,
     },
     ...Array.from({ length: 8 }, (_, index) => ({
@@ -141,6 +141,10 @@ test('斜杠选择公开线索并在发言气泡展示可访问引用', async ({
   const clueTooltip = page.getByRole('tooltip').filter({ hasText: '窗台留有只在北岸出现的红泥。' })
   await citation.hover()
   await expect(clueTooltip).toBeVisible()
+  await expect(clueTooltip.locator('li')).toHaveCount(2)
+  await expect(clueTooltip.locator('strong').first()).toHaveText('20:00—20:10')
+  await expect(clueTooltip.locator('strong').nth(1)).toHaveText('这是谁？')
+  await expect(clueTooltip).not.toContainText('**')
   await clueTooltip.getByText('窗台留有只在北岸出现的红泥。').hover()
   await expect(clueTooltip).toBeVisible()
   await page.keyboard.press('Escape')

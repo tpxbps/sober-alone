@@ -1,6 +1,6 @@
 import React, { useMemo, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { markdownPlugins } from "@/lib/markdownPlugins";
 import type { Character, PublicClue } from "@/types/game";
 import { ClueCitationHover } from "../game/ClueCitationHover";
 
@@ -307,7 +307,7 @@ export function GameMessageMarkdown({
       } ${className || ""}`}
     >
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={markdownPlugins}
         components={components}
       >
         {normalizedContent}

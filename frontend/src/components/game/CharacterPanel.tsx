@@ -2,6 +2,7 @@ import { CharacterPreview } from "./CharacterPreview";
 import { motion } from "framer-motion";
 import { Mic, MicOff } from "lucide-react";
 import type { PlayerState, Character, GameStage } from "@/types/game";
+import { Markdown } from "@/components/ui/Markdown";
 
 interface CharacterPanelProps {
   stage: GameStage;
@@ -61,9 +62,9 @@ export function CharacterPanel({
             details={<>
               <h3 className="text-base font-semibold">{character.name}</h3>
               <p className="mt-1 text-xs text-muted-foreground">{character.occupation}</p>
-              <p className="mt-3 whitespace-pre-wrap leading-relaxed text-muted-foreground">
-                {character.profile || "暂无角色简介"}
-              </p>
+                <Markdown className="mt-3 leading-relaxed text-muted-foreground">
+                  {character.profile || "暂无角色简介"}
+                </Markdown>
               {playerState && <div className="mt-4 space-y-2 border-t border-border/50 pt-3 text-xs">
                 <p className="flex justify-between"><span>本阶段发言</span><span>{playerState.speeches_this_round ?? 0} 次</span></p>
                 {stage === "free_discussion" && <p className="flex justify-between"><span>剩余发言机会</span><span>{playerState.remaining_speech_count ?? "-"} 次</span></p>}

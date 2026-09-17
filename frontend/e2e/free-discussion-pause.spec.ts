@@ -8,8 +8,14 @@ function json(route: Route, body: unknown) {
   })
 }
 
-test('让我想想暂停待发言 AI 且开关圆点保持在轨道内', async ({ page }) => {
+for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+test(`让我想想在输入框上方暂停、继续与发送后恢复 ${viewport.width}`, async ({ page }) => {
+  await page.setViewportSize(viewport)
   let aiSpeakRequests = 0
+  let humanSpeakRequests = 0
+  let currentSpeaker = 'ai-1'
+  let finishAiResponse!: () => void
+  const aiResponse = new Promise<void>(resolve => { finishAiResponse = resolve })
   const characters = [
     {
       character_id: 'human',
@@ -52,9 +58,9 @@ test('让我想想暂停待发言 AI 且开关圆点保持在轨道内', async (
         current_stage: 'free_discussion',
         current_round: 1,
         player_states: playerStates,
-        current_speaker_id: 'ai-1',
-        next_speaker_id: 'ai-1',
-        speech_queue: ['ai-1'],
+        current_speaker_id: currentSpeaker,
+        next_speaker_id: currentSpeaker,
+        speech_queue: [currentSpeaker],
         has_all_spoken: false,
         human_character_id: 'human',
         script: {
@@ -76,11 +82,17 @@ test('让我想想暂停待发言 AI 且开关圆点保持在轨道内', async (
     }
     if (path.endsWith('/ai-speech/ai-1')) {
       aiSpeakRequests += 1
+      await aiResponse
+      currentSpeaker = 'human'
       return route.fulfill({
         status: 200,
         contentType: 'text/event-stream',
         body: 'data: {"type":"done","next_speaker_id":null}\n\n',
       })
+    }
+    if (path.endsWith('/pause-session/speech')) {
+      humanSpeakRequests += 1
+      return route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'data: {"type":"done","next_speaker_id":null}\n\n' })
     }
     if (path === '/api/v1/system/capabilities') {
       return json(route, {
@@ -98,29 +110,37 @@ test('让我想想暂停待发言 AI 且开关圆点保持在轨道内', async (
   })
 
   await page.goto('/?session=pause-session')
-  const pauseSwitch = page.getByRole('switch', { name: '让我想想' })
-  await expect(pauseSwitch).toBeVisible()
-  await pauseSwitch.click()
-  await expect(pauseSwitch).toHaveAttribute('data-state', 'checked')
+  const pauseButton = page.getByRole('button', { name: '让我想想', exact: true })
+  await expect(pauseButton).toBeVisible()
+  const composer = page.getByRole('textbox', { name: '发言输入框' })
+  const [buttonBox, composerBox] = await Promise.all([pauseButton.boundingBox(), composer.boundingBox()])
+  expect(buttonBox!.height).toBeGreaterThanOrEqual(44)
+  expect(buttonBox!.y + buttonBox!.height).toBeLessThan(composerBox!.y)
+  expect(buttonBox!.x).toBeGreaterThanOrEqual(0)
+  expect(buttonBox!.x + buttonBox!.width).toBeLessThanOrEqual(viewport.width)
+  await pauseButton.focus()
+  await page.keyboard.press('Space')
+  const resumeButton = page.getByRole('button', { name: '继续讨论', exact: true })
+  await expect(resumeButton).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByText('AI 已暂停，慢慢写')).toBeVisible()
 
   const nextAiCard = page.getByRole('button', { name: '在输入框引用 姜芮' })
   await expect(nextAiCard.locator('.breathing')).toHaveCount(0)
 
-  const thumb = pauseSwitch.locator('[data-state="checked"]')
-  const [trackBox, thumbBox, countBox] = await Promise.all([
-    pauseSwitch.boundingBox(),
-    thumb.boundingBox(),
-    page.getByText('剩余发言次数: 1').boundingBox(),
-  ])
-  expect(trackBox).not.toBeNull()
-  expect(thumbBox).not.toBeNull()
-  expect(countBox).not.toBeNull()
-  expect(thumbBox!.x).toBeGreaterThanOrEqual(trackBox!.x)
-  expect(thumbBox!.x + thumbBox!.width).toBeLessThanOrEqual(
-    trackBox!.x + trackBox!.width + 0.5,
-  )
-  expect(trackBox!.x).toBeLessThan(countBox!.x)
-
   await page.waitForTimeout(1700)
   expect(aiSpeakRequests).toBe(0)
+  await resumeButton.click()
+  await expect.poll(() => aiSpeakRequests).toBe(1)
+  await expect(pauseButton).toHaveAttribute('aria-pressed', 'false')
+  await pauseButton.click()
+  await expect(page.getByText('当前回应结束后暂停')).toBeVisible()
+  finishAiResponse()
+  await expect(page.getByText('AI 已暂停，慢慢写')).toBeVisible()
+  await page.waitForTimeout(1700)
+  expect(aiSpeakRequests).toBe(1)
+  await composer.fill('我想先核对这段记录。')
+  await composer.press('Control+Enter')
+  await expect.poll(() => humanSpeakRequests).toBe(1)
+  await expect(pauseButton).toHaveAttribute('aria-pressed', 'false')
 })
+}

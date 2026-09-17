@@ -3,6 +3,7 @@ import { Search } from "lucide-react";
 import * as HoverCard from "@radix-ui/react-hover-card";
 
 import type { PublicClue } from "@/types/game";
+import { Markdown } from "@/components/ui/Markdown";
 
 export function ClueCitationHover({ clue }: { clue: PublicClue }) {
   const [open, setOpen] = useState(false);
@@ -63,7 +64,9 @@ export function ClueCitationHover({ clue }: { clue: PublicClue }) {
               <span className="text-xs font-semibold text-amber-200">{clue.summary}</span>
             </div>
             <p className="mb-2 text-[10px] text-muted-foreground">第 {clue.stage} 轮公开线索</p>
-            <p className="whitespace-pre-wrap text-xs leading-relaxed">{clue.content}</p>
+            <div className="max-h-[min(60dvh,28rem)] overflow-y-auto overscroll-contain scrollbar-thin">
+              <Markdown className="text-xs leading-relaxed">{clue.content}</Markdown>
+            </div>
             <HoverCard.Arrow className="fill-popover" />
           </HoverCard.Content>
         </HoverCard.Portal>
