@@ -68,7 +68,8 @@ def test_recovery_contract(action):
 
 def test_model_aliases():
     assert gateway_model("deepseek-flash") == "deepseek-v4.1-flash"
-    assert gateway_model("doubao-seed-2-0-mini-260215") == "seed-2.0-mini"
+    assert gateway_model("doubao-seed-2-0-mini-260215") == "seed-2.0-lite"
+    assert gateway_model("doubao-seed-2-0-lite-260215") == "seed-2.0-lite"
 
 
 def test_legacy_voice_gender_survives_without_character_metadata():
