@@ -122,9 +122,9 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
   let canvasBounds = canvas.getBoundingClientRect();
   const camera = new THREE.OrthographicCamera(0, canvasBounds.width, canvasBounds.height, 0, -10, 10);
   const geometry = new THREE.PlaneGeometry(1, 1);
-  const loader = new THREE.TextureLoader();
   const covers = new Map<HTMLImageElement, Cover>();
   const textures = new Map<string, THREE.Texture>();
+  const bitmaps = new Set<ImageBitmap>();
   let revealTexture: THREE.Texture | null = null;
   let disposed = false, frame = 0, dirty = true, width = 0, height = 0;
   const frameBudget = new FrameBudget();
@@ -153,22 +153,42 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
   const background = new THREE.Mesh(geometry, material(false));
   background.renderOrder = 0;
   scene.add(background);
-  function loadImage(source: string, done: (texture: THREE.Texture) => void) {
+  function loadImage(source: string, done: (texture: THREE.Texture) => void, decoded?: HTMLImageElement) {
     const cached = textures.get(source);
-    if (cached) { if (cached.image) done(cached); else cached.userData.listeners.push(done); return; }
-    const texture = loader.load(source, loaded => {
-      if (disposed) { loaded.dispose(); return; }
-      loaded.colorSpace = THREE.SRGBColorSpace;
-      loaded.userData.listeners.forEach((callback: (texture: THREE.Texture) => void) => callback(loaded));
-      loaded.userData.listeners = [];
-    }, undefined, () => { /* A failed GPU upload leaves the readable DOM image in place. */ });
+    if (cached) { if (cached.userData.ready) done(cached); else cached.userData.listeners.push(done); return; }
+    const element = decoded || new Image();
+    if (!decoded) { element.crossOrigin = 'anonymous'; element.fetchPriority = 'low'; element.src = source; }
+    const texture = new THREE.Texture();
     texture.userData.listeners = [done];
     textures.set(source, texture);
+    void element.decode().then(async () => {
+      if (disposed) { texture.dispose(); return; }
+      // DOM width/height are layout dimensions. WebGL allocates using those
+      // properties, so upload an intrinsic-sized copy of the decoded pixels.
+      // This reuses the selected srcset resource without another network load.
+      if (typeof createImageBitmap === 'function') {
+        const bitmap = await createImageBitmap(element, { imageOrientation: 'flipY', premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
+        if (disposed) { bitmap.close(); texture.dispose(); return; }
+        bitmaps.add(bitmap);
+        texture.image = bitmap;
+        texture.flipY = false;
+      } else {
+        const pixels = document.createElement('canvas');
+        pixels.width = element.naturalWidth; pixels.height = element.naturalHeight;
+        pixels.getContext('2d')!.drawImage(element, 0, 0);
+        texture.image = pixels;
+      }
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.needsUpdate = true;
+      texture.userData.ready = true;
+      texture.userData.listeners.forEach((callback: (texture: THREE.Texture) => void) => callback(texture));
+      texture.userData.listeners = [];
+    }).catch(() => { /* The readable DOM image remains the fallback. */ });
   }
   loadImage("/lobby/theatre.webp", texture => {
     background.material.uniforms.map.value = texture;
     background.material.uniforms.imageSize.value.set((texture.image as HTMLImageElement).width, (texture.image as HTMLImageElement).height);
-  });
+  }, document.querySelector<HTMLImageElement>('.backdrop-home') || undefined);
   loadImage("/lobby/palace-revealed.webp", texture => { revealTexture=texture; });
   function syncCovers() {
     const images = new Set(root.querySelectorAll<HTMLImageElement>(".card-cover-media"));
@@ -189,7 +209,7 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
         mesh.material.uniforms.map.value = texture;
         mesh.material.uniforms.imageSize.value.set((texture.image as HTMLImageElement).width, (texture.image as HTMLImageElement).height);
         dirty = true;
-      });
+      }, image);
     });
   }
   const resize = () => {
@@ -236,7 +256,7 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
   };
   const leave = () => { pointerActive = 0; pointerCard = null; pendingPoints.length = 0; painted = null; };
   const observer = new MutationObserver(markDirty);
-  observer.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ["src"] });
+  observer.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ["src", "srcset", "sizes"] });
   const resizeObserver = new ResizeObserver(markDirty);
   resizeObserver.observe(root);
   resizeObserver.observe(canvas);
@@ -357,6 +377,7 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
     // Keep the DOM backdrop and covers visible until a textured frame exists.
     // Texture download completion alone does not mean pixels have been drawn.
     if (background.material.uniforms.map.value) {
+      if (root.dataset.renderer !== 'webgl') performance.mark('lobby:atmosphere-frame');
       root.dataset.renderer = "webgl";
       covers.forEach(cover => {
         if (cover.mesh.visible) cover.image.dataset.gpu = "ready";
@@ -373,6 +394,7 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
     canvas.removeEventListener("webglcontextlost", contextLost);
     covers.forEach(cover => { delete cover.image.dataset.gpu; cover.mesh.material.dispose(); });
     textures.forEach(texture => texture.dispose());
+    bitmaps.forEach(bitmap => bitmap.close());
     background.material.dispose(); geometry.dispose(); fluid.dispose(); renderer.dispose();
   }
   return cleanup;

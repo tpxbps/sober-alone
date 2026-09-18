@@ -452,3 +452,6 @@ html {
 
 /* Readable emphasis in the player's private script and quick overview. */
 .player-script-reading strong { color: #f2dfb9; font-weight: 700; opacity: 1; }
+
+/* Entry transitions temporarily hide the first-read hint without dismissing it. */
+.app-shell:has(.game-entry-overlay) [data-personal-script-hint] { visibility: hidden; }

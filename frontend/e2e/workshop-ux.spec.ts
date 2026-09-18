@@ -9,6 +9,33 @@ const sections = () => ({
   character_data: ['许舟', '陆宁', '顾青'].map((name, index) => ({ character_id: ['a', 'z', 'm'][index], name, gender: '男', age: 30, occupation: '旅馆老客人', profile: `${name}和馆主相识多年。`, appearance: '深色外套，略显疲惫。', script_summary: '我记得昨晚的争执。', character_script: `我是${name}。昨晚，我再次来到这家旅馆。\n\n` + '我和馆主曾经自愿合作，彼此都清楚账目里的秘密。'.repeat(12), system_prompt: '依照个人经历扮演角色。', step_voice_id: 'cixingnansheng' })),
 });
 
+for (const step of ['safety_check', 'save_to_database']) {
+  test(`${step} 失败后仍可查看已提交数据并重试`, async ({ page }) => {
+    const requests: string[] = [];
+    const data = sections();
+    const response = { success: true, thread_id: 'recovery-data', current_step: step, is_complete: false,
+      state: { script_title: data.title, game_data_sections: data, error_message: '当前步骤暂未完成，请重试。',
+        workflow_error: { scope: 'stage', message: '当前步骤暂未完成，请重试。' } },
+      interrupt: { step, failed: true, retry_step: step } };
+    await page.addInitScript(() => localStorage.setItem('editorSession', JSON.stringify({ threadId: 'recovery-data' })));
+    await page.route('**/api/v1/**', route => {
+      const path = new URL(route.request().url()).pathname;
+      let body: unknown = { success: true, scripts: [], models: [], features: {}, checkpoints: [], progress: null };
+      if (path.endsWith('/state')) body = response;
+      if (path.endsWith('/resume')) { requests.push(route.request().postDataJSON().action); body = response; }
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
+    });
+    await page.goto('/?editor=resume');
+    await expect(page.getByTestId('game-data-workspace')).toBeVisible();
+    await expect(page.getByLabel('大厅简介', { exact: true })).toHaveValue(data.overview);
+    await expect(page.getByLabel('大厅简介', { exact: true })).toBeDisabled();
+    await page.getByRole('button', { name: '真相与结局 故事的完整答案' }).click();
+    await expect(page.getByLabel('完整真相', { exact: true })).toHaveValue(data.full_truth);
+    await page.getByRole('button', { name: '重试当前步骤' }).click();
+    await expect.poll(() => requests).toEqual(['retry_failed']);
+  });
+}
+
 async function setup(page: Page, step = 'review_game_data', qualityFailure = false) {
   let data = sections();
   let checkpoint = 'cp1';
@@ -39,7 +66,7 @@ async function setup(page: Page, step = 'review_game_data', qualityFailure = fal
       checkpoint = 'cp2';
       return send({ success: true, thread_id: 'ux-thread', operation_id: body.request_id, operation_status: 'queued', target_step: step });
     }
-    if (path.includes('/operations/')) return send(failed ? { operation_status: 'failed', error_message: '暂时无法生成，请重试。' } : busy ? { operation_id: path.split('/').at(-1), operation_status: 'running', current_step: step === 'review_final' ? 'convert_to_game_data' : 'review_by_llm', progress: { message: '进行中' } } : { ...response(), operation_id: path.split('/').at(-1), operation_status: 'complete' });
+    if (path.includes('/operations/')) return send(failed ? { operation_status: 'failed', error_message: '暂时无法生成，请重试。' } : busy ? { operation_id: path.split('/').at(-1), operation_status: 'running', current_step: step === 'review_final' ? 'convert_to_game_data' : 'review_by_llm', progress: { message: '进行中', workflow: { operation_id: path.split('/').at(-1), seq: 2, current_step: step === 'review_final' ? 'convert_to_game_data' : 'review_by_llm', finished: false } } } : { ...response(), operation_id: path.split('/').at(-1), operation_status: 'complete' });
     return send({ success: true, scripts: [], voices: [], models: [], features: {} });
   });
   await page.goto('/?editor=resume');

@@ -156,8 +156,8 @@ export function ScriptEditorPage({ onBack, editScriptId }: ScriptEditorPageProps
     await retryAssetStore(taskId);
   };
 
-  const handleRetryConvert = async () => {
-    await resumeWorkflow("retry_failed");
+  const handleRetryConvert = async (taskId?: string) => {
+    await resumeWorkflow("retry_failed", undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, taskId);
   };
 
   const handleBackToLobby = () => {
@@ -375,7 +375,7 @@ export function ScriptEditorPage({ onBack, editScriptId }: ScriptEditorPageProps
           </div>
           {!outlineActive && <div className="min-h-7 shrink-0 px-4 pb-2 text-sm text-muted-foreground/50 leading-relaxed">
             <WorkflowFooterMessage
-              key={isLoading || isStarting ? `working:${currentStep}` : "idle"}
+              key={isLoading || isStarting ? "working" : "idle"}
               isWorking={isLoading || isStarting}
             />
           </div>}

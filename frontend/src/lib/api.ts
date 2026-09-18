@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { characterImages } from './characterImages';
 import type {
   Script,
   Character,
@@ -119,7 +120,7 @@ export const scriptApi = {
   // Get script characters
   getScriptCharacters: async (scriptId: string, signal?: AbortSignal): Promise<{ success: boolean; characters: Character[] }> => {
     const response = await api.get(`/game/scripts/${scriptId}/characters`, { signal });
-    return response.data;
+    return { ...response.data, characters: (response.data.characters || []).map(characterImages) };
   },
 };
 
@@ -150,7 +151,7 @@ export const gameApi = {
   // Get game state
   getGameState: async (sessionId: string): Promise<GameStateResponse> => {
     const response = await api.get(`/game/${sessionId}/state`);
-    return response.data;
+    return { ...response.data, characters: (response.data.characters || []).map(characterImages) };
   },
 
   // Advance to next stage

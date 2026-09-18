@@ -24,6 +24,7 @@ import { DefaultReviewStage } from "./DefaultReviewStage";
 import { AssetPlanDialog } from "./AssetPlanDialog";
 import { useTextDraft } from "./useTextDraft";
 import { Markdown } from '@/components/ui/Markdown';
+import { StageStatus } from './StageStatus';
 
 // === Props ===
 
@@ -59,7 +60,7 @@ interface ContentPanelProps {
   onCloseProgressStream?: () => void;
   onBack: () => void;
   onRetryAsset: (taskId: string) => Promise<void>;
-  onRetryConvert: () => Promise<void>;
+  onRetryConvert: (taskId?: string) => Promise<void>;
 }
 
 export function ContentPanel({
@@ -222,12 +223,35 @@ function ContentPanelBody({
 
     if (isLoading && currentStep === "safety_check") {
       return <div className="h-full flex flex-col items-center justify-center gap-4">
-        <div className="w-10 h-10 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-        <p>正在进行合规评估{safetyProgress ? `（已检查 ${safetyProgress.completed} / ${safetyProgress.total} 批）` : ""}</p>
+        <StageStatus>正在进行合规评估{safetyProgress ? `（已检查 ${safetyProgress.completed} / ${safetyProgress.total} 批）` : ""}</StageStatus>
       </div>;
     }
 
-    // === Terminal workflow error (for example, database save failure) ===
+    // A recoverable task remains in its workspace, including after a terminal
+    // operation snapshot arrives. It is not a fatal page error.
+    if (isConvertProgress) return <ConvertProgressPanel convertProgress={convertProgress} onRetry={onRetryConvert} />;
+    if (isAssetGeneration) return <AssetGenerationProgress assetProgress={assetProgress} onRetry={onRetryAsset} />;
+    if (workflowState?.error_message && !isLoading && workflowState.workflow_error?.scope !== 'workflow') {
+      if (editedGameData && ['safety_check', 'save_to_database', 'check_game_quality'].includes(currentStep)) {
+        return <ReviewGameDataStage editedGameData={editedGameData} setEditedGameData={setEditedGameData}
+          isLoading={false} currentStep={currentStep} onConfirmGameData={onConfirmGameData}
+          interruptInfo={interruptInfo || { step: 'review_game_data', step_label: '游戏数据', generated_content: '', prompt_used: '' }}
+          error={workflowState.workflow_error?.message || workflowState.error_message} scriptTitle={scriptTitle}
+          workflowState={workflowState} recovery={{ onRetry: () => onRegenerate() }} />;
+      }
+      const previousContent = submitted?.content || interruptInfo?.generated_content ||
+        (phase === 'review_final' ? workflowState.final_draft || workflowState.first_draft : '');
+      return <div className="flex h-full flex-col overflow-y-auto p-5">
+        <div role="alert" className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4">
+          <p className="text-sm">{workflowState.workflow_error?.message || workflowState.error_message}</p>
+          <p className="mt-1 text-xs text-muted-foreground">已保存的内容会保留，可继续重试当前步骤。</p>
+          <button onClick={() => void onRegenerate()} className="mt-3 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground">重试当前步骤</button>
+        </div>
+        {previousContent && <Markdown className="mt-5">{previousContent}</Markdown>}
+      </div>;
+    }
+
+    // Only an explicitly unrecoverable workflow replaces the workspace.
     if (workflowState?.error_message && !isLoading) {
       return (
         <div className="h-full flex flex-col items-center justify-center gap-4 p-6">
@@ -322,29 +346,10 @@ function ContentPanelBody({
       );
     }
 
-    // === Convert Progress (multi-step LLM calls) ===
-    if (isConvertProgress) {
-      return (
-        <ConvertProgressPanel
-          convertProgress={convertProgress}
-          onRetry={onRetryConvert}
-        />
-      );
-    }
-
-    // === Asset Generation Progress (task tree) ===
-    if (isAssetGeneration) {
-      return (
-        <AssetGenerationProgress
-          assetProgress={assetProgress}
-          onRetry={onRetryAsset}
-        />
-      );
-    }
-
     if (isLoading && submitted && !isReviewGameData) {
       return <div className="flex h-full flex-col">
-        <div className="flex-1 overflow-y-auto p-6"><Markdown>{submitted.content || '游戏数据已提交，正在处理下一阶段。'}</Markdown></div>
+        <StageStatus>{currentStep === submitted.step ? '正在提交，准备进入下一阶段…' : getButtonLoadingMessage(currentStep)}</StageStatus>
+        {submitted.content && <div className="flex-1 overflow-y-auto p-6"><Markdown>{submitted.content}</Markdown></div>}
       </div>;
     }
 

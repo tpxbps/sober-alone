@@ -117,6 +117,30 @@ async def start(env):
     return accepted["thread_id"], state
 
 
+@pytest.mark.asyncio
+async def test_running_operation_stage_is_not_overwritten_by_review_checkpoint(env):
+    runner, factory, *_ = env
+    accepted = await runner.queue_start(StartWorkflowRequest(user_idea="状态验证"), "owner")
+    await settle(runner)
+    async with factory() as db:
+        operation = await db.get(EditorOperation, accepted["operation_id"])
+        operation.status = "running"
+        operation.progress = {
+            "event_seq": 9,
+            "workflow": {
+                "operation_id": operation.operation_id,
+                "seq": 9,
+                "current_step": "generate_final_draft",
+                "finished": False,
+            },
+        }
+        await db.commit()
+    result = await runner.get(accepted["thread_id"], accepted["operation_id"], "owner")
+    assert result["current_step"] == result["execution_step"] == "generate_final_draft"
+    assert result["review_step"] == "outline_wait"
+    assert result["seq"] == 9
+
+
 def command(action, state, **kwargs):
     import uuid
 

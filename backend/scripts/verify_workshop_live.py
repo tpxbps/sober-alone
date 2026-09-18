@@ -60,6 +60,34 @@ async def run(args, root):
 
     from app.core.config import settings
     from app.main import app
+    from app.script_editor import llm as editor_llm
+
+    calls_path = root / "structured-calls.json"
+    structured_calls = (
+        json.loads(calls_path.read_text(encoding="utf-8")) if calls_path.exists() else []
+    )
+    original_invoke = editor_llm.invoke_structured
+
+    async def measured_invoke(model, schema, *positional, **keyword):
+        import time
+
+        started = time.monotonic()
+        call = {"schema": schema.__name__}
+        try:
+            result = await original_invoke(model, schema, *positional, **keyword)
+            call["status"] = "complete"
+            return result
+        except Exception as error:
+            call.update(status="failed", failure_type=type(error).__name__)
+            raise
+        finally:
+            call["seconds"] = round(time.monotonic() - started, 2)
+            structured_calls.append(call)
+            (root / "structured-calls.json").write_text(
+                json.dumps(structured_calls, indent=2), encoding="utf-8"
+            )
+
+    editor_llm.invoke_structured = measured_invoke
 
     logging.getLogger("httpx").setLevel(logging.WARNING)
     pointer = root / "acceptance.json"
@@ -222,6 +250,29 @@ async def run(args, root):
                     }[step]
                     body["content"] = state["state"][field]
                 accepted = await post(f"/script-editor/{record['thread_id']}/resume", body)
+            elif step == "generate_assets":
+                progress = (
+                    await client.get(f"/api/v1/script-editor/{record['thread_id']}/asset-progress")
+                ).json().get("progress") or {}
+                failed_tasks = [
+                    task
+                    for phase in progress.get("phases", [])
+                    for task in phase.get("tasks", [])
+                    if task.get("status") == "failed"
+                ]
+                if not failed_tasks:
+                    raise RuntimeError("Resources are incomplete without a retryable task")
+                task_id = failed_tasks[0]["id"]
+                record.setdefault("resource_retries", []).append(task_id)
+                accepted = await post(
+                    f"/script-editor/{record['thread_id']}/resume",
+                    {
+                        "action": "retry_asset",
+                        "asset_task_id": task_id,
+                        "request_id": str(uuid.uuid4()),
+                        "expected_checkpoint_id": state.get("checkpoint_id"),
+                    },
+                )
             else:
                 raise RuntimeError(
                     f"Unfinished acceptance stage: {step}; inspect latest-state.json"
@@ -250,6 +301,8 @@ async def run(args, root):
             script_id=script["script_id"],
             game_session_id=game["session_id"],
             game_state_verified=True,
+            conversion_metrics=script.get("conversion_metrics", []),
+            structured_calls=len(structured_calls),
         )
         record.pop("failure", None)
         save()

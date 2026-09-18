@@ -31,6 +31,9 @@ class ScriptGenState(TypedDict, total=False):
     completed_refinements: list[str]
     generation_audit: list[dict]
     disclosure_plan: dict
+    workflow_error: dict | None
+    conversion_retry_task: str | None
+    conversion_metrics: list[dict]
     final_draft: str  # 终稿全文
     character_scripts: dict  # {角色名: 个人剧本文本}
     system_prompts_map: dict  # {角色名: system_prompt文本}

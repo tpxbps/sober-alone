@@ -27,6 +27,7 @@ class ResumeWorkflowRequest(BaseModel):
     expected_checkpoint_id: str | None = None
     feedback: str | None = Field(default=None, max_length=8000)
     asset_task_id: str | None = None
+    conversion_task_id: str | None = None
     content: str | None = None
     characters: list | None = None
     character_scripts: dict | None = None

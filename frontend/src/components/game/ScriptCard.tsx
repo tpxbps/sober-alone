@@ -71,7 +71,7 @@ export function ScriptCard({ script, onClick, onDeleted, onEdit, quiet = false, 
     >
       {/* Cover Image */}
       <div className="relative h-48 overflow-hidden">
-        <StoryCover src={script.cover_image_url} alt={script.title} loading="lazy" className="card-cover-media w-full h-full object-cover" />
+        <StoryCover src={script.cover_image_url} variants={script.cover_image_variants} alt={script.title} loading="lazy" className="card-cover-media w-full h-full object-cover" />
 
         {/* Overlay gradient */}
         <div className="absolute inset-0 bg-gradient-to-t from-background/30 via-transparent to-transparent" />

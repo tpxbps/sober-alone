@@ -14,7 +14,9 @@ export type GameStage =
 export type GameStatus = 'waiting' | 'playing' | 'paused' | 'completed';
 
 // Script from backend
+export interface ImageVariant { url: string; width: number; height: number }
 export interface Script {
+  cover_image_variants?: ImageVariant[];
   script_id: string;
   resource_namespace?: string;
   title: string;
@@ -36,6 +38,7 @@ export interface Script {
 
 // Character from backend
 export interface Character {
+  avatar_variants?: ImageVariant[];
   script_id?: string;
   character_id: string;
   name: string;

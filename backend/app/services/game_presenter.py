@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.game.resource_revision import resource_namespace
+from app.services.image_variants import image_variants
 
 
 class GameStatePresenter:
@@ -22,6 +23,7 @@ class GameStatePresenter:
             "difficulty": script_data.get("difficulty"),
             "player_count": script_data.get("player_count"),
             "cover_image_url": script_data.get("cover_image_url"),
+            "cover_image_variants": image_variants(script_data.get("cover_image_url")),
         }
 
     @staticmethod
@@ -37,6 +39,7 @@ class GameStatePresenter:
                 "occupation": character.get("occupation"),
                 "profile": character.get("profile"),
                 "avatar_url": character.get("avatar_url"),
+                "avatar_variants": image_variants(character.get("avatar_url")),
                 "portrait_url": character.get("portrait_url"),
                 "voice_id": character.get("voice_id"),
                 "is_human": character.get("character_id") == human_character_id,

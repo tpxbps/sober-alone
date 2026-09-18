@@ -129,6 +129,22 @@ class EditorOperationRunner:
                 raise ValueError("请在游戏数据工作区使用质量检查")
             if request.action == "retry_asset" and not request.asset_task_id:
                 raise ValueError("请选择要重试的资源")
+            if request.conversion_task_id:
+                tasks = [
+                    task
+                    for phase in (snapshot.values.get("convert_progress") or {}).get("phases", [])
+                    for task in phase.get("tasks", [])
+                ]
+                if (
+                    request.action != "retry_failed"
+                    or step != "convert_to_game_data"
+                    or not any(
+                        task.get("id") == request.conversion_task_id
+                        and task.get("status") == "failed"
+                        for task in tasks
+                    )
+                ):
+                    raise ValueError("请选择当前未完成的结构化任务重试")
             operation = EditorOperation(
                 operation_id=request.request_id or str(uuid.uuid4()),
                 thread_id=thread_id,
@@ -258,6 +274,14 @@ class EditorOperationRunner:
                     return response
                 raise
             response.update(live)
+            # Checkpoints describe the last committed review. During execution they
+            # must never overwrite the newer node published by this operation.
+            event = (operation.progress or {}).get("workflow") or {}
+            response["review_step"] = live.get("current_step", "")
+            response["seq"] = (operation.progress or {}).get("event_seq", 0)
+            response["execution_step"] = event.get("current_step", "")
+            if operation.status in ACTIVE_STATUSES and event.get("current_step"):
+                response["current_step"] = event["current_step"]
             state = live.get("state", {})
             response["script_id"] = state.get("script_id", "")
             response["script_title"] = state.get("script_title", "")

@@ -3,6 +3,7 @@ Image Generation Service — doubao-seedream-4-0
 用于生成剧本封面图和角色头像
 """
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -90,10 +91,16 @@ async def generate_cover_image(
     save_path = save_dir / "cover.png"
 
     if not force and save_path.exists() and save_path.stat().st_size > 0:
+        from app.services.image_variants import prepare_variants
+
+        await asyncio.to_thread(prepare_variants, save_path, "cover")
         return f"/images/scripts/{script_id}/cover.png"
 
     result = await _generate_image(prompt, save_path, "1280x768")
     if result:
+        from app.services.image_variants import prepare_variants
+
+        await asyncio.to_thread(prepare_variants, save_path, "cover")
         return f"/images/scripts/{script_id}/cover.png"
     return None
 
@@ -125,10 +132,16 @@ async def generate_character_avatar(
     save_path = save_dir / f"{character_id}.png"
 
     if not force and save_path.exists() and save_path.stat().st_size > 0:
+        from app.services.image_variants import prepare_variants
+
+        await asyncio.to_thread(prepare_variants, save_path, "avatar")
         return f"/images/scripts/{script_id}/avatars/{character_id}.png"
 
     result = await _generate_image(prompt, save_path, "1024x1024")
     if result:
+        from app.services.image_variants import prepare_variants
+
+        await asyncio.to_thread(prepare_variants, save_path, "avatar")
         return f"/images/scripts/{script_id}/avatars/{character_id}.png"
     return None
 

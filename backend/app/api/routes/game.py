@@ -429,6 +429,8 @@ async def list_scripts(
     """
     from sqlalchemy import text
 
+    from app.services.image_variants import image_variants
+
     result = await db.execute(
         text(
             "SELECT script_id, title, overview, tags, difficulty, player_count, "
@@ -451,6 +453,7 @@ async def list_scripts(
                 "difficulty": row[4],
                 "player_count": row[5],
                 "cover_image_url": row[6],
+                "cover_image_variants": image_variants(row[6]),
                 "is_ai_generated": bool(row[7]) if row[7] is not None else False,
                 "estimated_duration": row[8] if row[8] else 0,
                 "can_manage": owner_hash_matches(row[9], owner_key_hash),
@@ -474,6 +477,8 @@ async def get_script_characters(script_id: str, db: AsyncSession = Depends(get_d
     - **script_id**: 剧本ID
     """
     from sqlalchemy import text
+
+    from app.services.image_variants import image_variants
 
     result = await db.execute(
         text(
@@ -499,6 +504,7 @@ async def get_script_characters(script_id: str, db: AsyncSession = Depends(get_d
                 "occupation": row[4],
                 "profile": row[5],
                 "avatar_url": row[6],
+                "avatar_variants": image_variants(row[6]),
                 "voice_id": row[7],
             }
             for row in characters
