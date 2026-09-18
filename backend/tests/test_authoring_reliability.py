@@ -1,3 +1,4 @@
+import json
 from copy import deepcopy
 from types import SimpleNamespace
 
@@ -16,7 +17,7 @@ from app.script_editor.conversion.contracts import (
 from app.script_editor.editing import normalize_game_data
 from app.script_editor.nodes.safety_check import (
     GENERIC_ERROR,
-    SafetyResult,
+    SafetyBatchResult,
     review_chunks,
     safety_approved,
     safety_check,
@@ -43,10 +44,15 @@ async def test_safety_covers_tail_short_text_and_new_clue_fields(monkeypatch):
         async def ainvoke(self, messages):
             text = messages[-1]["content"]
             seen.append(text)
-            return (
-                SafetyResult(status="FAIL", reason="尾部拒绝")
-                if "TAIL_REJECT" in text
-                else SafetyResult(status="PASS")
+            return SafetyBatchResult(
+                results=[
+                    {
+                        "id": item["id"],
+                        "status": "FAIL" if "TAIL_REJECT" in item["text"] else "PASS",
+                        "reason": "尾部拒绝" if "TAIL_REJECT" in item["text"] else "",
+                    }
+                    for item in json.loads(text)["items"]
+                ]
             )
 
     monkeypatch.setattr("app.script_editor.llm.create_llm", lambda **kwargs: Judge())
@@ -81,7 +87,12 @@ async def test_short_safety_checks_call_model_and_content_changes_invalidate_pas
 
         async def ainvoke(self, messages):
             calls.append(messages)
-            return SafetyResult(status="PASS")
+            return SafetyBatchResult(
+                results=[
+                    {"id": item["id"], "status": "PASS"}
+                    for item in json.loads(messages[-1]["content"])["items"]
+                ]
+            )
 
     monkeypatch.setattr("app.script_editor.llm.create_llm", lambda **kwargs: Judge())
     state = {"game_data_sections": {"description": "字"}}

@@ -160,7 +160,7 @@ function TaskRow({
   task,
   onRetry,
 }: {
-  task: { id: string; label: string; status: string; reason?: string };
+  task: { id: string; label: string; status: string; reason?: string; retry_count?: number; retry_exhausted?: boolean };
   onRetry?: (taskId: string) => Promise<void>;
 }) {
   const busy = useEditorStore(state => state.isLoading);
@@ -202,7 +202,7 @@ function TaskRow({
           {task.status === "failed" && task.reason && <span className="mt-1 block text-muted-foreground">{task.reason}</span>}
         </span>
       </div>
-      {task.status === "failed" && onRetry && (
+      {task.status === "failed" && onRetry && !task.retry_exhausted && (
         <button
           onClick={() => onRetry(task.id)}
           disabled={busy}

@@ -160,6 +160,44 @@ test('创作长任务在刷新和返回大厅后仍恢复到同一工作流', as
   await expect.poll(() => stateRequests).toBeGreaterThan(0)
 })
 
+test('资源最多重试三次，刷新保留进度，耗尽后显示创作完成', async ({ page }) => {
+  let attempts = 0;
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  const progress = () => ({ isComplete: attempts >= 3, phases: [{ id: 'image', label: '剧本图片生成', tech: 'Text-to-Image', tasks: [{ id: 'cover', label: '剧本概览封面', status: attempts >= 3 ? 'skipped' : 'failed', retry_count: attempts, retry_exhausted: attempts >= 3, fallback: attempts >= 3, reason: '图片暂不可用' }] }] });
+  const response = () => ({ success: true, thread_id: 'bounded-assets', current_step: 'generate_assets', is_complete: attempts >= 3, interrupt: null, state: { workflow_mode: 'create', script_id: 'bounded-script', script_title: '资源回退测试', asset_progress: progress() } });
+  await page.addInitScript(() => localStorage.setItem('editorSession', JSON.stringify({ threadId: 'bounded-assets', currentStep: 'generate_assets' })));
+  await page.route('**/api/v1/**', async route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith('/state')) return json(route, response());
+    if (path.endsWith('/asset-progress')) return json(route, { success: true, progress: progress() });
+    if (path.endsWith('/convert-progress')) return json(route, { success: true, progress: null });
+    if (path.endsWith('/progress-stream')) return route.fulfill({ contentType: 'text/event-stream', body: ': heartbeat\n\n' });
+    if (path.endsWith('/resume')) {
+      const body = route.request().postDataJSON();
+      expect(body.action).toBe('retry_asset');
+      expect(body.asset_task_id).toBe('cover');
+      attempts++;
+      return json(route, { success: true, thread_id: 'bounded-assets', operation_id: body.request_id, operation_status: 'queued', target_step: 'generate_assets' });
+    }
+    if (path.includes('/operations/')) return json(route, { ...response(), operation_status: 'complete', operation_id: path.split('/').at(-1) });
+    return json(route, { success: true, scripts: [], models: [], checkpoints: [] });
+  });
+  await page.goto('/?editor=resume');
+  for (let i = 1; i <= 3; i++) {
+    await page.getByRole('button', { name: '重试', exact: true }).click();
+    await expect.poll(() => attempts).toBe(i);
+    if (i < 3) {
+      await expect(page.getByRole('button', { name: '重试', exact: true })).toBeEnabled();
+      await page.reload();
+    }
+  }
+  await expect(page.getByText('剧本创建完成！')).toBeVisible();
+  await expect(page.getByText('部分资源暂不可用，已使用默认展示或文本模式，不影响开始游戏。')).toBeVisible();
+  await expect(page.getByRole('button', { name: '重试', exact: true })).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
 test('刷新后仍展示未完成的资源任务而不是误报创作完成', async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem(

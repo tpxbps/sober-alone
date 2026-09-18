@@ -66,7 +66,9 @@ def test_unrequested_quality_report_is_null_on_all_response_paths(saved):
     assert service.serialize_state(saved)["quality_report"] is None
     assert service.reconstruct_interrupt("review_game_data", saved)["quality_report"] is None
     state = snapshot(saved, ("review_game_data",))
-    state.tasks = (SimpleNamespace(interrupts=(SimpleNamespace(value={"step": "review_game_data", **saved}),)),)
+    state.tasks = (
+        SimpleNamespace(interrupts=(SimpleNamespace(value={"step": "review_game_data", **saved}),)),
+    )
     assert service.extract_interrupt(state)["quality_report"] is None
 
 
@@ -77,7 +79,9 @@ def test_completed_quality_report_with_no_findings_is_preserved():
     assert service.serialize_state(saved)["quality_report"] == report
     assert service.reconstruct_interrupt("review_game_data", saved)["quality_report"] == report
     state = snapshot(saved, ("review_game_data",))
-    state.tasks = (SimpleNamespace(interrupts=(SimpleNamespace(value={"step": "review_game_data", **saved}),)),)
+    state.tasks = (
+        SimpleNamespace(interrupts=(SimpleNamespace(value={"step": "review_game_data", **saved}),)),
+    )
     assert service.extract_interrupt(state)["quality_report"] == report
 
 

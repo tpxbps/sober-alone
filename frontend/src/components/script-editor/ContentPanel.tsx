@@ -223,7 +223,7 @@ function ContentPanelBody({
     if (isLoading && currentStep === "safety_check") {
       return <div className="h-full flex flex-col items-center justify-center gap-4">
         <div className="w-10 h-10 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-        <p>正在进行合规评估{safetyProgress ? `（${safetyProgress.completed} / ${safetyProgress.total}）` : ""}</p>
+        <p>正在进行合规评估{safetyProgress ? `（已检查 ${safetyProgress.completed} / ${safetyProgress.total} 批）` : ""}</p>
       </div>;
     }
 
@@ -284,6 +284,7 @@ function ContentPanelBody({
             剧本「{scriptTitle}」已保存为最新版本，你可以返回剧本大厅开始新对局。
             感谢您的创作和贡献！
           </p>
+          {assetProgress?.phases.some(p => p.tasks.some(t => t.fallback)) && <p className="text-xs text-muted-foreground">部分资源暂不可用，已使用默认展示或文本模式，不影响开始游戏。</p>}
           <button
             onClick={onBack}
             className="w-full max-w-sm mt-2 py-2.5 rounded-lg bg-primary text-primary-foreground font-medium hover:bg-primary/90 transition-colors text-sm"

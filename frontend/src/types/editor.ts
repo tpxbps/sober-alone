@@ -262,6 +262,9 @@ export interface AssetPlanItem {
 export type AssetTaskStatus = "pending" | "running" | "complete" | "failed" | "skipped";
 
 export interface AssetTask {
+  retry_count?: number;
+  retry_exhausted?: boolean;
+  fallback?: boolean;
   id: string;
   label: string;
   status: AssetTaskStatus;
