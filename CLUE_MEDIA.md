@@ -64,4 +64,6 @@ uv run python -m scripts.clue_citation_smoke --source ../fixtures/clue-citation-
 
 默认使用公开虚构样例。私有源材料必须在获得相应数据传输授权后才可用于此命令。模型可能忽略格式提示；脚本将双模式使用情况、未知 ID 和流式一致性分别记录，失败返回非零状态，不能用离线解析测试代替模型遵循率验收。
 
+验收默认采用与游戏角色相同的 temperature=0.7；可通过 `--temperature` 调整，通过 `--repeats 2` 在固定规则下重复各阶段。结果记录采样参数和逐轮提示词摘要，保留失败输出以便比较。重复次数为 1–5，每次重复都会新增各阶段的真实调用费用。
+
 可选素材视觉验收：设置 `CLUE_PILOT_URL` 为本地预览 URL，运行 `pnpm exec playwright test e2e/clue-pilot.visual.spec.ts --project=flows --workers=1`。未设置时跳过，不影响普通离线 CI。

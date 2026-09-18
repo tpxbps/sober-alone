@@ -66,13 +66,18 @@ async def test_actual_model_payload_is_stage_scoped_even_after_checkpoint_restor
         {
             "messages": [HumanMessage(content="现在分析已经公开的证据。")],
             "current_stage": "clue_analysis",
-            "public_clues": CLUES,
+            "public_clues": [
+                *CLUES,
+                {"id": "c08", "summary": "窗台", "content": "窗台有泥土", "stage": 1},
+            ],
         },
         config,
     )
     messages, tools = model.calls[-1]
     combined = "\n".join(str(message.content) for message in messages)
     assert "[c07]" in combined and "门锁没有撬动痕迹" in combined
+    assert "直接引用（点名）" in combined
+    assert "关联引用（附证据）：[推理原文][c07,c08]" in combined
     assert {tool.name for tool in tools} == {"recall_public_clues", "update_role_reaction"}
     assert "[c01]" not in combined
 

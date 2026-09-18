@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,16 +25,24 @@ async def run(args):
     source = json.loads(args.source.read_text(encoding="utf-8-sig"))
     stages = normalize_clue_stages(source["clue_stages"], script_id=source["script_id"])
     model = create_llm(
-        model=args.model, temperature=0.2, timeout=90, max_retries=0, disable_thinking=True
+        model=args.model,
+        temperature=args.temperature,
+        timeout=90,
+        max_retries=0,
+        disable_thinking=True,
     )
     result = {
         "model": args.model,
+        "temperature": args.temperature,
+        "repeats": args.repeats,
         "content_fingerprint": content_fingerprint(source),
         "time": datetime.now(timezone.utc).isoformat(),
         "rounds": [],
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    for stage in stages:
+    for attempt, stage in (
+        (attempt, stage) for attempt in range(1, args.repeats + 1) for stage in stages
+    ):
         clues = [
             clue for item in stages if item["stage"] <= stage["stage"] for clue in item["items"]
         ]
@@ -67,6 +76,8 @@ async def run(args):
         result["rounds"].append(
             {
                 "stage": stage["stage"],
+                "attempt": attempt,
+                "instructions_sha256": hashlib.sha256(instructions.encode()).hexdigest(),
                 "checks": checks,
                 "raw": raw,
                 "rendered": visible,
@@ -75,7 +86,10 @@ async def run(args):
         )
         args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
         print(
-            json.dumps({"stage": stage["stage"], "checks": checks}, ensure_ascii=False), flush=True
+            json.dumps(
+                {"attempt": attempt, "stage": stage["stage"], "checks": checks}, ensure_ascii=False
+            ),
+            flush=True,
         )
     if not all(all(item["checks"].values()) for item in result["rounds"]):
         raise SystemExit("Citation smoke requires review")
@@ -86,6 +100,8 @@ def main():
     parser.add_argument("--source", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--model", default="deepseek-flash")
+    parser.add_argument("--temperature", type=float, default=0.7)
+    parser.add_argument("--repeats", type=int, choices=range(1, 6), default=1)
     parser.add_argument("--env-file", type=Path)
     args = parser.parse_args()
     asyncio.run(run(args))
