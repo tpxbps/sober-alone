@@ -25,7 +25,7 @@ export interface EditorInterruptInfo {
   retry_step?: string;
   human_review?: string;
   first_draft?: string;
-  quality_report?: QualityReport;
+  quality_report?: QualityReport | null;
   step: string;
   step_label: string;
   generated_content: string;
@@ -75,7 +75,7 @@ export interface EditorWorkflowState {
   first_draft: string;
   review_opinion: string;
   human_review?: string;
-  quality_report?: QualityReport;
+  quality_report?: QualityReport | null;
   final_draft: string;
   character_scripts: Record<string, string>;
   game_data_sections: GameDataSections;
@@ -107,7 +107,8 @@ export interface EditorOperationAccepted {
   operation_id: string;
   operation_status: 'queued' | 'running' | 'complete' | 'failed' | 'paused';
   target_step: string;
-  progress?: { message?: string; percent?: number; workflow?: WorkflowProgress };
+  progress?: { message?: string; percent?: number; workflow?: WorkflowProgress; convert_progress?: AssetProgress; asset_progress?: AssetProgress };
+  outline_progress?: OutlineProgress | null;
   error_message?: string;
 }
 
@@ -261,6 +262,9 @@ export interface AssetPlanItem {
 export type AssetTaskStatus = "pending" | "running" | "complete" | "failed" | "skipped";
 
 export interface AssetTask {
+  retry_count?: number;
+  retry_exhausted?: boolean;
+  fallback?: boolean;
   id: string;
   label: string;
   status: AssetTaskStatus;

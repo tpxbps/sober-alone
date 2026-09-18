@@ -10,13 +10,17 @@ const question = (id: string) => ({
   ], recommended_option_id: "a",
 });
 async function setup(page: Page) {
-  let stage = 0, revision = 1, stopped = false, paused = false;
+  let stage = 0, stopped = false, paused = false;
+  const revision = 1;
   let savedOutline = "", lastOperation = "start", sequence = 0;
-  let answers: Array<Record<string, unknown>> = [];
-  const archived: unknown[] = [];
+  const answers: Array<Record<string, unknown>> = [];
+  const events: Array<Record<string, unknown>> = [
+    { id: 'passage-1', seq: 1, kind: 'passage', content: '浓雾封住了码头，四名故人被困在旧灯塔。午夜，值守人离奇死亡。' },
+    { id: 'q1', seq: 2, kind: 'question', content: '', question: question('q1') },
+  ];
   const commands: Record<string, unknown>[] = [];
   const session = () => ({
-    protocol_version: 2, revision, status: stage < 2 ? "awaiting_answer" : "ready",
+    protocol_version: 3, events, revision, status: stage < 2 ? "awaiting_answer" : "ready",
     segments: [{ id: "s1", content: "浓雾封住了码头，四名故人被困在旧灯塔。午夜，值守人离奇死亡。" },
       ...(stage > 0 ? [{ id: "s2", content: "十年前的失踪案再次浮现，四人的证词无法拼成完整的一夜。" }] : [])],
     decisions: answers, pending_question: stage < 2 ? question(stage === 0 ? "q1" : "q2") : null,
@@ -44,11 +48,11 @@ async function setup(page: Page) {
     if (path.endsWith("/game/scripts")) return json({ success: true, scripts: [] });
     if (path.endsWith("/model-health")) return json({ models: [] });
     if (path.endsWith("/capabilities")) return json({ models: [], features: {} });
-    if (path.endsWith("/start")) return json({ success: true, thread_id: "co-thread", operation_id: "start", operation_status: "queued", target_step: "generate_outline" });
+    if (path.endsWith("/script-editor/start")) return json({ success: true, thread_id: "co-thread", operation_id: "start", operation_status: "queued", target_step: "generate_outline" });
     if (path.endsWith("/state")) return json(response());
-    if (path.includes("/operations/")) return json({ ...response(), operation_id: "start", operation_status: "complete" });
+    if (path.includes("/operations/")) return json({ ...response(), operation_id: lastOperation, operation_status: "complete" });
     if (path.endsWith("/history")) return json({ success: true, checkpoints: [
-      { checkpoint_id: "now", current_step: "generate_outline", state: state() }, ...archived,
+      { checkpoint_id: "now", current_step: "generate_outline", state: state() },
     ] });
     if (path.endsWith("/progress-stream")) return route.fulfill({ contentType: "text/event-stream",
       body: "data: " + JSON.stringify({ type: "outline_snapshot", data: response().outline_progress }) + "\n\n" });
@@ -60,15 +64,14 @@ async function setup(page: Page) {
       if (cmd.action === "pause") paused = true;
       if (cmd.action === "continue") paused = false;
       if (cmd.action === "stop_questions") { stopped = true; stage = 2; }
-      if (cmd.action === "answer" || cmd.action === "rewrite") {
-        if (cmd.action === "rewrite") {
-          archived.push({ checkpoint_id: "old-" + revision, current_step: "review_outline", state: structuredClone(state()) });
-          revision += 1; stage = 0; answers = [];
-        }
+      if (cmd.action === "answer") {
         const q = question(stage === 0 ? "q1" : "q2");
         answers.push({ source: "user", choice: cmd.option_id ? "旧案复仇" : "", other_text: cmd.other_text,
           question: q, option_id: cmd.option_id, segment_index: stage + 1 });
+        events.push({ id: cmd.request_id, seq: events.length + 1, kind: 'answer', content: [cmd.option_id ? '旧案复仇' : '', cmd.other_text].filter(Boolean).join('\n\n') });
+        events.push({ id: 'revision-' + cmd.request_id, seq: events.length + 1, kind: 'revision', content: '已将新想法纳入当前大纲。' });
         stage = stopped ? 2 : stage + 1;
+        if (stage < 2) events.push({ id: 'q2', seq: events.length + 1, kind: 'question', content: '', question: question('q2') });
         paused = false;
       }
       return json({ success: true, thread_id: "co-thread", operation_id: cmd.request_id, operation_status: "complete", target_step: "outline_wait" });
@@ -93,18 +96,19 @@ test("大纲共创：标题、自由回答、改写与全文确认", async ({ pa
   await expect(page.getByRole("dialog", { name: "创作小助手" })).not.toBeVisible();
   await page.getByRole("radio", { name: /旧案复仇/ }).click();
   await page.getByLabel("其他想法或补充说明").fill("希望有一名完全不知情的角色");
-  await page.getByRole("button", { name: "按此方向继续" }).click();
+  await page.getByRole("button", { name: "提交想法" }).click();
   await expect(page.getByText("谁最想隐瞒这段往事？")).toBeVisible();
+  const history = await page.locator('[data-conversation-event]').allTextContents();
+  expect(history[0]).toContain('浓雾封住');
+  expect(history[1]).toContain('核心冲突');
+  expect(history[2]).toContain('希望有一名完全不知情');
+  expect(history[3]).toContain('已将新想法');
   await expect(page.getByRole("button", { name: /暂停创作|停止创作|重新整理/ })).toHaveCount(0);
-  await page.getByRole("button", { name: "从这里修改" }).first().click();
+  await expect(page.getByRole("button", { name: /从这里修改|撤销修订/ })).toHaveCount(0);
+  await expect(page.getByLabel("查看大纲版本")).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: "其他想法或补充说明" })).toHaveCount(1);
   await page.getByLabel("其他想法或补充说明").fill("改为共同秘密，并保留温情结局");
-  await page.getByRole("button", { name: "从这里重写后续", exact: true }).click();
-  await expect(page.getByText("版本 2", { exact: true })).toBeVisible();
-  await page.getByLabel("查看大纲版本").selectOption("1");
-  await expect(page.getByText("正在查看旧版本；内容不会加入当前创作。")).toBeVisible();
-  await expect(page.getByRole("button", { name: "停止提问" })).not.toBeVisible();
-  await page.getByLabel("查看大纲版本").selectOption("");
-  await page.getByRole("button", { name: "停止提问" }).click();
+  await page.getByRole("button", { name: "提交想法", exact: true }).click();
   await expect(page.getByRole("button", { name: "确认大纲，进入初稿" })).toBeVisible();
   await expect(page.getByTestId("outline-final-message")).toContainText("守夜人利用旧案");
   await page.reload();
@@ -120,8 +124,8 @@ test("大纲共创：标题、自由回答、改写与全文确认", async ({ pa
   await expect(page.getByText("初稿正文")).toBeVisible();
   expect(commands.find(c => c.action === "save")?.content).toBe("# 雾港旧事\n人工调整后的大纲");
   expect(commands.find(c => c.action === "confirm")?.content).toBe("# 雾港旧事\n人工调整后的大纲");
-  expect(commands.filter(c => c.action === "answer")).toHaveLength(1);
-  expect(commands.some(c => c.action === "rewrite")).toBe(true);
+  expect(commands.filter(c => c.action === "answer")).toHaveLength(2);
+  expect(commands.some(c => c.action === "rewrite")).toBe(false);
 });
 
 test("窄屏共创和小助手开关保留输入", async ({ page }) => {
@@ -162,8 +166,13 @@ test("首段在后台操作结束前流式显示，调度占位与最终正文�
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   const address = server.address() as { port: number };
   const emit = (type: string, data: unknown) => stream!.write("data: " + JSON.stringify({ type, data }) + "\n\n");
-  await page.route("**/progress-stream", route => route.continue({ url: `http://127.0.0.1:${address.port}/events` }));
-  await page.route("**/operations/*", route => route.fulfill({ json: { operation_status: "running" } }));
+  await page.route("**/progress-stream*", route => route.continue({ url: `http://127.0.0.1:${address.port}/events` }));
+  await page.route("**/script-editor/start", route => route.fulfill({ json: { success: true, thread_id: "co-thread", operation_id: "stream-op", operation_status: "queued", target_step: "generate_outline" } }));
+  await page.route("**/operations/*", route => route.fulfill({ json: {
+    operation_id: "stream-op", operation_status: step === "review_outline" ? "complete" : "running", thread_id: "co-thread", current_step: step,
+    state: { outline_session: session, prompts: {}, outline: session.final_outline }, outline_progress: snapshot(),
+    interrupt: step === "review_outline" ? { step } : null,
+  } }));
   await page.route("**/state", route => route.fulfill({ json: { success: true, thread_id: "co-thread", current_step: step,
     state: { outline_session: session, user_idea: "流式回归", prompts: {}, script_title: "流式大纲", outline: session.final_outline },
     interrupt: step === "review_outline" ? { step } : null, outline_progress: snapshot() } }));
@@ -201,6 +210,7 @@ test("首段在后台操作结束前流式显示，调度占位与最终正文�
     const finalNode = await page.getByTestId("outline-final-message").elementHandle();
     session.final_outline = live.text; session.status = "ready"; live = null; step = "review_outline"; seq++;
     emit("outline_segment_complete", snapshot());
+    emit("workflow_progress", { operation_id: "stream-op", seq: ++seq, current_step: step, finished: true });
     await expect(page.getByText("完整大纲已整理", { exact: true })).toBeVisible();
     expect(await finalNode!.evaluate(el => el.isConnected)).toBe(true);
     await expect(page.getByTestId("outline-final-message")).toHaveCount(1);
@@ -217,7 +227,7 @@ test("操作受理后状态查询失败不会锁住按钮，放弃确认框覆�
   await begin(page);
   await page.getByRole("radio", { name: /旧案复仇/ }).click();
   await page.route("**/state", route => route.fulfill({ status: 500, json: { detail: "测试状态查询失败" } }));
-  await page.getByRole("button", { name: "按此方向继续" }).click();
+  await page.getByRole("button", { name: "提交想法" }).click();
   await expect(page.getByRole("button", { name: "停止提问", exact: true })).toBeEnabled();
   await expect(page.getByRole("alert")).toHaveCount(0);
   await page.getByRole("button", { name: "放弃此剧本", exact: true }).click();
@@ -264,8 +274,12 @@ test("保存大纲留在确认节点，刷新保留全文，失败时不丢草�
   await page.getByRole("button", { name: "停止提问", exact: true }).click();
   await page.getByRole("button", { name: "编辑全文", exact: true }).click();
   const content = "# 手动保存的大纲\n保留最新剧情和末尾空格  ";
+  const previewBox = (await page.getByRole('button', { name: '预览', exact: true }).boundingBox())!;
+  const saveBox = (await page.getByRole('button', { name: '保存', exact: true }).boundingBox())!;
+  expect(Math.abs(previewBox.y - saveBox.y)).toBeLessThan(2);
+  expect(saveBox.x).toBeGreaterThan(previewBox.x);
   await page.getByLabel("编辑完整大纲").fill(content);
-  await page.getByRole("button", { name: "保存大纲", exact: true }).click();
+  await page.getByRole("button", { name: "保存", exact: true }).click();
   await expect(page.getByText("大纲已保存", { exact: true })).toBeVisible();
   expect(commands.filter(c => c.action === "confirm")).toHaveLength(0);
   await page.reload();
@@ -277,6 +291,22 @@ test("保存大纲留在确认节点，刷新保留全文，失败时不丢草�
   await page.getByRole("button", { name: "确认大纲，进入初稿", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("保存测试失败");
   await expect(page.getByLabel("编辑完整大纲")).toHaveValue(content + "\n尚未保存的修改");
-  await expect(page.getByRole("button", { name: "保存大纲", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "保存", exact: true })).toBeEnabled();
   expect(commands.filter(c => c.action === "confirm")).toHaveLength(0);
+});
+
+
+test("等待作者选择时不轮询，刷新保留提问卡草稿", async ({ page }) => {
+  const reads: string[] = [];
+  page.on('request', request => { if (/\/(state|operations\/[^/]+|progress-stream)(\?|$)/.test(request.url())) reads.push(request.url()); });
+  await setup(page);
+  await begin(page);
+  await expect(page.getByLabel('其他想法或补充说明')).toBeEnabled();
+  await page.getByLabel('其他想法或补充说明').fill('只纠正前文，双方一直自愿合作');
+  await page.waitForTimeout(250);
+  const before = reads.length;
+  await page.waitForTimeout(6000);
+  expect(reads.length).toBe(before);
+  await page.reload();
+  await expect(page.getByLabel('其他想法或补充说明')).toHaveValue('只纠正前文，双方一直自愿合作');
 });

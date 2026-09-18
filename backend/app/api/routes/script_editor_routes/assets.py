@@ -160,7 +160,11 @@ async def retry_convert_task(
 
 
 @stream_router.get("/{thread_id}/progress-stream")
-async def progress_stream(thread_id: str, owner_key_hash: str = Depends(require_author_key_hash)):
+async def progress_stream(
+    thread_id: str,
+    owner_key_hash: str = Depends(require_author_key_hash),
+    operation_id: str | None = None,
+):
     """Stream conversion and asset progress snapshots over SSE."""
     from app.script_editor.services.progress_bus import subscribe, unsubscribe
 
@@ -209,6 +213,28 @@ async def progress_stream(thread_id: str, owner_key_hash: str = Depends(require_
             except Exception:
                 pass
 
+            if operation_id:
+                operation = await editor_operation_runner.get(
+                    thread_id, operation_id, owner_key_hash
+                )
+                progress = operation.get("progress", {}).get("workflow", {})
+                finished = operation["operation_status"] not in {"queued", "running"}
+                yield _sse(
+                    {
+                        "type": "workflow_progress",
+                        "data": {
+                            **progress,
+                            "operation_id": operation_id,
+                            "current_step": operation.get("current_step", ""),
+                            "finished": finished,
+                            "outcome": operation["operation_status"],
+                        },
+                    }
+                )
+                if finished:
+                    yield _sse({"type": "done", "data": {"operation_id": operation_id}})
+                    return
+
             while True:
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=30.0)
@@ -218,6 +244,7 @@ async def progress_stream(thread_id: str, owner_key_hash: str = Depends(require_
                         event.get("type") == "workflow_progress"
                         and isinstance(data, dict)
                         and data.get("finished")
+                        and (not operation_id or data.get("operation_id") == operation_id)
                     ):
                         yield _sse({"type": "done"})
                         break

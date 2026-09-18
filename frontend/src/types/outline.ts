@@ -3,7 +3,7 @@ export interface OutlineQuestion {
   title: string;
   question: string;
   options: Array<{ id: string; label: string; impact: string }>;
-  recommended_option_id: string;
+  recommended_option_id?: string | null;
 }
 export interface OutlineDecision {
   source: "user" | "ai";
@@ -14,7 +14,8 @@ export interface OutlineDecision {
   segment_index?: number;
 }
 export interface OutlineSession {
-  protocol_version: 2;
+  protocol_version: 2 | 3;
+  events?: OutlineEvent[];
   revision: number;
   status: "writing" | "directing" | "awaiting_answer" | "finalizing" | "checking" | "ready" | "needs_revision" | "revising";
   canon?: string[];
@@ -58,4 +59,12 @@ export interface OutlineCommand {
   option_id?: string;
   other_text?: string;
   content?: string;
+}
+
+export interface OutlineEvent {
+  id: string;
+  seq: number;
+  kind: 'passage' | 'question' | 'answer' | 'revision' | 'final' | 'restored';
+  content: string;
+  question?: OutlineQuestion;
 }

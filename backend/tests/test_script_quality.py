@@ -187,7 +187,7 @@ async def test_interrupted_gateway_review_cannot_approve_partial_tool_data(monke
         monkeypatch.setattr(quality_check, "create_llm", lambda **kwargs: model)
         state = {"game_data_sections": content()}
         state.update(await quality_check.check_game_quality(state))
-    assert len(requests) == 1 and requests[0]["stream"] is True
+    assert len(requests) == 2 and all(request["stream"] is True for request in requests)
     assert requests[0]["tool_choice"]["function"]["name"] == "LocatedQualityResult"
     assert state["quality_report"]["status"] == "incomplete"
     assert not quality_check.quality_approved(state)

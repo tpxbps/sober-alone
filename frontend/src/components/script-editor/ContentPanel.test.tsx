@@ -79,8 +79,8 @@ describe('ContentPanel pending workflow state', () => {
       />,
     )
 
-    expect(markup).toContain('重新执行结构化转换')
-    expect(markup).toContain('避免只更新进度、遗漏数据合并')
+    expect(markup).toContain('重试未完成的任务')
+    expect(markup).toContain('已完成的内容会保留')
     expect(markup).not.toContain('转换任务 game_flow 重试')
   })
 })

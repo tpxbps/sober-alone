@@ -3,8 +3,6 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.core.model_registry import get_model_spec
-
 
 class StartWorkflowRequest(BaseModel):
     user_idea: str
@@ -58,9 +56,8 @@ class ChatRequest(BaseModel):
     chat_session_id: str
     workflow_thread_id: str | None = None
 
-    @field_validator("model")
+    @field_validator("model", mode="before")
     @classmethod
-    def standard_model_only(cls, value: str) -> str:
-        if get_model_spec(value).tier == "frontier":
-            raise ValueError("前沿模型仅供游戏角色选择，创作助手请使用常用模型")
-        return value
+    def fixed_workshop_model(cls, value) -> str:
+        # Accept old clients without allowing them to change the workshop route.
+        return "deepseek-flash"

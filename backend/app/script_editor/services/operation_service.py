@@ -189,7 +189,11 @@ class EditorOperationRunner:
             "operation_id": operation.operation_id,
             "operation_status": operation.status,
             "target_step": operation.target_step,
-            "progress": operation.progress,
+            "progress": {
+                key: value
+                for key, value in (operation.progress or {}).items()
+                if key not in {"disclosure_cache", "convert_cache"}
+            },
         }
 
     def _schedule(self, operation_id: str) -> None:
@@ -244,10 +248,15 @@ class EditorOperationRunner:
             )
             if operation.error_message:
                 response["error_message"] = operation.error_message
-        if response["operation_status"] in {"complete", "paused"}:
+        if response["operation_status"] in {"queued", "running", "complete", "paused", "failed"}:
             from app.script_editor.outline.runtime import workflow_response
 
-            live = await workflow_response(ScriptEditorWorkflowService(), thread_id)
+            try:
+                live = await workflow_response(ScriptEditorWorkflowService(), thread_id)
+            except WorkflowNotFoundError:
+                if response["operation_status"] in ACTIVE_STATUSES:
+                    return response
+                raise
             response.update(live)
             state = live.get("state", {})
             response["script_id"] = state.get("script_id", "")
@@ -374,6 +383,7 @@ class EditorOperationRunner:
             await runtime.drain_progress()
             if result.get("state", {}).get("outline_session"):
                 await emit_final(runtime, result["state"]["outline_session"])
+            business_error = (result.get("state") or {}).get("error_message", "")
             async with AsyncSessionLocal() as db:
                 operation = await db.get(EditorOperation, operation_id)
                 workflow = await db.get(EditorWorkflow, thread_id)
@@ -381,20 +391,35 @@ class EditorOperationRunner:
                     return
                 if operation.status == "paused":
                     return
-                operation.status = "complete"
+                operation.status = "failed" if business_error else "complete"
+                operation.error_message = business_error
                 operation.progress = {
                     **(operation.progress or {}),
-                    "message": "执行完成",
+                    "message": "执行失败" if business_error else "执行完成",
                     "percent": 100,
                 }
                 workflow.current_step = result.get("current_step", workflow.current_step)
                 workflow.script_id = result.get("script_id") or workflow.script_id
-                workflow.status = "complete" if result.get("is_complete") else "idle"
+                workflow.status = (
+                    "failed"
+                    if business_error
+                    else "complete"
+                    if result.get("is_complete")
+                    else "idle"
+                )
                 workflow.updated_at = datetime.now()
                 await db.commit()
             from app.script_editor.services.execution import report_stage
 
-            await report_stage(result.get("current_step", ""), finished=True)
+            await report_stage(
+                result.get("current_step", ""),
+                finished=True,
+                outcome="failed"
+                if business_error
+                else "awaiting_author"
+                if result.get("interrupt")
+                else "complete",
+            )
         except asyncio.CancelledError:
             raise
         except Exception as error:
@@ -417,6 +442,9 @@ class EditorOperationRunner:
                     if workflow:
                         workflow.status = "failed"
                     await db.commit()
+            from app.script_editor.services.execution import report_stage
+
+            await report_stage(runtime.stage if runtime else "", finished=True, outcome="failed")
         finally:
             if runtime:
                 await runtime.drain_progress()

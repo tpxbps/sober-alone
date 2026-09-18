@@ -37,6 +37,10 @@ class WorkflowProgressRegistry:
             if progress:
                 mutation(progress)
 
+    def restore(self, script_id: str, progress: dict) -> None:
+        with self._lock:
+            self._progress[script_id] = deepcopy(progress)
+
     def update_task(self, script_id: str, task_id: str, status: str, reason: str = "") -> None:
         def apply(progress: dict) -> None:
             for phase in progress.get("phases", []):

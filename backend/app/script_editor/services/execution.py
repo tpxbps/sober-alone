@@ -11,7 +11,7 @@ from langchain_core.runnables import RunnableConfig
 
 from app.script_editor.state import ScriptGenState
 
-PROMPT_VERSION = "workshop-v3"
+PROMPT_VERSION = "workshop-v4.2"
 GENERATION_REVIEW = {
     "generate_outline": "review_outline",
     "generate_first_draft": "review_first_draft",
@@ -48,7 +48,7 @@ def creative_context(state: dict, step: str) -> str:
     return text
 
 
-def observe_model(response) -> None:
+def observe_model(response, *, validation: str = "", schema: str = "") -> None:
     """Record provider-reported identity and usage, without retaining raw transport data."""
     from app.script_editor.outline.runtime import current_runtime
 
@@ -57,11 +57,17 @@ def observe_model(response) -> None:
     model = metadata.get("model_name") or metadata.get("model")
     if runtime and model:
         runtime.model_responses.append(
-            {"model": model, "usage": getattr(response, "usage_metadata", None)}
+            {
+                "model": model,
+                "usage": getattr(response, "usage_metadata", None),
+                "finish_reason": metadata.get("finish_reason"),
+                "validation": validation,
+                "schema": schema,
+            }
         )
 
 
-async def report_stage(step: str, *, finished: bool = False):
+async def report_stage(step: str, *, finished: bool = False, outcome: str = "running"):
     from app.db.models import EditorOperation, EditorWorkflow
     from app.db.session import AsyncSessionLocal
     from app.script_editor.outline.runtime import current_runtime, finish_database_access
@@ -85,6 +91,7 @@ async def report_stage(step: str, *, finished: bool = False):
                 "seq": runtime.progress_seq,
                 "current_step": step,
                 "finished": finished,
+                "outcome": outcome,
             }
             operation.progress = {
                 **(operation.progress or {}),
@@ -118,7 +125,7 @@ def observable_node(name, fn):
             name in GENERATION_REVIEW
             or name in {"outline_director", "outline_apply", "outline_finalize"}
         ) and not result.get("error_message"):
-            from app.core.config import settings
+            from app.script_editor.llm import MODEL
             from app.script_editor.outline.runtime import current_runtime
 
             runtime = current_runtime.get()
@@ -142,9 +149,7 @@ def observable_node(name, fn):
                     "reported_models": runtime.model_responses[model_start:] if runtime else [],
                     "input_checkpoint_id": config.get("configurable", {}).get("checkpoint_id")
                     or (runtime.input_checkpoint_id if runtime else None),
-                    "model": settings.get_script_review_model()
-                    if name == "review_by_llm"
-                    else settings.SCRIPT_EDITOR_MODEL or "deepseek-flash",
+                    "model": MODEL,
                     "input_hash": digest(
                         {
                             k: state.get(k)

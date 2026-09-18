@@ -10,15 +10,14 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.core.config import settings
-from app.core.llm_factory import create_llm
 from app.db.models import Character, Script
 from app.db.session import AsyncSessionLocal
 from app.game.clues import CLUE_SCHEMA_VERSION, derive_game_process, normalize_clue_stages
+from app.script_editor.llm import create_editor_llm as create_llm
 from app.script_editor.services.tts_gen import generate_script_tts
 
 
@@ -99,18 +98,16 @@ async def _convert(script: Script, source: list[dict]) -> tuple[list[dict], dict
         max_retries=2,
         disable_thinking=True,
     )
-    converter = llm.with_structured_output(ConvertedClues, method="function_calling")
+    from app.script_editor.llm import invoke_structured
+
     prompt = (
         "把下面每一轮旧系统线索拆成 overview 和若干独立线索项。"
         "必须逐轮处理，stage 原样保留；只能拆分、摘取和概括原文，禁止增加、删除、"
         "改写事实或把讨论提示混入线索。summary 简短明确，content 保留支撑该线索的完整细节。"
         "不要生成 ID。\n\n" + json.dumps(source, ensure_ascii=False, indent=2)
     )
-    converted = await converter.ainvoke(
-        [
-            SystemMessage(content="你是剧本数据迁移器，事实保真高于文采。"),
-            HumanMessage(content=prompt),
-        ]
+    converted = await invoke_structured(
+        llm, ConvertedClues, "你是剧本数据迁移器，事实保真高于文采。", prompt
     )
     converted_data = ConvertedClues.model_validate(converted).model_dump()
     if len(converted_data["stages"]) != len(source):
@@ -125,7 +122,6 @@ async def _convert(script: Script, source: list[dict]) -> tuple[list[dict], dict
         game_full_process=script.game_full_process or [],
     )
 
-    auditor = llm.with_structured_output(ConversionAudit, method="function_calling")
     audit_prompt = (
         "逐轮对比原文与结构化结果。只有所有事实均被覆盖、没有新增事实、轮次和讨论提示"
         "均正确时 passed 才能为 true。\n原文：\n"
@@ -133,8 +129,8 @@ async def _convert(script: Script, source: list[dict]) -> tuple[list[dict], dict
         + "\n结果：\n"
         + json.dumps(normalized, ensure_ascii=False, indent=2)
     )
-    audit = await auditor.ainvoke(
-        [SystemMessage(content="你是严格的数据迁移审计员。"), HumanMessage(content=audit_prompt)]
+    audit = await invoke_structured(
+        llm, ConversionAudit, "你是严格的数据迁移审计员。", audit_prompt
     )
     audit_data = ConversionAudit.model_validate(audit).model_dump()
     if not audit_data["passed"] or audit_data["omissions"] or audit_data["invented_facts"]:

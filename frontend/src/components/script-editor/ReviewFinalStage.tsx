@@ -22,7 +22,7 @@ export function ReviewFinalStage({ interruptInfo, workflowState, isLoading, onCo
       {editing ? <textarea aria-label="终稿正文" value={draft} onChange={(e) => setDraft(e.target.value)} disabled={isLoading}
         className="w-full h-full min-h-64 bg-transparent resize-none text-sm focus:outline-none" /> : <Markdown className="text-sm">{draft}</Markdown>}
     </div>
-    <div className="p-3 border-t border-border flex flex-wrap gap-2">
+    <div className="p-3 border-t border-border grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] gap-2">
       <RefineButton step="review_final" content={draft} humanReview={human} disabled={isLoading} />
       <button disabled={isLoading || !draft.trim()} onClick={() => onConfirm(draft, human)}
         className="flex-1 px-4 py-2.5 rounded-lg bg-primary text-primary-foreground disabled:opacity-50">{isLoading ? "处理中…" : "确认终稿并拆分"}</button>
