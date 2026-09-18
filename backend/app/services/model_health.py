@@ -30,6 +30,7 @@ from app.agents.reaction import (
     build_reaction_system_prompt,
 )
 from app.core.config import settings
+from app.core.inference import InferenceRecoveryError, raise_for_inference_recovery
 from app.core.llm_factory import create_summary_llm
 from app.core.model_registry import MODEL_SPECS, ModelSpec
 
@@ -42,6 +43,7 @@ FIRST_TOKEN_SLOW_THRESHOLD_SECONDS = 5.0
 REACTION_PROBE_TIMEOUT_SECONDS = 30.0
 REACTION_SLOW_THRESHOLD_SECONDS = 12.0
 CACHE_TTL_SECONDS = 30 * 60.0
+FAILURE_CACHE_TTL_SECONDS = 30.0
 MODEL_PROBE_CONCURRENCY = 4
 TRANSIENT_PROBE_ATTEMPTS = 2
 
@@ -60,6 +62,7 @@ _cached_models: list[dict[str, Any]] | None = None
 _cached_at_monotonic = 0.0
 _probe_task: asyncio.Task[list[dict[str, Any]]] | None = None
 _probing_models: dict[str, dict[str, Any]] = {}
+_successful_models: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
 def _is_timeout(exc: BaseException) -> bool:
@@ -159,6 +162,9 @@ async def _measure_with_transient_retry(
         try:
             return await measure(spec)
         except Exception as exc:  # noqa: BLE001 - normalize provider failures
+            # SDK transport wrappers must not hide account/configuration failures
+            # or turn them into repeated billable connection retries.
+            raise_for_inference_recovery(exc)
             status = getattr(exc, "status_code", None)
             transient = isinstance(exc, (APIConnectionError, ConnectionError)) or (
                 isinstance(status, int) and 500 <= status < 600
@@ -190,6 +196,14 @@ def _health_message(status: str) -> str:
     }.get(status, "响应正常")
 
 
+def _probe_error_code(error: Exception) -> str:
+    if isinstance(error, InferenceRecoveryError):
+        return "probe_auth" if error.status in {401, 403} else "probe_account"
+    if getattr(error, "status_code", None) in {401, 403}:
+        return "probe_auth"
+    return "probe_failed"
+
+
 async def _probe_model(spec: ModelSpec) -> dict[str, Any]:
     """Probe speaking and reaction paths concurrently for one configured model."""
     if spec.tier == "frontier":
@@ -201,7 +215,10 @@ async def _probe_model(spec: ModelSpec) -> dict[str, Any]:
     )
     measurements = {"speech": first_token, "reaction": reaction}
     errors = [value for value in measurements.values() if isinstance(value, Exception)]
-    unavailable = any(getattr(error, "status_code", None) in {401, 403} for error in errors)
+    error_codes = {_probe_error_code(error) for error in errors}
+    service_error = next(
+        (code for code in ("probe_auth", "probe_account") if code in error_codes), None
+    )
     failed_dimensions = [dim for dim, value in measurements.items() if isinstance(value, Exception)]
     timeout_dimensions = [
         dim
@@ -214,8 +231,8 @@ async def _probe_model(spec: ModelSpec) -> dict[str, Any]:
     if _dimension_is_slow(reaction, REACTION_SLOW_THRESHOLD_SECONDS):
         slow_dimensions.append("reaction")
     status = (
-        "unavailable"
-        if unavailable
+        "unknown"
+        if service_error
         else "timeout"
         if timeout_dimensions
         else "unknown"
@@ -225,11 +242,12 @@ async def _probe_model(spec: ModelSpec) -> dict[str, Any]:
         else "normal"
     )
     for error in errors:
-        logger.info(
-            "Model health probe failed model=%s error=%s status=%s",
+        logger.warning(
+            "Model health probe failed model=%s error=%s status=%s code=%s",
             spec.id,
             type(error).__name__,
-            getattr(error, "status_code", None),
+            getattr(error, "status_code", getattr(error, "status", None)),
+            _probe_error_code(error),
         )
     first_token_ms = first_token if isinstance(first_token, int) else None
     return {
@@ -241,12 +259,19 @@ async def _probe_model(spec: ModelSpec) -> dict[str, Any]:
         "slow_dimensions": slow_dimensions,
         "failed_dimensions": failed_dimensions,
         "timeout_dimensions": timeout_dimensions,
-        "message": _health_message(status),
+        "message": (
+            "测速服务鉴权失败，暂无法判断模型状态"
+            if service_error == "probe_auth"
+            else "测速服务账户暂不可用，暂无法判断模型状态"
+            if service_error == "probe_account"
+            else _health_message(status)
+        ),
+        "error_code": service_error,
         "checked_at": datetime.now(UTC).isoformat(),
     }
 
 
-async def _probe_configured_models() -> list[dict[str, Any]]:
+async def _probe_configured_models(*, refresh_successful: bool = False) -> list[dict[str, Any]]:
     global _cached_at_monotonic, _cached_models
     specs = [
         spec
@@ -259,7 +284,19 @@ async def _probe_configured_models() -> list[dict[str, Any]]:
 
     async def probe(spec: ModelSpec) -> dict[str, Any]:
         async with semaphore:
+            previous = _successful_models.get(spec.id)
+            if (
+                not refresh_successful
+                and previous
+                and time.monotonic() - previous[0] < CACHE_TTL_SECONDS
+            ):
+                _probing_models[spec.id] = previous[1]
+                return previous[1]
             result = await _probe_model(spec)
+            if result.get("status") in {"normal", "slow"}:
+                _successful_models[spec.id] = (time.monotonic(), result)
+            else:
+                _successful_models.pop(spec.id, None)
             _probing_models[spec.id] = result
             return result
 
@@ -269,31 +306,74 @@ async def _probe_configured_models() -> list[dict[str, Any]]:
     return models
 
 
-def _snapshot(*, probing: bool, cached: bool) -> dict[str, Any]:
+def _cache_ttl() -> float:
+    batch_ttl = (
+        FAILURE_CACHE_TTL_SECONDS
+        if any(item.get("status") not in {"normal", "slow"} for item in (_cached_models or []))
+        else CACHE_TTL_SECONDS
+    )
+    # Reusing a successful sample must never renew its original expiry.
+    return max(
+        0.0,
+        min(
+            [batch_ttl]
+            + [
+                _successful_models[item["model"]][0] + CACHE_TTL_SECONDS - _cached_at_monotonic
+                for item in (_cached_models or [])
+                if item["model"] in _successful_models
+            ]
+        ),
+    )
+
+
+def _snapshot(*, probing: bool, cached: bool, retry_after_seconds: int = 0) -> dict[str, Any]:
     # Return remaining age so a browser cannot extend a nearly-expired server cache.
-    remaining = max(0, math.ceil(CACHE_TTL_SECONDS - (time.monotonic() - _cached_at_monotonic)))
+    remaining = max(0, math.ceil(_cache_ttl() - (time.monotonic() - _cached_at_monotonic)))
+    models = deepcopy(list(_probing_models.values()) if probing else (_cached_models or []))
+    service_errors = {item.get("error_code") for item in models}
+    service_error = next(
+        (code for code in ("probe_auth", "probe_account") if code in service_errors), None
+    )
     return {
-        "models": deepcopy(list(_probing_models.values()) if probing else (_cached_models or [])),
+        "models": models,
         "cached": cached,
         "probing": probing,
         "max_age_seconds": 0 if probing else remaining,
+        "retry_after_seconds": retry_after_seconds,
+        "service_error": service_error,
     }
 
 
 async def get_model_health(
-    *, force_refresh: bool = False, wait_for_completion: bool = True
+    *,
+    force_refresh: bool = False,
+    wait_for_completion: bool = True,
+    refresh_cooldown_seconds: float = 0,
 ) -> dict[str, Any]:
     """Share one process-wide run; HTTP callers receive progressive snapshots."""
     global _probe_task
     running = _probe_task is not None and not _probe_task.done()
     cache_is_fresh = (
-        _cached_models is not None and time.monotonic() - _cached_at_monotonic < CACHE_TTL_SECONDS
+        _cached_models is not None and time.monotonic() - _cached_at_monotonic < _cache_ttl()
     )
+    if not running and force_refresh and cache_is_fresh:
+        retry_after = math.ceil(
+            refresh_cooldown_seconds - (time.monotonic() - _cached_at_monotonic)
+        )
+        if retry_after > 0:
+            return _snapshot(probing=False, cached=True, retry_after_seconds=retry_after)
     if not running and cache_is_fresh and not force_refresh:
         return _snapshot(probing=False, cached=True)
     if not running:
         _probing_models.clear()
-        _probe_task = asyncio.create_task(_probe_configured_models())
+        # Retest failures first. A single failed model must not repeatedly spend
+        # the successful models' probe budget while their samples remain valid.
+        refresh_successful = force_refresh and all(
+            item.get("status") in {"normal", "slow"} for item in (_cached_models or [])
+        )
+        _probe_task = asyncio.create_task(
+            _probe_configured_models(refresh_successful=refresh_successful)
+        )
     if not wait_for_completion:
         return _snapshot(probing=True, cached=False)
     await asyncio.shield(_probe_task)
@@ -309,3 +389,4 @@ def clear_model_health_cache() -> None:
     _cached_models = None
     _cached_at_monotonic = 0.0
     _probing_models.clear()
+    _successful_models.clear()

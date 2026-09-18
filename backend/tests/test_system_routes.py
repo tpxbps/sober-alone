@@ -9,6 +9,27 @@ from app.main import app, lifespan
 
 
 @pytest.mark.asyncio
+async def test_manual_health_refresh_requests_a_real_run_with_bounded_cooldown(monkeypatch):
+    from app.api.routes import system
+
+    calls = []
+
+    async def health(**kwargs):
+        calls.append(kwargs)
+        return {"probing": True}
+
+    monkeypatch.setattr(system, "get_model_health", health)
+    assert await system.refresh_model_health() == {"probing": True}
+    assert calls == [
+        {
+            "force_refresh": True,
+            "wait_for_completion": False,
+            "refresh_cooldown_seconds": 10,
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_healthz_checks_local_database_only():
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     session_factory = async_sessionmaker(engine, expire_on_commit=False)

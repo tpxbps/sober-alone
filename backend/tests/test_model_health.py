@@ -147,7 +147,7 @@ async def test_health_probe_is_parallel_singleflight_and_cached(monkeypatch):
 async def test_force_refresh_bypasses_a_fresh_cache(monkeypatch):
     calls = 0
 
-    async def fake_configured_models():
+    async def fake_configured_models(**_kwargs):
         nonlocal calls
         calls += 1
         model_health._cached_models = []
@@ -244,7 +244,7 @@ async def test_partial_results_are_available_while_slow_model_is_running(monkeyp
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", ["normal", "timeout", "unknown"])
-async def test_all_results_are_cached_for_30_minutes_with_remaining_age(monkeypatch, status):
+async def test_failures_have_short_cache_and_success_has_30_minutes(monkeypatch, status):
     now = [100.0]
     monkeypatch.setattr(model_health.time, "monotonic", lambda: now[0])
     calls = []
@@ -257,7 +257,8 @@ async def test_all_results_are_cached_for_30_minutes_with_remaining_age(monkeypa
     monkeypatch.setattr(type(model_health.settings), "get_api_key", lambda *_: "key")
     monkeypatch.setattr(model_health, "_probe_model", fake_probe)
     await model_health.get_model_health()
-    now[0] += 1799
+    ttl = 1800 if status == "normal" else 30
+    now[0] += ttl - 1
     cached = await model_health.get_model_health()
     assert cached["cached"] and cached["max_age_seconds"] == 1
     assert len(calls) == 1
@@ -356,3 +357,80 @@ async def test_empty_structured_response_cannot_be_a_normal_health_sample(monkey
     monkeypatch.setattr(model_health, "bind_reaction_output", lambda *args: Chain())
     with pytest.raises(ValueError, match="empty reaction analysis"):
         await model_health._measure_reaction(_spec())
+
+
+@pytest.mark.asyncio
+async def test_wrapped_credential_error_is_not_retried_or_misreported_as_model_failure(monkeypatch):
+    from openai import APIConnectionError
+
+    from app.core.inference import InferenceRecoveryError
+
+    calls = 0
+
+    async def rejected(_spec):
+        nonlocal calls
+        calls += 1
+        try:
+            raise InferenceRecoveryError("reauthorize_api_key", status=401)
+        except InferenceRecoveryError as cause:
+            raise APIConnectionError(
+                request=httpx.Request("POST", "https://provider.invalid")
+            ) from cause
+
+    monkeypatch.setattr(model_health, "_measure_first_token", rejected)
+    monkeypatch.setattr(model_health, "_measure_reaction", rejected)
+    result = await model_health._probe_model(_spec())
+    assert calls == 2  # once per dimension; no pointless connection retries
+    assert result["status"] == "unknown"
+    assert result["error_code"] == "probe_auth"
+    assert result["message"] == "测速服务鉴权失败，暂无法判断模型状态"
+    assert result["failed_dimensions"] == ["speech", "reaction"]
+
+
+@pytest.mark.asyncio
+async def test_manual_retry_respects_short_cooldown_then_really_runs(monkeypatch):
+    now = [100.0]
+    monkeypatch.setattr(model_health.time, "monotonic", lambda: now[0])
+    calls = []
+
+    async def probe(spec):
+        calls.append(spec.id)
+        return {"model": spec.id, "status": "unknown", "error_code": "probe_auth"}
+
+    monkeypatch.setattr(model_health, "MODEL_SPECS", (_spec(),))
+    monkeypatch.setattr(type(model_health.settings), "get_api_key", lambda *_: "key")
+    monkeypatch.setattr(model_health, "_probe_model", probe)
+    await model_health.get_model_health()
+    throttled = await model_health.get_model_health(force_refresh=True, refresh_cooldown_seconds=10)
+    assert throttled["cached"] and throttled["retry_after_seconds"] == 10
+    assert throttled["service_error"] == "probe_auth"
+    assert len(calls) == 1
+    now[0] += 10
+    refreshed = await model_health.get_model_health(force_refresh=True, refresh_cooldown_seconds=10)
+    assert not refreshed["cached"] and len(calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_retry_failed_model_reuses_success_without_extending_its_expiry(monkeypatch):
+    now = [100.0]
+    monkeypatch.setattr(model_health.time, "monotonic", lambda: now[0])
+    calls = []
+
+    async def probe(spec):
+        calls.append(spec.id)
+        status = "unknown" if spec.id == "hy3" and len(calls) <= 2 else "normal"
+        return {"model": spec.id, "status": status}
+
+    monkeypatch.setattr(
+        model_health, "MODEL_SPECS", (_spec(), ModelSpec("hy3", "hy3", "hunyuan", "Tencent"))
+    )
+    monkeypatch.setattr(type(model_health.settings), "get_api_key", lambda *_: "key")
+    monkeypatch.setattr(model_health, "_probe_model", probe)
+    await model_health.get_model_health()
+    now[0] += 30
+    retried = await model_health.get_model_health()
+    assert calls.count("glm-5.3-flash") == 1 and calls.count("hy3") == 2
+    assert retried["max_age_seconds"] == 1770
+    now[0] += 1770
+    await model_health.get_model_health()
+    assert calls.count("glm-5.3-flash") == 2 and calls.count("hy3") == 2
