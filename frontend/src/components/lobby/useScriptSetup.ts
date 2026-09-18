@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { gameApi, scriptApi, systemApi, subscribeModelHealth } from "@/lib/api";
 import { configuredModels } from "@/lib/capabilityAdapter";
 import { assignModelsToAICharacters } from "@/lib/modelAssignment";
+import { modelHealthMessage } from "@/lib/modelHealthPresentation";
 import { useGameStore } from "@/stores/gameStore";
 import type { AIModelOption, Character } from "@/types/game";
-import type { ModelHealthItem } from "@/types/capabilities";
+import type { ModelHealthItem, ModelHealthResponse } from "@/types/capabilities";
 
 export function useScriptSetup(scriptId: string, quiet: boolean, onStartGame: (id: string) => void) {
   const [characters, setCharacters] = useState<Character[]>([]);
@@ -45,10 +46,11 @@ export function useScriptSetup(scriptId: string, quiet: boolean, onStartGame: (i
     const controller = new AbortController();
     setLoading(true); setLoadError(""); setModelReason("");
     setCharacters([]); setModels([]); setHuman(null); setAssignments({}); setHealth({});
-    const applyHealth = (result: { models: ModelHealthItem[]; probing?: boolean }) => {
+    const applyHealth = (result: ModelHealthResponse) => {
       if (cancelled) return;
       setHealth(Object.fromEntries(result.models.map(item => [item.model, item])));
       setRefreshing(Boolean(result.probing));
+      setHealthMessage(modelHealthMessage(result));
     };
     const unsubscribe = subscribeModelHealth(applyHealth);
     void systemApi.getModelHealth().then(applyHealth).catch(() => {});
@@ -96,7 +98,7 @@ export function useScriptSetup(scriptId: string, quiet: boolean, onStartGame: (i
       const result = await systemApi.getModelHealth(true);
       if (!alive.current) return;
       setHealth(Object.fromEntries(result.models.map(item => [item.model, item])));
-      setHealthMessage("测速已更新");
+      setHealthMessage(modelHealthMessage(result, true));
     } catch { if (alive.current) setHealthMessage("测速失败，可继续使用当前配置"); }
     finally { if (alive.current) setRefreshing(false); }
   };

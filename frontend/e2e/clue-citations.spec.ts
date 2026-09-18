@@ -12,6 +12,8 @@ test('斜杠选择公开线索并在发言气泡展示可访问引用', async ({
   let submitted = ''
   let historyReloaded = false
   let records: unknown[] = []
+  let releaseReactions!: () => void
+  const reactionsPending = new Promise<void>(resolve => { releaseReactions = resolve })
   const characters = [
     { character_id: 'human', name: '陆鸣', character_script: '个人剧本', is_human: true },
     { character_id: 'ai-1', name: '姜芮', is_human: false },
@@ -75,6 +77,7 @@ test('斜杠选择公开线索并在发言气泡展示可访问引用', async ({
     }
     if (path.endsWith('/clue-session/speech')) {
       submitted = route.request().postDataJSON().content
+      await reactionsPending
       records = [
         {
           id: 1,
@@ -129,6 +132,13 @@ test('斜杠选择公开线索并在发言气泡展示可访问引用', async ({
   await page.getByRole('button', { name: '完成发言' }).click()
 
   await expect.poll(() => submitted).toContain('[c02]')
+  // The first local bubble must already have a citation while reactions are
+  // blocked, before the authoritative history replaces the optimistic record.
+  expect(historyReloaded).toBe(false)
+  const optimisticRecord = page.locator('[data-record-id]').filter({ hasText: '我认为这条线索最关键。' })
+  await expect(optimisticRecord.getByRole('button', { name: '查看线索 窗台红泥' })).toBeVisible()
+  await expect(optimisticRecord).not.toContainText('[c02]')
+  releaseReactions()
   await expect.poll(() => historyReloaded).toBe(true)
   const persistedRecord = page.locator('[data-record-id="1"]')
   await expect(persistedRecord).toContainText('设备日志在关键时刻被清空。')

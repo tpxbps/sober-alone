@@ -39,6 +39,7 @@ export interface ModelHealthItem {
   timeout_dimensions?: Array<'speech' | 'reaction'>;
   message: string;
   checked_at: string;
+  error_code?: 'probe_auth' | 'probe_account' | null;
 }
 
 export interface ModelHealthResponse {
@@ -46,4 +47,6 @@ export interface ModelHealthResponse {
   cached: boolean;
   max_age_seconds: number;
   probing?: boolean;
+  retry_after_seconds?: number;
+  service_error?: 'probe_auth' | 'probe_account' | null;
 }

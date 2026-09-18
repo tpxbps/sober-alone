@@ -18,6 +18,7 @@ import { Dialog, DialogContent, DialogTitle, DialogDescription, DialogClose } fr
 import { Markdown } from "@/components/ui/Markdown";
 import type { Character, GameStage, GameRecord } from "@/types/game";
 import { resolveDisplayedSpeakerId } from "@/lib/speakerPresentation";
+import { citedIds, speechClues } from "@/lib/clueScope";
 
 interface GamePageProps {
   sessionId: string;
@@ -309,6 +310,7 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
         speaker_id: humanCharacterId || undefined,
         speaker_name: humanChar?.name || "你",
         content: content,
+        clue_refs: citedIds(content, speechClues(stage, publicClues)),
         record_type: "speech",
         created_at: new Date().toISOString(),
       };
@@ -317,7 +319,7 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
       // Send to backend
       await humanSpeak(content);
     },
-    [humanSpeak, characters, humanCharacterId, stage, sessionId, addRecord]
+    [humanSpeak, characters, humanCharacterId, stage, sessionId, addRecord, publicClues]
   );
 
   // Handle stage advance

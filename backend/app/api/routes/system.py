@@ -30,7 +30,9 @@ async def model_health() -> dict:
 
 @router.post("/api/v1/system/model-health/refresh")
 async def refresh_model_health() -> dict:
-    return await get_model_health(force_refresh=True, wait_for_completion=False)
+    return await get_model_health(
+        force_refresh=True, wait_for_completion=False, refresh_cooldown_seconds=10
+    )
 
 
 @router.get("/api/v1/system/voices")

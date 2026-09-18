@@ -85,7 +85,14 @@ export const systemApi = {
           cached: Boolean(response.data?.cached),
           probing: Boolean(response.data?.probing),
           max_age_seconds: Number.isFinite(maxAge) && maxAge >= 0 ? maxAge : 90,
+          retry_after_seconds: Math.max(0, Number(response.data?.retry_after_seconds) || 0),
+          service_error: response.data?.service_error ?? null,
         };
+        // Failed samples are only a brief backoff, including responses from an
+        // older server that still advertises the successful-sample lifetime.
+        if (value.models.some(model => !['normal', 'slow'].includes(model.status))) {
+          value.max_age_seconds = Math.min(value.max_age_seconds, 30);
+        }
         modelHealthSnapshot = value;
         modelHealthCache = value.probing ? null : {
           value, expiresAt: Date.now() + value.max_age_seconds * 1000,

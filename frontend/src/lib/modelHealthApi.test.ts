@@ -64,3 +64,18 @@ it('does not cache request failures and allows the dialog to retry', async () =>
   expect((await systemApi.getModelHealth()).models).toHaveLength(1)
   expect(http.get).toHaveBeenCalledTimes(2)
 })
+
+it('expires failed results quickly even when an older server advertises 30 minutes', async () => {
+  const failed = { data: { ...response(false).data,
+    models: [{ model: 'test', status: 'unknown' }], service_error: 'probe_auth', retry_after_seconds: 8,
+  } }
+  http.get.mockResolvedValueOnce(failed).mockResolvedValueOnce(response(false))
+  const { systemApi } = await import('./api')
+  const first = await systemApi.getModelHealth()
+  expect(first.max_age_seconds).toBe(30)
+  expect(first.service_error).toBe('probe_auth')
+  expect(first.retry_after_seconds).toBe(8)
+  await vi.advanceTimersByTimeAsync(30_000)
+  await systemApi.getModelHealth()
+  expect(http.get).toHaveBeenCalledTimes(2)
+})
