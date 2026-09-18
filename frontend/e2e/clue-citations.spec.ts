@@ -128,6 +128,8 @@ test('斜杠选择公开线索并在发言气泡展示可访问引用', async ({
   await composer.pressSequentially('/')
   await composer.press('ArrowDown')
   await composer.press('Enter')
+  await expect(page.getByRole('dialog', { name: '编辑线索引用' })).toBeVisible()
+  await page.getByRole('textbox', { name: '相关推理' }).press('Escape')
   await composer.pressSequentially(' 我认为这条线索最关键。')
   await page.getByRole('button', { name: '完成发言' }).click()
 

@@ -8,6 +8,7 @@ from sqlalchemy import select
 from app.agents.role_state import apply_beliefs, normalize_beliefs, observations, put_observation
 from app.core.inference import InferenceRecoveryError, raise_for_inference_recovery
 from app.db.models import GameRecord, GameSession, PlayerState
+from app.game.clue_media import presentation_pending
 from app.game.clues import parse_clue_citations, stage_public_clues
 
 
@@ -40,6 +41,8 @@ async def process_turn(
         return {"success": False, "error": "数据库连接不可用"}
     session = await db.get(GameSession, controller.session.session_id)
     controller.session = session
+    if presentation_pending(session):
+        return {"success": False, "error": "请先查看线索并确认继续推理"}
     if session.pending_speech:
         await finish_pending(controller, db)
         return {"success": False, "error": "上一条发言已恢复，请刷新当前回合后重试"}

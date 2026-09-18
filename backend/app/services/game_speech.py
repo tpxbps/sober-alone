@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.inference import InferenceRecoveryError, raise_for_inference_recovery
 from app.db.models import GameStage
 from app.game.citation_stream import CitationStreamFilter
+from app.game.clue_media import presentation_pending
 from app.game.clues import stage_public_clues
 
 logger = logging.getLogger(__name__)
@@ -65,6 +66,15 @@ class GameSpeechService:
 
             await finish_pending(flow_controller, self.db)
         human_character_id = flow_controller.session.human_character_id
+        if presentation_pending(flow_controller.session):
+            yield encode_sse(
+                {
+                    "type": "error",
+                    "code": "clue_presentation_pending",
+                    "message": "请先查看线索并确认继续推理",
+                }
+            )
+            return
         current_speaker = flow_controller.session.current_speaker
         current_stage = flow_controller.session.current_stage
 
@@ -144,6 +154,15 @@ class GameSpeechService:
 
                 controller = await self._ensure_controller(session_id, self.db)
                 await finish_pending(controller, self.db)
+            if presentation_pending(session):
+                yield encode_sse(
+                    {
+                        "type": "error",
+                        "code": "clue_presentation_pending",
+                        "message": "请先查看线索并确认继续推理",
+                    }
+                )
+                return
             if session.current_speaker != character_id:
                 yield encode_sse({"type": "error", "message": "该发言请求已过期，当前发言者已变化"})
                 return
@@ -174,6 +193,15 @@ class GameSpeechService:
             return
 
         # 生成AI发言
+        if presentation_pending(flow_controller.session):
+            yield encode_sse(
+                {
+                    "type": "error",
+                    "code": "clue_presentation_pending",
+                    "message": "请先查看线索并确认继续推理",
+                }
+            )
+            return
         full_content = ""
         citation_filter = CitationStreamFilter(
             stage_public_clues(

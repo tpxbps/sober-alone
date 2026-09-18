@@ -86,6 +86,7 @@ class GameSession(Base):
     runtime_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
     # Flat list of clue items already published to this session.
     revealed_clues: Mapped[list] = mapped_column(JSON, default=list)
+    clue_presentation_state: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # 投票结果: {"voter_id": {"suspect_id": xxx, "reasoning": xxx}}
     votes: Mapped[dict] = mapped_column(JSON, default=dict)

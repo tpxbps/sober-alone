@@ -88,3 +88,41 @@ it("does not retroactively activate an introduction's unknown citation", () => {
   );
   expect(missingMetadata).not.toContain("查看线索");
 });
+
+describe("attached clue evidence", () => {
+  const clues = [
+    { id: "c01", summary: "门锁", content: "没有撬痕", stage: 1 },
+    { id: "c02", summary: "窗台", content: "留有泥土", stage: 1 },
+  ];
+  const render = (text: string) => renderToStaticMarkup(
+    <GameMessageMarkdown publicClues={clues} allowedCitationIds={['c01', 'c02']}>
+      {text}
+    </GameMessageMarkdown>,
+  );
+
+  it("keeps inline Markdown and multiline reasoning with one evidence count", () => {
+    const markup = render('[**门锁**完整，\n但窗台有泥土][c01，c02,c01]');
+    expect(markup).toContain('查看 2 条引用线索');
+    expect(markup).toContain('decoration-dashed');
+    expect(markup).toContain('<strong');
+    expect(markup).toContain('但窗台有泥土');
+    expect(markup).not.toContain('查看线索 门锁');
+  });
+
+  it("does not hijack ordinary links with the generated fragment prefix", () => {
+    const markup = render('[c01] [普通链接](#evidence-0) [别的链接](https://example.org)');
+    expect(markup).toContain('查看线索 门锁');
+    expect(markup).toContain('href="#evidence-0"');
+    expect(markup).toContain('href="https://example.org"');
+    expect(markup.match(/查看线索 门锁/g)).toHaveLength(1);
+  });
+
+  it("preserves code, escaped tags, and mixed invalid groups without clickable evidence", () => {
+    for (const text of ['    [c01]', '```text\n[推理][c01,c02]\n```', '\\[c01]', '[推理][c01,c99]']) {
+      const markup = render(text);
+      expect(markup).not.toContain('查看线索');
+      expect(markup).not.toContain('条引用线索');
+      expect(markup).toContain('c01');
+    }
+  });
+});

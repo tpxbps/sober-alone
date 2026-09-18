@@ -1,3 +1,4 @@
+import type { ClueMedia, CluePresentationState } from './cluePresentation';
 // Game types definition - matching backend API
 
 // Game stages matching backend
@@ -53,6 +54,7 @@ export interface Character {
 }
 
 export interface PublicClue {
+  media?: ClueMedia;
   id: string;
   summary: string;
   content: string;
@@ -220,6 +222,7 @@ export interface GameStateResponse {
   votes?: Record<string, VoteInfo>;
   vote_results?: VoteResults | null;
   public_clues?: PublicClue[];
+  clue_presentation?: CluePresentationState | null;
 }
 
 // Agent LLM info type
@@ -248,6 +251,7 @@ export interface GameState {
   playerStates: PlayerState[];
   records: GameRecord[];
   publicClues: PublicClue[];
+  cluePresentation: CluePresentationState | null;
   currentSpeakerId: string | null;
   speechQueue: string[];
   agentLlmInfo: Record<string, AgentLlmInfo>; // character_id -> LLM info

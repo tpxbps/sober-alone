@@ -217,6 +217,22 @@ async def advance_stage(
     return result
 
 
+class CluePresentationAck(BaseModel):
+    presentation_id: str = Field(min_length=1, max_length=100)
+
+
+@router.post("/{session_id}/clue-presentation/ack")
+async def acknowledge_clue_presentation(
+    session_id: str, request: CluePresentationAck, db: AsyncSession = Depends(get_db)
+):
+    result = await GameService(db).acknowledge_clue_presentation(
+        session_id, request.presentation_id
+    )
+    if not result.get("success"):
+        raise HTTPException(status_code=409, detail=result.get("error", "演出确认失败"))
+    return result
+
+
 @router.post("/{session_id}/vote")
 async def submit_vote(session_id: str, request: VoteRequest, db: AsyncSession = Depends(get_db)):
     """
@@ -386,7 +402,13 @@ async def stream_tts_audio(
                 return
 
             # 发送完整文本
-            text = record.raw_content or ""
+            from app.db.models import GameSession
+            from app.game.citation_syntax import speech_text
+
+            game_session = await db.get(GameSession, session_id)
+            text = speech_text(
+                record.raw_content or "", game_session.revealed_clues or [], record.clue_refs or []
+            )
             if not text:
                 yield f"data: {json.dumps({'type': 'error', 'message': '文本内容为空'})}\n\n"
                 return

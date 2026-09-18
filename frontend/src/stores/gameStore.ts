@@ -29,6 +29,7 @@ interface GameActions {
 
   // Stage control
   advanceStage: () => Promise<StageTransition | null>;
+  acknowledgeCluePresentation: (presentationId: string) => Promise<void>;
 
   // Speech
   humanSpeak: (content: string) => Promise<void>;
@@ -48,6 +49,7 @@ interface GameActions {
     player_states: PlayerState[];
     current_speaker_id?: string;
     turn_processing?: boolean;
+    clue_presentation?: GameState['cluePresentation'];
     next_speaker_id?: string;
     speech_queue: string[];
     has_all_spoken: boolean;
@@ -80,6 +82,7 @@ const initialState: GameState = {
   playerStates: [],
   records: [],
   publicClues: [],
+  cluePresentation: null,
   currentSpeakerId: null,
   speechQueue: [],
   agentLlmInfo: {}, // character_id -> { model, provider, is_human }
@@ -152,6 +155,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
   },
 
   advanceStage: async () => {
+    if (get().cluePresentation?.status === 'pending') return null;
     const { sessionId, isAdvancingStage } = get();
     if (!sessionId || isAdvancingStage) return null;
 
@@ -165,7 +169,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
 
         set({
           stage: result.transition.to_stage,
-          showStageTransition: true,
+          showStageTransition: state.clue_presentation?.status !== 'pending',
           stageTransitionMessage: result.transition.message || '',
           currentSpeakerId: state.current_speaker_id || null,
           speechQueue: state.speech_queue || [],
@@ -174,6 +178,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
           votes: state.votes || {},
           voteResults: state.vote_results || null,
           publicClues: state.public_clues || [],
+          cluePresentation: state.clue_presentation ?? null,
           isAdvancingStage: false,
         });
 
@@ -192,6 +197,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
   },
 
   humanSpeak: async (content: string) => {
+    if (get().cluePresentation?.status === 'pending') return;
     const { sessionId } = get();
     if (!sessionId) return;
 
@@ -256,6 +262,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
   },
 
   triggerAISpeak: async (characterId: string) => {
+    if (get().cluePresentation?.status === 'pending') return;
     const { sessionId } = get();
     if (!sessionId) return;
 
@@ -481,6 +488,15 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
     }));
   },
 
+  acknowledgeCluePresentation: async (presentationId) => {
+    const sessionId = get().sessionId;
+    if (!sessionId) return;
+    const state = await gameApi.acknowledgeCluePresentation(sessionId, presentationId);
+    if (!appliesToSession(get, sessionId)) return;
+    if (!state.success) throw new Error('确认失败，请重试');
+    set({ ...adaptGameState(state), showStageTransition: false });
+  },
+
   finalizeVoting: async () => {
     const { sessionId } = get();
     if (!sessionId) return;
@@ -524,6 +540,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
 
   updateFromAPI: (data) => {
     set({
+      ...(data.clue_presentation !== undefined ? { cluePresentation: data.clue_presentation } : {}),
       isProcessingReactions: Boolean(data.turn_processing),
       sessionId: data.session_id,
       status: data.status as GameState['status'],

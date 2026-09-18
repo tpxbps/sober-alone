@@ -1,0 +1,187 @@
+{
+  "allowed": [
+    "c01",
+    "c02",
+    "clue-aaaaaaaaaaaa"
+  ],
+  "cases": [
+    {
+      "name": "separators",
+      "input": "[这段**推理**][C01，c02、C01；clue-aaaaaaaaaaaa]",
+      "ai": "[这段**推理**][c01,c02,clue-aaaaaaaaaaaa]",
+      "refs": [
+        "c01",
+        "c02",
+        "clue-aaaaaaaaaaaa"
+      ],
+      "humanRefs": [
+        "c01",
+        "c02",
+        "clue-aaaaaaaaaaaa"
+      ],
+      "unknown": []
+    },
+    {
+      "name": "whitespace",
+      "input": "[证据\n有联系][c02 c01;\tc02]",
+      "ai": "[证据\n有联系][c02,c01]",
+      "refs": [
+        "c02",
+        "c01"
+      ],
+      "humanRefs": [
+        "c02",
+        "c01"
+      ],
+      "unknown": []
+    },
+    {
+      "name": "adjacent",
+      "input": "[c01][c02]",
+      "ai": "[c01][c02]",
+      "refs": [
+        "c01",
+        "c02"
+      ],
+      "humanRefs": [
+        "c01",
+        "c02"
+      ],
+      "unknown": []
+    },
+    {
+      "name": "invalid-mixed",
+      "input": "[仍有文字][c01,c99]",
+      "ai": "[仍有文字][c01]",
+      "refs": [
+        "c01"
+      ],
+      "humanRefs": [],
+      "unknown": [
+        "c99"
+      ]
+    },
+    {
+      "name": "invalid-all",
+      "input": "[仍有文字][c99]",
+      "ai": "仍有文字",
+      "refs": [],
+      "humanRefs": [],
+      "unknown": [
+        "c99"
+      ]
+    },
+    {
+      "name": "escaped",
+      "input": "\\[c01] [文字带\\[方括号\\]][c02]",
+      "ai": "\\[c01] [文字带\\[方括号\\]][c02]",
+      "refs": [
+        "c02"
+      ],
+      "humanRefs": [
+        "c02"
+      ],
+      "unknown": []
+    },
+    {
+      "name": "inline-code",
+      "input": "`call([c01]) c99` [c02]",
+      "ai": "`call([c01]) c99` [c02]",
+      "refs": [
+        "c02"
+      ],
+      "humanRefs": [
+        "c02"
+      ],
+      "unknown": []
+    },
+    {
+      "name": "legacy-code",
+      "input": "`[C01]`",
+      "ai": "[c01]",
+      "refs": [
+        "c01"
+      ],
+      "humanRefs": [
+        "c01"
+      ],
+      "unknown": []
+    },
+    {
+      "name": "fenced",
+      "input": "```txt\n[c01] [说明][c99]\n```\n[c02]",
+      "ai": "```txt\n[c01] [说明][c99]\n```\n[c02]",
+      "refs": [
+        "c02"
+      ],
+      "humanRefs": [
+        "c02"
+      ],
+      "unknown": []
+    },
+    {
+      "name": "long-fenced",
+      "input": "````\n[c99]\n````[c01]",
+      "ai": "````\n[c99]\n````[c01]",
+      "refs": [
+        "c01"
+      ],
+      "humanRefs": [
+        "c01"
+      ],
+      "unknown": []
+    },
+    {
+      "name": "indent",
+      "input": "    [c01] c99\n[c02]",
+      "ai": "    [c01] c99\n[c02]",
+      "refs": [
+        "c02"
+      ],
+      "humanRefs": [
+        "c02"
+      ],
+      "unknown": []
+    },
+    {
+      "name": "links",
+      "input": "[文档](https://example.test/c01) [c02](https://example.test) [标签](#clue-ref-c01)",
+      "ai": "[文档](https://example.test/c01) [c02](https://example.test) [c01]",
+      "refs": [
+        "c01"
+      ],
+      "humanRefs": [
+        "c01"
+      ],
+      "unknown": []
+    },
+    {
+      "name": "incomplete",
+      "input": "正文[推理][c0",
+      "ai": "正文[推理][c0",
+      "refs": [],
+      "humanRefs": [],
+      "unknown": []
+    },
+    {
+      "name": "incomplete-code",
+      "input": "`text [c99]",
+      "ai": "`text [c99]",
+      "refs": [],
+      "humanRefs": [],
+      "unknown": []
+    },
+    {
+      "name": "prose",
+      "input": "C01芯片 abc01test [c01]",
+      "ai": "C01芯片 abc01test [c01]",
+      "refs": [
+        "c01"
+      ],
+      "humanRefs": [
+        "c01"
+      ],
+      "unknown": []
+    }
+  ]
+}

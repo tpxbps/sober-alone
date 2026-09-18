@@ -17,6 +17,7 @@ export type GameStatePatch = Pick<
   | 'votes'
   | 'voteResults'
   | 'publicClues'
+  | 'cluePresentation'
 > & { isProcessingReactions: boolean }
 
 export function adaptGameState(state: GameStateResponse): GameStatePatch {
@@ -72,5 +73,6 @@ export function adaptGameState(state: GameStateResponse): GameStatePatch {
     votes: state.votes || {},
     voteResults: state.vote_results || null,
     publicClues: state.public_clues || [],
+    cluePresentation: state.clue_presentation ?? null,
   }
 }

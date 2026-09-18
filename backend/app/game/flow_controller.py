@@ -17,6 +17,7 @@ from app.db.models import (
     PlayerState,
     RecordType,
 )
+from app.game.clue_media import public_presentation
 from app.game.clues import (
     build_agent_clue_context,
     normalize_clue_stages,
@@ -88,6 +89,7 @@ class GameFlowController:
             script_data.get("clue_stages"),
             script_id=str(script_data.get("script_id", game_session.script_id)),
             game_full_process=self.game_process,
+            strict_media=False,
         )
         self.current_process_index = 0
         self.current_child_index = 0  # 用于追踪 advancement 类型中的子阶段
@@ -446,7 +448,7 @@ class GameFlowController:
         )
         await db_session.commit()
 
-    async def _reset_spoken_flags_for_all(self, db_session):
+    async def _reset_spoken_flags_for_all(self, db_session, *, commit=True):
         """
         重置所有玩家的has_spoken_this_round和speeches_this_round
 
@@ -465,7 +467,8 @@ class GameFlowController:
                 speeches_this_round=0,
             )
         )
-        await db_session.commit()
+        if commit:
+            await db_session.commit()
 
     async def _save_reactions_to_db(self, reactions: dict[str, Any], speaker_id: str, db_session):
         """
@@ -727,21 +730,17 @@ class GameFlowController:
                 self.session.speech_queue = queue
                 self.session.current_speaker = queue[0] if queue else None
                 if db_session:
-                    await self._reset_spoken_flags_for_all(db_session)
+                    await self._reset_spoken_flags_for_all(db_session, commit=False)
         elif next_stage_type == "vote":
             self.session.current_stage = GameStage.SUMMARY.value
             self.session.speech_queue = queue
             self.session.current_speaker = queue[0] if queue else None
             if db_session:
-                await self._reset_spoken_flags_for_all(db_session)
+                await self._reset_spoken_flags_for_all(db_session, commit=False)
         elif next_stage_type == "review":
             # 复盘阶段
             self.session.current_stage = GameStage.REVIEW.value
             self.session.status = GameStatus.REVIEW.value
-
-        # 提交阶段变更
-        if db_session:
-            await db_session.commit()
 
         # 获取系统通知（对于advancement类型，从children中获取）
         system_notice = ""
@@ -794,6 +793,24 @@ class GameFlowController:
                     system_notice = f"真相揭晓：\n\n{full_truth}"
             if system_notice:
                 audio_key = f"stage_{self.current_process_index}"
+
+        # The service commits reveal, announcement and gate together.
+        from app.game.clue_media import presentation_pending
+
+        if next_stage_type == "advancement" and clue_stage:
+            presentation = clue_stage.get("presentation")
+            if presentation and presentation.get("status") in ("ready", "unavailable"):
+                self.session.clue_presentation_state = {
+                    "presentation_id": f"{self.session.current_round}:{presentation['revision']}",
+                    "round": self.session.current_round,
+                    "status": "pending",
+                }
+            else:
+                self.session.clue_presentation_state = None
+        else:
+            self.session.clue_presentation_state = None
+        if presentation_pending(self.session):
+            self.session.current_speaker = None
 
         return StageTransition(
             from_stage=from_stage,
@@ -1164,6 +1181,7 @@ class GameFlowController:
             "speech_queue": self.session.speech_queue or [],
             "human_character_id": self.session.human_character_id,
             "turn_processing": bool(self.session.pending_speech),
+            "clue_presentation": public_presentation(self.session, self.clue_stages),
             "has_all_spoken": len(self.session.speech_queue or []) == 0,
             "agent_llm_info": agent_llm_info,
             "public_clues": stage_public_clues(

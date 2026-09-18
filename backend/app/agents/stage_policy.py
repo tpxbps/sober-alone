@@ -24,12 +24,22 @@ def stage_instructions(state):
     parts = []
     if clues:
         example = clues[0]["id"]
+        evidence_ids = ",".join(clue["id"] for clue in clues[:2])
         parts.append(f"""【本轮引用格式】
-当且仅当发言依据下方已公开内容时，紧跟相关句子附上纯文本短标签，例如 [{example}]。
-正文直接说事实或摘要，不要把机器 ID 当作线索名称。不要在标签两侧添加反引号、粗体或内部链接。
+有两种不同用途的引用，请根据发言内容选择：
+1. 直接点名线索：[{example}]，界面会显示它的线索名称，例如“[{example}]里记录了什么？”。
+2. 为一句事实或推理附证据：[你的推理文字][{evidence_ids}]。第一对方括号包住完整的推理文字，紧接第二对方括号列出依据 ID，多个 ID 用英文逗号分隔。
+写出基于多条线索的综合判断时，优先使用第 2 种格式；句中分别插入多个 [ID] 标签不能替代关联引用。
+格式示意：“[{example}]还有疑点。[这两条记录之间的联系仍需核实][{evidence_ids}]。”示意只说明语法，请用实际依据和你的判断替换文字。
+只在确有依据处引用；关联引用保留你的原话，显示证据数量，不把文字替换成线索名。
+不得把机器 ID 当作线索名称。不要在引用外添加反引号或内部链接。
 不要把引用集中堆在结尾；不得编造其他 ID。记忆不清时先调用 recall_public_clues 核对。
 """)
         parts.append(build_agent_clue_context(clues))
+        parts.append(
+            "【发言输出检查】点名时只包住一个 ID；为推理附证据时，用两组紧邻的方括号分别包住推理原文和依据 ID。"
+            f"完整形式：[这里写你的完整推理句][{evidence_ids}]。第一组括号不可省略。"
+        )
     if stage == "clue_analysis":
         parts.append("可调用 update_role_reaction 更新心理反应，完成工具调用后再发言。")
     if stage == "vote":

@@ -10,6 +10,7 @@ import { GameHeader } from "@/components/game/GameHeader";
 import { CharacterPanel } from "@/components/game/CharacterPanel";
 import { ChatArea } from "@/components/game/ChatArea";
 import { VotingModal } from "@/components/game/VotingModal";
+import { CluePresentationOverlay } from "@/components/game/CluePresentationOverlay";
 import { StageTransitionOverlay } from "@/components/game/StageTransitionOverlay";
 import { PlayerScriptTooltip } from "@/components/game/PlayerScriptTooltip";
 import { DraftNotebook } from "@/components/game/DraftNotebook";
@@ -57,6 +58,8 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
     playerStates,
     records,
     publicClues,
+    cluePresentation,
+    acknowledgeCluePresentation,
     currentSpeakerId,
     humanCharacterId,
     humanCharacterScript,
@@ -92,6 +95,8 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
       playerStates: s.playerStates,
       records: s.records,
       publicClues: s.publicClues,
+      cluePresentation: s.cluePresentation,
+      acknowledgeCluePresentation: s.acknowledgeCluePresentation,
       currentSpeakerId: s.currentSpeakerId,
       humanCharacterId: s.humanCharacterId,
       humanCharacterScript: s.humanCharacterScript,
@@ -134,6 +139,21 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
     timer = setTimeout(poll, 1500);
     return () => { cancelled = true; clearTimeout(timer); };
   }, [sessionId, isProcessingReactions, isStreaming]);
+
+  useEffect(() => {
+    if (cluePresentation?.status !== 'pending') return;
+    let cancelled = false;
+    const refresh = async () => {
+      if (document.hidden) return;
+      try {
+        const state = await gameApi.getGameState(sessionId);
+        if (!cancelled) useGameStore.getState().updateFromAPI(state);
+      } catch { /* Keep the confirmation screen available for retry. */ }
+    };
+    const timer = window.setInterval(() => void refresh(), 3000);
+    document.addEventListener('visibilitychange', refresh);
+    return () => { cancelled = true; clearInterval(timer); document.removeEventListener('visibilitychange', refresh); };
+  }, [sessionId, cluePresentation?.status]);
 
   const pauseContextKey = `${sessionId}:${stage}:${currentRound}`;
   const isAutoSpeakPaused =
@@ -192,6 +212,8 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
   useEffect(() => {
     if (stage !== "free_discussion") return;
     if (
+      cluePresentation?.status !== "pending" &&
+      !isAdvancingStage &&
       !isStreaming &&
       !isProcessingReactions &&
       speechReminderRoundRef.current !== `${stage}:${currentRound}` &&
@@ -221,6 +243,8 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
     }
   }, [
     stage,
+    cluePresentation?.status,
+    isAdvancingStage,
     isStreaming,
     isProcessingReactions,
     currentSpeakerId,
@@ -232,6 +256,8 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
   // Auto-trigger AI speech when it's AI's turn (and hasn't spoken yet)
   useEffect(() => {
     if (
+      cluePresentation?.status !== "pending" &&
+      !isAdvancingStage &&
       !isStreaming &&
       !isProcessingReactions &&
       currentSpeakerId &&
@@ -268,6 +294,8 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
       return () => clearTimeout(timer);
     }
   }, [
+    cluePresentation,
+    isAdvancingStage,
     currentSpeakerId,
     humanCharacterId,
     isStreaming,
@@ -297,6 +325,7 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
   // Handle human message send
   const handleSendMessage = useCallback(
     async (content: string) => {
+      if (useGameStore.getState().cluePresentation?.status === "pending") return;
       // Get human character info for optimistic update
       const humanChar = characters.find(
         (c) => c.character_id === humanCharacterId
@@ -509,12 +538,16 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
 
       {/* Stage Transition Overlay */}
       <StageTransitionOverlay
-        show={showStageTransition}
+        show={showStageTransition && cluePresentation?.status !== "pending"}
         fromStage={previousStage}
         toStage={stage}
         message={stageTransitionMessage}
         onComplete={handleTransitionComplete}
       />
+
+      {cluePresentation?.status === 'pending' && <CluePresentationOverlay
+        key={cluePresentation.presentation_id} state={cluePresentation}
+        onContinue={() => acknowledgeCluePresentation(cluePresentation.presentation_id)} />}
 
       {/* Voting Modal */}
       <VotingModal

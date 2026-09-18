@@ -158,6 +158,7 @@ def hydrate_completed_script(
         "flow_shape": _flow_shape(game_flow),
         "clue_stage_numbers": [stage["stage"] for stage in clue_stages],
         "clue_ids": [item["id"] for stage in clue_stages for item in stage["items"]],
+        "clue_stages": copy.deepcopy(clue_stages),
         "asset_dependencies": asset_dependencies(state),
     }
     return state
@@ -232,6 +233,17 @@ def normalize_game_data(state: ScriptGenState) -> dict[str, Any]:
         errors.append("每轮自由讨论发言次数必须为 1-3，且数量与轮次一致")
 
     try:
+        # Older editors omit media fields. Only an explicit null removes an asset.
+        previous_stages = {s["stage"]: s for s in original.get("clue_stages", [])}
+        for stage in submitted_clue_stages:
+            previous = previous_stages.get(stage.get("stage"), {})
+            if "presentation" not in stage and previous.get("presentation"):
+                stage["presentation"] = copy.deepcopy(previous["presentation"])
+            previous_items = {item["id"]: item for item in previous.get("items", [])}
+            for item in stage.get("items", []):
+                old = previous_items.get(item.get("id"), {})
+                if "media" not in item and old.get("media"):
+                    item["media"] = copy.deepcopy(old["media"])
         clue_stages = normalize_clue_stages(
             submitted_clue_stages,
             script_id=str(state.get("script_id", "")),

@@ -2,6 +2,7 @@ import React, { useMemo, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import { markdownPlugins } from "@/lib/markdownPlugins";
 import type { Character, PublicClue } from "@/types/game";
+import { trustedClueTokens, escapeClueLabel } from "@/lib/clueReferences";
 import { ClueCitationHover } from "../game/ClueCitationHover";
 
 const NO_CHARACTERS: Character[] = [];
@@ -20,50 +21,7 @@ interface GameMessageMarkdownProps {
   allowedCitationIds?: string[];
 }
 
-const CLUE_ID_SOURCE = String.raw`(?:c[0-9]{2,4})|(?:clue-[a-z0-9]{12})`;
-const clueTagPattern = () => new RegExp(`\\[(${CLUE_ID_SOURCE})\\]`, "gi");
-const clueCodeTagPattern = () =>
-  new RegExp("`+\\s*\\[(" + CLUE_ID_SOURCE + ")\\]\\s*`+", "gi");
-const clueMarkdownLinkPattern = () =>
-  new RegExp(
-    "`*\\\\?\\[[^\\]\\n]{1,200}\\\\?\\]\\s*\\\\?\\(\\s*#clue-ref-(" +
-      CLUE_ID_SOURCE +
-      ")\\s*\\\\?\\)`*",
-    "gi",
-  );
-const clueBareIdPattern = () =>
-  new RegExp(
-    "(?<![\\w\\[#/-])(" + CLUE_ID_SOURCE + ")(?![\\w\\]-])",
-    "gi",
-  );
-const CLUE_LINK_PREFIX = "#clue-ref-";
-
-function normalizeClueSyntax(content: string, clueMap: Map<string, PublicClue>) {
-  const canonicalizeVariant = (original: string, id: string) => {
-    const normalizedId = id.toLowerCase();
-    return clueMap.has(normalizedId) ? `[${normalizedId}]` : original;
-  };
-  let normalized = content.replace(clueCodeTagPattern(), canonicalizeVariant);
-  normalized = normalized.replace(clueMarkdownLinkPattern(), canonicalizeVariant);
-
-  const explicitIds = new Set(
-    Array.from(normalized.matchAll(clueTagPattern()), (match) => match[1].toLowerCase()).filter(
-      (id) => clueMap.has(id),
-    ),
-  );
-  return normalized.replace(clueBareIdPattern(), (original, id: string) => {
-    const normalizedId = id.toLowerCase();
-    if (!clueMap.has(normalizedId)) return original;
-    return explicitIds.has(normalizedId) ? "" : `[${normalizedId}]`;
-  });
-}
-
-function escapeMarkdownLabel(value: string) {
-  return value
-    .replaceAll("\\", "\\\\")
-    .replaceAll("[", "\\[")
-    .replaceAll("]", "\\]");
-}
+const CLUE_LINK_PREFIX = "#evidence-";
 
 /** 渲染普通角色名高亮和显式 @角色名引用。 */
 function renderTextWithHighlights(
@@ -207,18 +165,18 @@ export function GameMessageMarkdown({
     return new Map(publicClues.filter(clue => allowed.has(clue.id.toLowerCase()))
       .map(clue => [clue.id.toLowerCase(), clue]));
   }, [publicClues, allowedKey]);
-  const contentWithCompatibilityRefs = normalizeClueSyntax(
-    children.replace(/@{2,}/g, "@"),
-    clueMap,
-  );
-  const normalizedContent = contentWithCompatibilityRefs
-    .replace(clueTagPattern(), (tag, id: string) => {
-      const normalizedId = id.toLowerCase();
-      const clue = clueMap.get(normalizedId);
-      if (!clue) return tag;
-      return `[${escapeMarkdownLabel(clue.summary)}](${CLUE_LINK_PREFIX}${encodeURIComponent(normalizedId)})`;
-    })
-    .trim();
+  const citationTokens = useMemo(() => trustedClueTokens(children.replace(/@{2,}/g, "@"), new Set(clueMap.keys())), [children, clueMap]);
+  const { normalizedContent, citationPositions } = useMemo(() => {
+    let content = '';
+    const positions = new Map<number, number>();
+    citationTokens.forEach((token, index) => {
+      if (!token.ids) { content += token.raw; return; }
+      positions.set(content.length, index);
+      const label = token.label ?? escapeClueLabel(clueMap.get(token.ids[0])!.summary);
+      content += `[${label}](${CLUE_LINK_PREFIX}${index})`;
+    });
+    return { normalizedContent: content, citationPositions: positions };
+  }, [citationTokens, clueMap]);
 
   // Keep renderer identities stable while playback progress updates the parent.
   const components = useMemo<Components>(() => ({
@@ -245,11 +203,14 @@ export function GameMessageMarkdown({
             <strong className="font-bold text-primary">{children}</strong>
           ),
           em: ({ children }) => <em className="italic">{children}</em>,
-          a: ({ href, children }) => {
-            if (href?.startsWith(CLUE_LINK_PREFIX)) {
-              const clueId = decodeURIComponent(href.slice(CLUE_LINK_PREFIX.length)).toLowerCase();
-              const clue = clueMap.get(clueId);
-              if (clue) return <ClueCitationHover clue={clue} />;
+          a: ({ href, children, node }) => {
+            if (href?.startsWith(CLUE_LINK_PREFIX)
+              && citationPositions.get(node?.position?.start.offset ?? -1) === Number(href.slice(CLUE_LINK_PREFIX.length))) {
+              const token = citationTokens[Number(href.slice(CLUE_LINK_PREFIX.length))];
+              const clues = token?.ids?.map(id => clueMap.get(id)).filter((clue): clue is PublicClue => Boolean(clue)) ?? [];
+              if (clues.length) return token.label !== undefined
+                ? <ClueCitationHover clues={clues}>{children}</ClueCitationHover>
+                : <ClueCitationHover clue={clues[0]} />;
               return <>{children}</>;
             }
             return (
@@ -298,7 +259,7 @@ export function GameMessageMarkdown({
           ),
           // 处理换行 - 将 \n 转换为较小间距的换行
           br: () => <br className="leading-tight" />,
-        }), [characters, clueMap]);
+        }), [characters, clueMap, citationTokens, citationPositions]);
 
   return (
     <div

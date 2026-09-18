@@ -192,9 +192,11 @@ export function getPhaseFromStep(step: string): WorkflowPhaseKey {
 // === Game data sections ===
 
 export interface ClueStage {
+  presentation?: import('./cluePresentation').CluePresentation;
   stage: number;
   overview: string;
   items: Array<{
+    media?: import('./cluePresentation').ClueMedia;
     id: string;
     summary: string;
     content: string;

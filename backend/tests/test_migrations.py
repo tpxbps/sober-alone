@@ -78,6 +78,7 @@ def test_legacy_beliefs_migrate_on_backup_copy_with_snapshot_names(tmp_path):
     assert original.read_bytes() == before
     with sqlite3.connect(candidate) as db:
         assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert db.execute("SELECT clue_presentation_state FROM game_sessions").fetchone()[0] is None
         reasons, scores, suspected, intensity = db.execute(
             "SELECT suspicion_reasons,suspicion,suspected_by,suspected_intensity FROM player_states"
         ).fetchone()

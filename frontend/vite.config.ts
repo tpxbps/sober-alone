@@ -14,6 +14,7 @@ export default defineConfig({
   build: {
     target: 'es2020',
     rollupOptions: {
+      input: { main: path.resolve(__dirname, 'index.html'), cluePreview: path.resolve(__dirname, 'clue-preview.html') },
       output: {
         manualChunks: {
           react: ['react', 'react-dom', 'react-router-dom'],

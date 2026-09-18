@@ -125,6 +125,10 @@ export const scriptApi = {
 
 // ============ Game APIs ============
 export const gameApi = {
+  acknowledgeCluePresentation: async (sessionId: string, presentationId: string): Promise<GameStateResponse> => {
+    const response = await api.post(`/game/${sessionId}/clue-presentation/ack`, { presentation_id: presentationId });
+    return response.data;
+  },
   // Create new game session
   createGame: async (request: CreateGameRequest): Promise<CreateGameResponse> => {
     // Convert ai_models to llm_configs format for backend

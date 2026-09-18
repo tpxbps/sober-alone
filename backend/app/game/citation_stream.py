@@ -6,12 +6,15 @@ from app.game.clues import CLUE_ID_SOURCE, parse_clue_citations
 
 
 class CitationStreamFilter:
-    MAX_PENDING = 256
+    MAX_PENDING = 4096
 
     def __init__(self, clues):
         self.clues = list(clues)
         self.pending = ""
         self.previous = ""
+        self.fence = ""
+        self.line_start = True
+        self.indented = False
 
     @staticmethod
     def _possible_id(word):
@@ -23,18 +26,36 @@ class CitationStreamFilter:
         )
 
     def _end(self, text, final):
+        if text.startswith("\\"):
+            return 2 if len(text) >= 2 else (1 if final else None)
+        if text.startswith("`"):
+            marker = re.match(r"`+", text)[0]
+            close = text.find(marker, len(marker))
+            if close >= 0:
+                return close + len(marker)
+            if not final and len(text) < self.MAX_PENDING:
+                return None
+            if not final:
+                self.fence = marker
+            return len(text)
         prefix = re.match(r"`*\\?", text).end()
         body = text[prefix:]
         wait = not final and len(text) < self.MAX_PENDING
         if not body:
             return None if wait else len(text)
         if body.startswith("["):
-            closing = text.find("]", prefix + 1)
-            if closing < 0:
+            from app.game.citation_syntax import ID, bracket_end
+
+            end = bracket_end(text, prefix)
+            if end is None:
                 return None if wait else 1
-            end = closing + 1
             if end == len(text) and wait:
                 return None
+            if text[end : end + 1] == "[" and not ID.fullmatch(text[prefix + 1 : end - 1]):
+                group_end = bracket_end(text, end)
+                if group_end is None:
+                    return None if wait else end
+                end = group_end
             link_start = end + (1 if text[end : end + 1] == "\\" else 0)
             if link_start == len(text) and wait:
                 return None
@@ -67,11 +88,48 @@ class CitationStreamFilter:
         result = []
         cursor = 0
         while cursor < len(data):
+            if self.line_start and not self.fence:
+                rest = data[cursor:]
+                if rest.startswith("\t") or rest.startswith("    "):
+                    self.indented = True
+                elif not final and rest.strip(" ") == "" and len(rest) < 4:
+                    break
+                self.line_start = False
+            if self.indented:
+                newline = data.find("\n", cursor)
+                end = len(data) if newline < 0 else newline + 1
+                result.append(data[cursor:end])
+                cursor = end
+                if newline >= 0:
+                    self.indented = False
+                    self.line_start = True
+                continue
+            if self.fence:
+                end = data.find(self.fence, cursor)
+                if end >= 0:
+                    end += len(self.fence)
+                    result.append(data[cursor:end])
+                    cursor = end
+                    self.fence = ""
+                    continue
+                safe_end = len(data) if final else max(cursor, len(data) - len(self.fence) + 1)
+                result.append(data[cursor:safe_end])
+                cursor = safe_end
+                break
+            if data[cursor] in "`~":
+                marker = re.match(r"[`~]+", data[cursor:])[0]
+                if cursor + len(marker) == len(data) and not final:
+                    break
+                if len(marker) >= 3 and len(set(marker)) == 1:
+                    self.fence = marker
+                    result.append(marker)
+                    cursor += len(marker)
+                    continue
             char = data[cursor]
             previous = data[cursor - 1] if cursor else self.previous
             candidate = char in "[`\\" or (
                 char.lower() == "c"
-                and not (previous.isalnum() or (previous and previous in "_#/-"))
+                and not (previous.isalnum() or (previous and previous in "_#/[\\-"))
             )
             if candidate:
                 size = self._end(data[cursor:], final)
@@ -87,6 +145,8 @@ class CitationStreamFilter:
             else:
                 result.append(char)
                 cursor += 1
+                if char == "\n":
+                    self.line_start = True
         if cursor:
             self.previous = data[cursor - 1]
         self.pending = data[cursor:]

@@ -110,7 +110,7 @@ def test_stream_filter_is_independent_of_token_boundaries(content, expected):
 def test_stream_filter_does_not_hold_prose_or_unbounded_brackets():
     stream = CitationStreamFilter([])
     assert stream.feed("直接输出正文。") == "直接输出正文。"
-    result = stream.feed("[" + "普通文字" * 200)
+    result = stream.feed("[" + "普通文字" * stream.MAX_PENDING)
     assert result
     assert len(stream.pending) < stream.MAX_PENDING
 

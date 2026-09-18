@@ -15,6 +15,7 @@ from app.agents import get_agent_manager, remove_agent_manager
 from app.core.inference import InferenceRecoveryError, raise_for_inference_recovery
 from app.db.models import GameRecord, GameSession, GameStage, GameStatus, PlayerState
 from app.game import GameFlowController
+from app.game.clue_media import presentation_pending, public_presentation
 from app.game.resource_revision import resource_namespace
 from app.services.game_presenter import GameStatePresenter
 from app.services.game_runtime import (
@@ -89,9 +90,14 @@ async def ensure_flow_controller(
         )
 
     controller = await _flow_controllers.get_or_restore(session_id, restore)
-    if controller and resume_pending:
+    if controller:
         current = await db_session.get(GameSession, session_id)
-        if getattr(current, "pending_speech", None):
+        controller.session = current
+        if (
+            resume_pending
+            and not presentation_pending(current)
+            and getattr(current, "pending_speech", None)
+        ):
             from app.game.turn_state import finish_pending
             from app.services.game_speech import session_lock
 
@@ -281,6 +287,7 @@ class GameService:
         )
 
         if flow_controller:
+            flow_controller.session = game_session
             player_states = await self._get_player_states(session_id)
             state = flow_controller.get_game_state()
             state["player_states"] = player_states
@@ -312,6 +319,9 @@ class GameService:
             "votes": dict(game_session.votes or {}),
             "vote_results": game_session.vote_result or None,
             "public_clues": list(game_session.revealed_clues or []),
+            "clue_presentation": public_presentation(
+                game_session, (script_data or {}).get("clue_stages", [])
+            ),
         }
 
     async def _get_player_states(self, session_id: str) -> list[dict[str, Any]]:
@@ -344,6 +354,9 @@ class GameService:
             return {"success": False, "error": "游戏会话不存在或已结束"}
 
         current = await self.db.get(GameSession, session_id)
+        flow_controller.session = current
+        if presentation_pending(current):
+            return {"success": False, "error": "请先查看线索并确认继续推理"}
         if current.pending_speech:
             from app.game.turn_state import finish_pending
 
@@ -397,6 +410,30 @@ class GameService:
         async with lock:
             return await self._advance_stage_locked(session_id)
 
+    async def acknowledge_clue_presentation(self, session_id: str, presentation_id: str):
+        from app.services.game_speech import session_lock
+
+        async with session_lock(session_id):
+            self.db.expire_all()
+            current = await self.db.get(GameSession, session_id)
+            if not current:
+                return {"success": False, "error": "游戏会话不存在"}
+            state = current.clue_presentation_state or {}
+            if (
+                state.get("presentation_id") != presentation_id
+                or state.get("round") != current.current_round
+            ):
+                return {"success": False, "error": "线索演出已过期，请刷新游戏状态"}
+            if state.get("status") == "pending":
+                current.clue_presentation_state = {**state, "status": "acknowledged"}
+                current.current_speaker = (current.speech_queue or [None])[0]
+                current.last_active_at = datetime.now()
+                await self.db.commit()
+            controller = get_flow_controller(session_id)
+            if controller:
+                controller.session = current
+        return await self.get_game_state(session_id)
+
     async def _advance_stage_locked(self, session_id: str) -> dict[str, Any]:
         """
         推进游戏流程
@@ -414,6 +451,8 @@ class GameService:
         try:
             current = await self.db.get(GameSession, session_id)
             flow_controller.session = current
+            if presentation_pending(current):
+                return {"success": False, "error": "请先查看线索并确认继续推理"}
             if current.pending_speech:
                 from app.game.turn_state import finish_pending
 
@@ -430,7 +469,8 @@ class GameService:
                     "UPDATE game_sessions SET current_stage = :stage, "
                     "current_round = :round, status = :status, "
                     "speech_queue = :queue, current_speaker = :speaker, "
-                    "revealed_clues = :revealed_clues, last_active_at = :last_active_at "
+                    "revealed_clues = :revealed_clues, last_active_at = :last_active_at, "
+                    "clue_presentation_state = :clue_presentation_state "
                     "WHERE session_id = :session_id"
                 ),
                 {
@@ -438,11 +478,8 @@ class GameService:
                     "round": flow_controller.session.current_round,
                     "status": flow_controller.session.status,
                     "queue": json.dumps(flow_controller.session.speech_queue or []),
-                    "speaker": (
-                        flow_controller.session.speech_queue[0]
-                        if flow_controller.session.speech_queue
-                        else flow_controller.session.current_speaker
-                    ),
+                    "speaker": flow_controller.session.current_speaker,
+                    "clue_presentation_state": json.dumps(current.clue_presentation_state),
                     "revealed_clues": json.dumps(
                         flow_controller.session.revealed_clues or [], ensure_ascii=False
                     ),
@@ -450,8 +487,6 @@ class GameService:
                     "session_id": session_id,
                 },
             )
-            await self.db.commit()
-
             # 如果有系统通知，记录到游戏记录
             if transition.system_notice:
                 audio_url = None
@@ -470,7 +505,7 @@ class GameService:
                     timestamp=datetime.now(),
                 )
                 self.db.add(record)
-                await self.db.commit()
+            await self.db.commit()
 
             return {
                 "success": True,
@@ -485,12 +520,14 @@ class GameService:
                 # 额外返回更新后的游戏状态
                 "current_speaker_id": flow_controller.session.current_speaker,
                 "speech_queue": flow_controller.session.speech_queue or [],
+                "clue_presentation": public_presentation(current, flow_controller.clue_stages),
             }
         except InferenceRecoveryError:
             raise
         except Exception as e:
             raise_for_inference_recovery(e)
             await self.db.rollback()
+            remove_flow_controller(session_id)
             return {"success": False, "error": str(e)}
 
     async def submit_vote(

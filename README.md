@@ -83,6 +83,8 @@ pnpm dev --host 127.0.0.1
 
 代码结构、核心流程、数据边界和阅读顺序统一记录在 [PROJECT.md](PROJECT.md)。
 
+双模式线索引用、图片资源导入和阶段演出的配置与本地预览见 [CLUE_MEDIA.md](CLUE_MEDIA.md)。
+
 ## 技术栈
 
 | 模块    | 技术                                              |
