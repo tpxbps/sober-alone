@@ -25,7 +25,7 @@ export interface EditorInterruptInfo {
   retry_step?: string;
   human_review?: string;
   first_draft?: string;
-  quality_report?: QualityReport;
+  quality_report?: QualityReport | null;
   step: string;
   step_label: string;
   generated_content: string;
@@ -75,7 +75,7 @@ export interface EditorWorkflowState {
   first_draft: string;
   review_opinion: string;
   human_review?: string;
-  quality_report?: QualityReport;
+  quality_report?: QualityReport | null;
   final_draft: string;
   character_scripts: Record<string, string>;
   game_data_sections: GameDataSections;

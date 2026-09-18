@@ -351,8 +351,8 @@ function ContentPanelBody({
       return <ReviewReportStage interruptInfo={interruptInfo} workflowState={workflowState}
         isLoading={isLoading} onConfirm={onConfirmReviewFinal} onRegenerate={onRegenerateReviewFinal} error={error} />;
     }
-    if (currentStep === "review_quality" && interruptInfo?.quality_report) {
-      return <QualityReviewStage key={interruptInfo.quality_report.report_id} report={interruptInfo.quality_report} isLoading={isLoading} error={error} />;
+    if (currentStep === "review_quality") {
+      return <QualityReviewStage report={interruptInfo?.quality_report} isLoading={isLoading} error={error} />;
     }
 
     // === Review Final Draft ===

@@ -11,6 +11,7 @@ import { EndingEditor } from './EndingEditor';
 import { RefineButton } from './RefineButton';
 import { useTextDraft } from './useTextDraft';
 import { submissionData } from './gameDataAdapter';
+import { normalizeQualityReport } from './qualityReport';
 
 const chapters = [
   { id: 'public', label: '公开介绍', note: '让玩家走进故事', icon: BookOpen },
@@ -36,7 +37,7 @@ export function ReviewGameDataStage({ editedGameData: draft, setEditedGameData, 
   const positions = useRef<Record<string, number>>({});
   const [target, setTarget] = useState<QualityTarget | null>(null);
   const resume = useEditorStore(s => s.resumeWorkflow);
-  const report = workflowState?.quality_report || interruptInfo.quality_report;
+  const report = normalizeQualityReport(workflowState?.quality_report) || normalizeQualityReport(interruptInfo.quality_report);
   const reportChanged = Boolean(report?.source_sections && draft && JSON.stringify(submissionData(draft)) !== JSON.stringify(report.source_sections));
   useEffect(() => {
     const controller = new AbortController();

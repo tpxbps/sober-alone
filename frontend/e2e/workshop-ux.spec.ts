@@ -13,11 +13,13 @@ async function setup(page: Page, step = 'review_game_data', qualityFailure = fal
   let data = sections();
   let checkpoint = 'cp1';
   let current = step;
-  let quality: unknown = undefined;
+  // Older servers serialize an unrequested quality report as an empty object.
+  let quality: unknown = {};
+  let qualityAttempted = false;
   let busy = false;
   let failed = false;
   const submissions: Record<string, unknown>[] = [];
-  const state = () => ({ workflow_mode: 'create', script_id: 'ux-script', script_title: data.title, player_count: 3, difficulty: 2, num_clue_rounds: 1, prompts: {}, error_message: '', first_draft: '模型原稿', outline: '', final_draft: '', characters: data.character_data, game_data_sections: data, quality_report: quality, quality_check_attempted: Boolean(quality) });
+  const state = () => ({ workflow_mode: 'create', script_id: 'ux-script', script_title: data.title, player_count: 3, difficulty: 2, num_clue_rounds: 1, prompts: {}, error_message: '', first_draft: '模型原稿', outline: '', final_draft: '', characters: data.character_data, game_data_sections: data, quality_report: quality, quality_check_attempted: qualityAttempted });
   const response = () => ({ success: true, thread_id: 'ux-thread', checkpoint_id: checkpoint, current_step: current, is_complete: false, state: state(), interrupt: { step: current, step_label: '初稿审阅', generated_content: current === 'review_first_draft' ? '模型原稿' : '新的审稿意见', prompt_used: '', game_data_sections: data, quality_report: quality } });
   await page.addInitScript(() => { if (!localStorage.getItem('editorSession')) localStorage.setItem('editorSession', JSON.stringify({ threadId: 'ux-thread', currentStep: 'review_game_data' })); });
   await page.route('**/api/v1/**', async route => {
@@ -29,17 +31,45 @@ async function setup(page: Page, step = 'review_game_data', qualityFailure = fal
     if (path.endsWith('/asset-progress') || path.endsWith('/convert-progress')) return send({ success: true, progress: null });
     if (path.endsWith('/resume')) {
       const body = route.request().postDataJSON(); submissions.push(body);
+      if (body.action === 'quality_check') qualityAttempted = true;
       if (body.game_data_sections) data = body.game_data_sections;
       if (body.action === 'quality_check') quality = { report_id: 'report-once', content_fingerprint: 'fp', status: qualityFailure ? 'incomplete' : 'blocked', error: qualityFailure ? '本次检查未完成，仍可继续创作。' : undefined, source_sections: structuredClone(data), findings: qualityFailure ? [] : [{ severity: 'major', impact: '请核对这段记忆是否发生在开局前。', evidence: '我记得昨晚的争执。', suggestion: '仅保留开局已经知道的内容。', field: 'characters[2].character_script_summary', target: { section: 'characters', entity_id: 'z', field: 'character_script_summary', label: '角色 → 陆宁 → 角色速览' } }] };
       else if (current === 'review_first_draft' && !failed) current = 'review_report';
+      else if (current === 'review_final' && !failed) current = 'review_game_data';
       checkpoint = 'cp2';
       return send({ success: true, thread_id: 'ux-thread', operation_id: body.request_id, operation_status: 'queued', target_step: step });
     }
-    if (path.includes('/operations/')) return send(failed ? { operation_status: 'failed', error_message: '暂时无法生成，请重试。' } : busy ? { operation_id: path.split('/').at(-1), operation_status: 'running', current_step: 'review_by_llm', progress: { message: '进行中' } } : { ...response(), operation_id: path.split('/').at(-1), operation_status: 'complete' });
+    if (path.includes('/operations/')) return send(failed ? { operation_status: 'failed', error_message: '暂时无法生成，请重试。' } : busy ? { operation_id: path.split('/').at(-1), operation_status: 'running', current_step: step === 'review_final' ? 'convert_to_game_data' : 'review_by_llm', progress: { message: '进行中' } } : { ...response(), operation_id: path.split('/').at(-1), operation_status: 'complete' });
     return send({ success: true, scripts: [], voices: [], models: [], features: {} });
   });
   await page.goto('/?editor=resume');
   return { submissions, setFailed: (value: boolean) => { failed = value; }, setBusy: (value: boolean) => { busy = value; }, reorder: () => { data.character_data.reverse(); }, data: () => data };
+}
+
+for (const width of [1280, 390]) {
+  test(`终稿拆分完成后未质检也能进入游戏数据，刷新不白屏 ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    const fixture = await setup(page, 'review_final');
+    await page.getByRole('button', { name: '编辑终稿', exact: true }).click();
+    await page.getByLabel('终稿正文').fill('作者确认终稿：角色只知道各自亲历的事实。');
+    fixture.setBusy(true);
+    await page.getByRole('button', { name: '确认终稿并拆分' }).click();
+    await expect.poll(() => fixture.submissions.length).toBe(1);
+    expect(fixture.submissions[0].content).toBe('作者确认终稿：角色只知道各自亲历的事实。');
+    await expect(page.getByRole('heading', { name: '结构化数据转化' })).toBeVisible();
+    await page.reload();
+    await expect(page.getByRole('heading', { name: '结构化数据转化' })).toBeVisible();
+    fixture.setBusy(false);
+    await expect(page.getByTestId('game-data-workspace')).toBeVisible({ timeout: 12000 });
+    await expect(page.getByRole('button', { name: '质量检查（可选）' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '下一步 · 生成资源' })).toBeEnabled();
+    expect(fixture.submissions).toHaveLength(1);
+    await page.reload();
+    await expect(page.getByTestId('game-data-workspace')).toBeVisible();
+    expect(errors).toEqual([]);
+  });
 }
 
 for (const width of [1280, 390]) {

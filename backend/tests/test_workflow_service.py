@@ -60,6 +60,27 @@ def test_interrupt_reconstruction_and_state_serialization_are_stable():
     assert "original_snapshot" not in ScriptEditorWorkflowService.serialize_state(state.values)
 
 
+@pytest.mark.parametrize("saved", [{}, {"quality_report": {}}, {"quality_report": None}])
+def test_unrequested_quality_report_is_null_on_all_response_paths(saved):
+    service = ScriptEditorWorkflowService
+    assert service.serialize_state(saved)["quality_report"] is None
+    assert service.reconstruct_interrupt("review_game_data", saved)["quality_report"] is None
+    state = snapshot(saved, ("review_game_data",))
+    state.tasks = (SimpleNamespace(interrupts=(SimpleNamespace(value={"step": "review_game_data", **saved}),)),)
+    assert service.extract_interrupt(state)["quality_report"] is None
+
+
+def test_completed_quality_report_with_no_findings_is_preserved():
+    report = {"report_id": "report-1", "status": "passed", "findings": []}
+    saved = {"quality_report": report}
+    service = ScriptEditorWorkflowService
+    assert service.serialize_state(saved)["quality_report"] == report
+    assert service.reconstruct_interrupt("review_game_data", saved)["quality_report"] == report
+    state = snapshot(saved, ("review_game_data",))
+    state.tasks = (SimpleNamespace(interrupts=(SimpleNamespace(value={"step": "review_game_data", **saved}),)),)
+    assert service.extract_interrupt(state)["quality_report"] == report
+
+
 @pytest.mark.asyncio
 async def test_history_and_checkpoint_use_same_wire_contract():
     checkpoint = snapshot({"current_step": "review_final", "final_draft": "终稿"})
