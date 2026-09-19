@@ -60,7 +60,7 @@ def create_llm(
     model_lower = model.lower()
     # Existing gateway games can resume after the selectable Step model retires.
     if settings.INFERENCE_BACKEND == "tokendance" and model_lower == "step-3.5-flash":
-        model_lower = "ling-3.0-flash"
+        model_lower = "deepseek-flash"
     spec = get_model_spec(model_lower)
     model_lower = spec.id
     if not settings.is_model_enabled(model_lower):
@@ -88,7 +88,7 @@ def create_llm(
                 extra = {"enable_thinking": False}
             elif spec.disable_thinking_extra == "glm_low":
                 extra = {"reasoning_effort": "low"}
-            elif spec.disable_thinking_extra == "ling":
+            elif spec.disable_thinking_extra in {"ling", "doubao"}:
                 extra = {"thinking": {"type": "disabled"}}
         return ReasoningChatOpenAI(
             model=gateway_model(model_lower),
@@ -146,6 +146,8 @@ def create_llm(
             # effort avoids the default long reasoning pass in latency-sensitive paths.
             else {"reasoning_effort": "low"}
             if disable_thinking and spec.disable_thinking_extra == "glm_low"
+            else {"thinking": {"type": "disabled"}}
+            if disable_thinking and spec.disable_thinking_extra == "doubao"
             else None
         ),
     )

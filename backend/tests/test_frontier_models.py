@@ -41,8 +41,8 @@ def test_frontier_parameters_never_default_to_max(monkeypatch, spec):
 def test_gateway_catalog_retires_step_but_direct_mode_keeps_it(monkeypatch):
     monkeypatch.setattr(settings, "INFERENCE_BACKEND", "tokendance")
     ids = {spec["id"] for spec in get_capabilities()["models"]}
-    assert "step-3.5-flash" not in ids and "ling-3.0-flash" in ids
-    assert create_llm("step-3.5-flash", disable_thinking=True).model_name == "ling-3.0-flash"
+    assert "step-3.5-flash" not in ids and "ling-3.0-flash" not in ids
+    assert create_llm("step-3.5-flash", disable_thinking=True).model_name == "deepseek-v4.1-flash"
     monkeypatch.setattr(settings, "INFERENCE_BACKEND", "direct")
     ids = {spec["id"] for spec in get_capabilities()["models"]}
     assert "step-3.5-flash" in ids and "ling-3.0-flash" not in ids

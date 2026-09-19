@@ -69,7 +69,7 @@ MODEL_SPECS = (
         "Ling-3.0-flash",
         "inclusionai",
         "Ling",
-        backends=("tokendance",),
+        backends=(),
         disable_thinking_extra="ling",
     ),
     ModelSpec(
@@ -80,12 +80,13 @@ MODEL_SPECS = (
         disable_thinking_extra="qwen",
     ),
     ModelSpec(
-        "doubao-seed-2-0-mini-260215",
-        "doubao-seed-2.0-mini",
+        "doubao-seed-2-0-lite-260215",
+        "doubao-seed-2.0-lite",
         "bytedance",
         "Doubao",
+        disable_thinking_extra="doubao",
     ),
-    ModelSpec("mimo-v2.5", "mimo-v2.5", "mimo", "Xiaomi MiMo"),
+    ModelSpec("mimo-v2.5", "mimo-v2.5", "mimo", "Xiaomi MiMo", backends=()),
     ModelSpec("hy3", "hy3", "hunyuan", "Tencent Hunyuan"),
     ModelSpec(
         "glm-5.3-flash",
@@ -101,7 +102,7 @@ DEFAULT_MODELS = {
     "deepseek": "deepseek-flash",
     "stepfun": "step-3.5-flash",
     "alibaba": "qwen3.8-flash",
-    "bytedance": "doubao-seed-2-0-mini-260215",
+    "bytedance": "doubao-seed-2-0-lite-260215",
     "mimo": "mimo-v2.5",
     "hunyuan": "hy3",
     "zhipuai": "glm-5.3-flash",
@@ -112,6 +113,7 @@ PROBE_FILE = LOCAL_DATA_DIR / "model-probes.json"
 MODEL_ALIASES = {
     "deepseek-v4-flash": "deepseek-flash",
     "deepseek-v4-flash-vision-exp": "deepseek-flash",
+    "doubao-seed-2-0-mini-260215": "doubao-seed-2-0-lite-260215",
 }
 
 
@@ -127,6 +129,20 @@ def get_model_spec(model_id: str) -> ModelSpec:
 
 def public_model_spec(spec: ModelSpec) -> dict:
     return asdict(spec)
+
+
+def resolve_game_model(model_id: str, backend: str) -> ModelSpec:
+    """Resume saved games with a supported model and its matching provider.
+
+    Keep retired specs available for historical metadata, but never dispatch to
+    them. Cross-provider replacements belong here, not in credential aliases.
+    """
+    spec = get_model_spec(model_id)
+    if spec.id in {"ling-3.0-flash", "mimo-v2.5"} or (
+        spec.id == "step-3.5-flash" and backend == "tokendance"
+    ):
+        return get_model_spec("deepseek-flash")
+    return spec
 
 
 def load_probe_results() -> dict[str, dict]:

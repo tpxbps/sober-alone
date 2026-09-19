@@ -16,6 +16,7 @@ from app.core.inference import (
     gather_inference,
     raise_for_inference_recovery,
 )
+from app.core.model_registry import resolve_game_model
 
 
 @dataclass
@@ -87,20 +88,20 @@ class AgentManager:
             # 获取该角色的LLM配置
             char_llm_config = llm_configs.get(character_id, {})
             llm_provider = char_llm_config.get("provider", settings.DEFAULT_LLM_PROVIDER)
-            llm_model = char_llm_config.get("model")
+            llm_model = char_llm_config.get("model") or settings.get_llm_model_name(llm_provider)
             if llm_model:
-                from app.core.model_registry import get_model_spec
-
                 try:
-                    model_spec = get_model_spec(str(llm_model))
+                    model_spec = resolve_game_model(str(llm_model), settings.INFERENCE_BACKEND)
                 except ValueError:
                     model_spec = None
                 if model_spec:
                     llm_provider = model_spec.provider
                     llm_model = model_spec.id
             if not llm_provider or not settings.get_api_key(llm_provider):
-                llm_provider = settings.DEFAULT_LLM_PROVIDER
-                llm_model = settings.get_llm_model_name(llm_provider)
+                fallback = resolve_game_model(
+                    settings.get_llm_model_name(), settings.INFERENCE_BACKEND
+                )
+                llm_provider, llm_model = fallback.provider, fallback.id
 
             if not is_human:
                 rag_enabled = False
