@@ -46,7 +46,7 @@ async def test_probe_marks_slow_when_only_structured_reaction_exceeds_threshold(
 @pytest.mark.asyncio
 async def test_probe_marks_both_dimensions_and_does_not_expose_model_output(monkeypatch):
     async def first_token(_spec):
-        return 6_100
+        return 10_100
 
     async def reaction(_spec):
         return 13_200

@@ -37,7 +37,7 @@ from app.core.model_registry import MODEL_SPECS, ModelSpec
 logger = logging.getLogger(__name__)
 
 FIRST_TOKEN_PROBE_TIMEOUT_SECONDS = 15.0
-FIRST_TOKEN_SLOW_THRESHOLD_SECONDS = 5.0
+FIRST_TOKEN_SLOW_THRESHOLD_SECONDS = 10.0
 # This only bounds the lightweight health probe. Gameplay reactions retain
 # their separate, much more generous production timeout.
 REACTION_PROBE_TIMEOUT_SECONDS = 30.0
