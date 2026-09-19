@@ -11,6 +11,7 @@ import { CharacterPanel } from "@/components/game/CharacterPanel";
 import { ChatArea } from "@/components/game/ChatArea";
 import { VotingModal } from "@/components/game/VotingModal";
 import { CluePresentationOverlay } from "@/components/game/CluePresentationOverlay";
+import { ClueArchive } from "@/components/game/ClueArchive";
 import { StageTransitionOverlay } from "@/components/game/StageTransitionOverlay";
 import { PersonalScriptHint } from "@/components/game/PersonalScriptHint";
 import { usePersonalScriptRead } from "@/hooks/usePersonalScriptRead";
@@ -567,6 +568,8 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
       {cluePresentation?.status === 'pending' && <CluePresentationOverlay
         key={cluePresentation.presentation_id} state={cluePresentation}
         onContinue={() => acknowledgeCluePresentation(cluePresentation.presentation_id)} />}
+
+      {cluePresentation?.status !== 'pending' && publicClues.length > 0 && <ClueArchive key={sessionId} clues={publicClues} />}
 
       {/* Voting Modal */}
       <VotingModal

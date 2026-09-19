@@ -13,12 +13,19 @@ for (const device of [{ name: 'desktop', width: 1440, height: 900 }, { name: 'mo
     const url = new URL(pilotUrl!);
     const response = await page.request.get(new URL(url.searchParams.get('src')!, url.origin).href);
     const data = await response.json();
-    const output = path.resolve('../output/playwright/clue-pilot-optical');
+    const output = path.resolve('../output/playwright/clue-pilot-ready');
     await mkdir(output, { recursive: true });
     await page.goto(pilotUrl!);
     for (const stage of data.clue_stages) {
       await page.getByRole('button', { name: '第 ' + stage.stage + ' 轮 · ' + stage.presentation.title }).click();
       await page.getByRole('button', { name: '播放本轮演出' }).click();
+      await expect(page.locator('.cinema-immersive')).toBeVisible();
+      await page.locator('.cinema-immersive').evaluate(element => {
+        const observed: { phase: string | null; title: string | null | undefined }[] = [];
+        (window as unknown as { captionPhases: typeof observed }).captionPhases = observed;
+        new MutationObserver(() => observed.push({ phase: element.getAttribute('data-phase'), title: element.querySelector('h2')?.textContent }))
+          .observe(element, { attributes: true, attributeFilter: ['data-phase'] });
+      });
       for (const shot of stage.presentation.shots) {
         const title = page.locator('.cinema-copy h2');
         await expect(title).toHaveText(shot.title, { timeout: 16000 });
@@ -41,6 +48,10 @@ for (const device of [{ name: 'desktop', width: 1440, height: 900 }, { name: 'mo
         await page.screenshot({ path: path.join(output, device.name + '-' + stage.stage + '-' + shot.id + '.png') });
       }
       await expect(page.getByRole('button', { name: '继续推理' })).toBeVisible({ timeout: 16000 });
+      const phases = await page.evaluate(() => (window as unknown as { captionPhases: { phase: string; title: string }[] }).captionPhases);
+      const gathered = phases.filter(item => item.phase === 'gather');
+      expect(gathered.length).toBeGreaterThan(0);
+      expect(gathered.every(item => item.title === stage.presentation.shots.at(-1).title)).toBe(true);
       await page.screenshot({ path: path.join(output, device.name + '-' + stage.stage + '-end.png') });
       await page.locator('.cinema-evidence-list summary').first().click();
       await expect(page.locator('.cinema-evidence-body').first()).toBeVisible();
@@ -59,6 +70,14 @@ for (const device of [{ name: 'desktop', width: 1440, height: 900 }, { name: 'mo
       await expect(details.getByText('场景示意', { exact: true })).toHaveCount(0);
       await page.screenshot({ path: path.join(output, device.name + '-' + stage.stage + '-details.png') });
       await page.keyboard.press('Escape');
+      await page.getByRole('button', { name: /^查看已公开线索/ }).click();
+      const archive = page.getByRole('dialog', { name: '线索档案' });
+      await expect(archive.locator('summary')).toHaveCount(stage.items.length);
+      await page.screenshot({ path: path.join(output, device.name + '-' + stage.stage + '-archive.png') });
+      await archive.locator('summary').first().click();
+      await expect(archive.locator('.cinema-evidence-body').first()).toBeVisible();
+      await page.screenshot({ path: path.join(output, device.name + '-' + stage.stage + '-archive-reading.png') });
+      await archive.getByRole('button', { name: '关闭线索档案' }).click();
     }
   });
 }

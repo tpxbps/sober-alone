@@ -11,6 +11,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from app.agents.agent_manager import prune_agent_managers
 from app.api.routes import game, script_editor, system
 from app.core.config import settings
+from app.core.static_images import ImageStaticFiles
 from app.db.readiness import ensure_database_ready
 from app.db.session import engine
 from app.script_editor.graph import set_script_gen_graph
@@ -96,4 +97,4 @@ if (_audio_dir).exists():
 _image_dir = settings.image_dir
 _image_dir.mkdir(parents=True, exist_ok=True)
 if (_image_dir).exists():
-    app.mount("/images", StaticFiles(directory=str(_image_dir)), name="images")
+    app.mount("/images", ImageStaticFiles(directory=str(_image_dir)), name="images")

@@ -4,9 +4,9 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { ArrowRight, Pause, Play, SkipForward, RotateCcw } from 'lucide-react';
 import type { ClueMedia, CluePresentationState } from '@/types/cluePresentation';
 import { audioPlayerManager } from '@/lib/audioPlayerManager';
-import { Markdown } from '@/components/ui/Markdown';
-import { ClueImage } from './ClueImage';
+import { ClueEvidenceList } from './ClueEvidenceList';
 import { ImmersiveClueScene } from './ImmersiveClueScene';
+import { warmCluePresentation } from '@/lib/clueImageLoader';
 import './cluePresentation.css';
 import './immersiveClueScene.css';
 
@@ -48,6 +48,7 @@ export function CluePresentationOverlay({ state, onContinue }: {
   const [paused, setPaused] = useState(false);
   const [hidden, setHidden] = useState(() => document.hidden);
   const [loaded, setLoaded] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [allImagesFailed, setAllImagesFailed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -72,18 +73,21 @@ export function CluePresentationOverlay({ state, onContinue }: {
     return () => document.removeEventListener('visibilitychange', change);
   }, []);
   useEffect(() => {
+    if (!valid || reduced) return;
     let active = true;
-    const urls = [...new Set([presentation?.background?.image_url, ...state.clues.map(clue => clue.media?.status === 'ready' ? clue.media.image_url : undefined)].filter((url): url is string => Boolean(url?.startsWith('/images/'))))];
-    const images: HTMLImageElement[] = [];
-    const timer = window.setTimeout(() => { if (active) setLoaded(true); }, 4000);
-    Promise.all(urls.map(url => new Promise<boolean>(resolve => {
-      const image = new Image(); images.push(image);
-      image.onload = () => resolve(true); image.onerror = () => resolve(false); image.src = url;
-    }))).then(results => {
-      if (active) { setLoaded(true); setAllImagesFailed(!results.some(Boolean)); }
+    const timeout = window.setTimeout(() => { if (active) { active = false; setAllImagesFailed(true); } }, 12000);
+    void warmCluePresentation(state, loadAttempt > 0).then(results => {
+      if (active) {
+        clearTimeout(timeout);
+        const ready = results.length > 0 && results.every(Boolean);
+        setLoaded(ready);
+        setAllImagesFailed(!ready);
+      }
     });
-    return () => { active = false; clearTimeout(timer); for (const image of images) { image.onload = null; image.onerror = null; } };
-  }, [presentation, state.clues]);
+    return () => { active = false; clearTimeout(timeout); };
+    // Polling creates equivalent state objects; it must not restart the readiness deadline.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.presentation_id, valid, reduced, loadAttempt]);
   useEffect(() => {
     if (stopped) return;
     let frame = 0;
@@ -109,7 +113,10 @@ export function CluePresentationOverlay({ state, onContinue }: {
     <Dialog.Content aria-describedby="clue-cinema-description" onEscapeKeyDown={event => event.preventDefault()}
       onPointerDownOutside={event => event.preventDefault()} className={`clue-cinema ${presentation?.template === 'dossier' ? 'is-dossier' : ''} ${presentation?.version === 2 && !finished ? 'is-immersive' : ''} ${reduced ? 'is-reduced' : ''} ${stopped ? 'is-paused' : ''}`}
       onClick={event => { if (event.target === event.currentTarget && finished) void confirm(); }}>
-      <div className="cinema-backdrop" aria-hidden="true" style={presentation?.background ? { backgroundImage: `url("${presentation.background.image_url}")`, ...(presentation.version === 2 && !finished ? { transform: `scale(${1.06 + elapsed / Math.max(total, 1) * 0.12}) translateX(${elapsed / Math.max(total, 1) * 1.5 - 1}%)` } : {}) } : undefined} />
+      <div className="cinema-backdrop" aria-hidden="true" style={loaded && presentation?.background ? {
+        backgroundImage: `url("${presentation.background.image_url}")`,
+        ...(presentation.version === 2 && !finished ? { transform: `scale(${1.06 + elapsed / Math.max(total, 1) * 0.12}) translateX(${elapsed / Math.max(total, 1) * 1.5 - 1}%)` } : {}),
+      } : undefined} />
       <div className="cinema-shade" aria-hidden="true" />
       <header className="cinema-header">
         <div><p className="cinema-eyebrow">第 {String(state.round).padStart(2, '0')} 轮 · 公开线索</p><Dialog.Title>{presentation?.title ?? '新的线索已送达'}</Dialog.Title></div>
@@ -117,7 +124,7 @@ export function CluePresentationOverlay({ state, onContinue }: {
       </header>
       <Dialog.Description id="clue-cinema-description" className="sr-only">观看本轮线索演出。可以暂停或跳至结尾，完成后确认继续推理。</Dialog.Description>
       {!finished ? <>
-        {!loaded ? <div className="cinema-loading" role="status">正在展开本轮线索…</div> : presentation?.version === 2
+        {!loaded ? <div className="cinema-loading" role="status">正在准备本轮演出…</div> : presentation?.version === 2
           ? <ImmersiveClueScene presentation={presentation} clues={state.reference_clues ?? state.clues} elapsed={elapsed} duration={total} />
           : <AnimatePresence mode="wait">
           <motion.main key={shot.id} className={`cinema-scene scene-${shot.motion}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.22 }}>
@@ -137,12 +144,13 @@ export function CluePresentationOverlay({ state, onContinue }: {
       </> : <main className="cinema-end">
         <p className="cinema-eyebrow">{state.clues.length} 条线索已公开</p><h2>接下来，听听彼此的解释。</h2>
         <p className="cinema-end-intro">可以展开回看完整线索。准备好后，再开始本轮推理。</p>
-        <div className="cinema-evidence-list">{state.clues.map(clue => <details key={clue.id}>
-          <summary><ClueImage media={clue.media} thumbnail className="cinema-evidence-thumb" /><span>{clue.summary}</span><span className="cinema-expand">＋</span></summary>
-          <div className="cinema-evidence-body"><ClueImage media={clue.media} className="cinema-evidence-image" /><Markdown>{clue.content}</Markdown></div>
-        </details>)}</div>
+        {allImagesFailed && <p className="cinema-end-intro">图片尚未全部就绪，可以先阅读线索，或重试加载演出。</p>}
+        <ClueEvidenceList clues={state.clues} />
         {error && <p role="alert" className="cinema-error">{error}</p>}
-        <div className="cinema-end-actions">{valid && !reduced && !allImagesFailed && <button type="button" className="cinema-replay" onClick={() => { setElapsed(0); setPaused(false); }}><RotateCcw />再看一遍</button>}<button type="button" className="cinema-continue" disabled={submitting} onClick={() => void confirm()}>{submitting ? '正在进入…' : '继续推理'}<ArrowRight /></button></div>
+        <div className="cinema-end-actions">{valid && !reduced && <button type="button" className="cinema-replay" onClick={() => {
+          setElapsed(0); setPaused(false);
+          if (allImagesFailed) { setAllImagesFailed(false); setLoaded(false); setLoadAttempt(value => value + 1); }
+        }}><RotateCcw />{allImagesFailed ? '重试加载演出' : '再看一遍'}</button>}<button type="button" className="cinema-continue" disabled={submitting} onClick={() => void confirm()}>{submitting ? '正在进入…' : '继续推理'}<ArrowRight /></button></div>
       </main>}
     </Dialog.Content>
   </Dialog.Portal></Dialog.Root>;

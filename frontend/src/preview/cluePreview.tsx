@@ -5,8 +5,10 @@ import type { CluePresentationState } from '@/types/cluePresentation';
 import { CluePresentationOverlay } from '@/components/game/CluePresentationOverlay';
 import { MentionComposer, type MentionComposerHandle } from '@/components/game/MentionComposer';
 import { ClueDetails } from '@/components/game/ClueReferencePanel';
+import { ClueArchive } from '@/components/game/ClueArchive';
 import { GameMessageMarkdown } from '@/components/ui/GameMessageMarkdown';
 import { citedIds } from '@/lib/clueScope';
+import { warmCluePresentation } from '@/lib/clueImageLoader';
 import '../index.css';
 
 interface Preview { title?: string; clue_stages: ClueStage[] }
@@ -37,6 +39,11 @@ export function CluePreview() {
     return () => { cancelled = true; };
   }, []);
   const stage = data?.clue_stages[round];
+  useEffect(() => {
+    if (stage) void warmCluePresentation({ presentation_id: 'preview', round: stage.stage, status: 'pending',
+      presentation: stage.presentation ?? null, clues: stage.items,
+      reference_clues: data?.clue_stages.filter(item => item.stage <= stage.stage).flatMap(item => item.items) });
+  }, [data, stage]);
   const clues = data?.clue_stages.filter(item => item.stage <= (stage?.stage ?? 0)).flatMap(item => item.items) ?? [];
   const send = () => { setMessage(draft); composer.current?.clear(); };
   return <main className="mx-auto max-w-5xl space-y-8 px-5 py-10">
@@ -62,6 +69,7 @@ export function CluePreview() {
       <section className="rounded-xl border border-border p-5"><h2 className="mb-4 text-lg">本轮完整线索</h2><ClueDetails clues={stage.items} /></section>
     </>}
     {active && <CluePresentationOverlay state={active} onContinue={async () => setActive(null)} />}
+    {!active && <ClueArchive clues={clues} />}
   </main>;
 }
 createRoot(document.getElementById('root')!).render(<StrictMode><CluePreview /></StrictMode>);

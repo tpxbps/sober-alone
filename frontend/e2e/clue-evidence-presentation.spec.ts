@@ -11,13 +11,14 @@ const presentation = {
   shots: [{ id: 'scene', duration_ms: 15000, clue_ids: ['c01', 'c02'], title: '观察现场', caption: '两处痕迹，等待解释。', emphasis: '等待解释', motion: 'split', labels: [] }],
 };
 const stage = { stage: 1, overview: '材料', free_discussion_notice: '讨论', items: clues, presentation };
+const testArt = '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="450"><rect width="800" height="450" fill="#21364a"/></svg>';
 function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 }
 async function images(page: Page, broken = false, version = 1) {
   await page.route(url => url.pathname.startsWith('/images/'), route => {
     if (route.request().url().endsWith('preview.json')) return json(route, { title: '验证资源', clue_stages: [{ ...stage, presentation: { ...presentation, version } }] });
-    return route.fulfill({ status: broken ? 404 : 200, contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="450"><rect width="800" height="450" fill="#21364a"/></svg>' });
+    return route.fulfill({ status: broken ? 404 : 200, contentType: broken ? 'text/plain' : 'image/svg+xml', body: broken ? 'Image unavailable' : testArt });
   });
 }
 test('引用编辑、多选、换行、重开、复制删除与手机详情', async ({ page }) => {
@@ -176,4 +177,109 @@ test('资源失效与减少动态效果仍有可读摘要和继续入口', async
   await expect(page.getByRole('dialog').getByText('门锁没有撬动痕迹。')).toBeVisible();
   await page.getByRole('button', { name: '继续推理' }).click();
   await expect(page.getByRole('dialog')).toBeHidden();
+});
+
+for (const template of ['cinematic', 'dossier']) {
+  test(template + ': 收拢时上一幕字幕原位结束，结束语才居中', async ({ page }) => {
+    await images(page, false, 2);
+    await page.route(url => url.pathname.endsWith('/preview.json'), route => json(route, { clue_stages: [{ ...stage, presentation: {
+      ...presentation, version: 2, template, shots: [
+        { ...presentation.shots[0], id: 'question', duration_ms: 10000, title: '仍有疑问待解释' },
+        { ...presentation.shots[0], id: 'closing', duration_ms: 2000, clue_ids: [], title: '开始本轮推理' },
+      ],
+    } }] }));
+    await page.goto('/clue-preview.html?src=/images/scripts/test/preview.json');
+    await page.getByRole('button', { name: '播放本轮演出' }).click();
+    await expect(page.locator('.cinema-copy h2')).toHaveText('仍有疑问待解释');
+    await page.locator('.cinema-immersive').evaluate(element => {
+      const capture = () => ({ title: element.querySelector('h2')?.textContent, align: getComputedStyle(element.querySelector('.cinema-copy')!).textAlign });
+      const observed = [capture()];
+      (window as unknown as { observedCaptions: typeof observed }).observedCaptions = observed;
+      new MutationObserver(() => observed.push(capture())).observe(element, { attributes: true, attributeFilter: ['data-phase'] });
+    });
+    await expect(page.locator('.cinema-copy h2')).toHaveText('开始本轮推理', { timeout: 20000 });
+    await expect(page.locator('.cinema-copy')).toHaveCSS('text-align', 'center');
+    const observed = await page.evaluate(() => (window as unknown as { observedCaptions: { title: string; align: string }[] }).observedCaptions);
+    expect(observed.filter(item => item.title === '仍有疑问待解释').every(item => item.align === 'left')).toBe(true);
+    expect(observed.some(item => item.title === '开始本轮推理' && item.align === 'center')).toBe(true);
+  });
+}
+
+test('大图未返回时等待，全部就绪才从头播放且请求不重复', async ({ page }) => {
+  let release!: () => void;
+  const delayed = new Promise<void>(resolve => { release = resolve; });
+  let fullRequests = 0;
+  const progressiveMedia = { ...media, thumbnail_url: '/images/scripts/test/tiny.svg' };
+  await page.route(url => url.pathname.endsWith('/preview.json'), route => json(route, { clue_stages: [{ ...stage,
+    items: clues.map(clue => ({ ...clue, media: progressiveMedia })),
+    presentation: { ...presentation, version: 2, background: progressiveMedia },
+  }] }));
+  await page.route('**/tiny.svg', route => route.fulfill({ contentType: 'image/svg+xml', body: testArt }));
+  await page.route('**/art.svg', async route => {
+    fullRequests++; await delayed;
+    await route.fulfill({ contentType: 'image/svg+xml', body: testArt });
+  });
+  try {
+    await page.goto('/clue-preview.html?src=/images/scripts/test/preview.json', { waitUntil: 'domcontentloaded' });
+    await page.getByRole('button', { name: '播放本轮演出' }).click();
+    await expect(page.getByRole('status')).toHaveText('正在准备本轮演出…');
+    await page.waitForTimeout(600);
+    await expect(page.locator('.cinema-copy, .cinema-card')).toHaveCount(0);
+    release();
+    await expect(page.locator('.cinema-copy h2')).toHaveText('观察现场');
+    await expect(page.locator('.cinema-card img').first()).toHaveAttribute('src', media.image_url);
+    expect(fullRequests).toBe(1);
+  } finally { release(); }
+});
+
+test('图片全部损坏时自动显示正文摘要，确认仍由玩家触发', async ({ page }) => {
+  await images(page, true, 2);
+  await page.goto('/clue-preview.html?src=/images/scripts/test/preview.json');
+  await page.getByRole('button', { name: '播放本轮演出' }).click();
+  await expect(page.getByRole('button', { name: '继续推理' })).toBeVisible();
+  await page.getByText('门锁痕迹', { exact: true }).last().click();
+  await expect(page.getByRole('dialog').getByText('门锁没有撬动痕迹。')).toBeVisible();
+  await page.route('**/art.svg', route => route.fulfill({ contentType: 'image/svg+xml', body: testArt }));
+  await page.getByRole('button', { name: '重试加载演出' }).click();
+  await expect(page.locator('.cinema-copy h2')).toHaveText('观察现场');
+});
+
+test('仅一张必需图片损坏也不播放残缺动画', async ({ page }) => {
+  await images(page, false, 2);
+  const missing = { ...media, image_url: '/images/scripts/test/missing.webp' };
+  await page.route(url => url.pathname.endsWith('/preview.json'), route => json(route, { clue_stages: [{ ...stage,
+    items: [clues[0], { ...clues[1], media: missing }], presentation: { ...presentation, version: 2 },
+  }] }));
+  await page.route('**/missing.webp', route => route.fulfill({ status: 404, body: 'missing' }));
+  await page.goto('/clue-preview.html?src=/images/scripts/test/preview.json');
+  await page.getByRole('button', { name: '播放本轮演出' }).click();
+  await expect(page.getByRole('button', { name: '继续推理' })).toBeVisible();
+  await expect(page.locator('.cinema-card')).toHaveCount(0);
+});
+
+test('线索圆圈按轮次回看，关闭恢复焦点且不触发阶段确认', async ({ page }) => {
+  await images(page);
+  await page.route(url => url.pathname.endsWith('/preview.json'), route => json(route, { clue_stages: [stage, { ...stage, stage: 2,
+    items: [{ ...clues[0], id: 'c03', stage: 2, summary: '后来公开的材料' }], presentation: { ...presentation, title: '第二轮' },
+  }] }));
+  await page.goto('/clue-preview.html?src=/images/scripts/test/preview.json');
+  const trigger = page.getByRole('button', { name: '查看已公开线索（2条）' });
+  await trigger.click();
+  const archive = page.getByRole('dialog', { name: '线索档案' });
+  await expect(archive.locator('summary')).toHaveCount(2);
+  await expect(archive.getByRole('button', { name: /第 2 轮/ })).toHaveCount(0);
+  await archive.getByText('门锁痕迹', { exact: true }).click();
+  await expect(archive.getByText('门锁没有撬动痕迹。')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(trigger).toBeFocused();
+  await page.getByRole('button', { name: '第 2 轮 · 第二轮' }).click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('button', { name: '查看已公开线索（3条）' }).click();
+  await expect(archive.getByText('后来公开的材料')).toBeVisible();
+  await archive.getByRole('button', { name: /第 1 轮/ }).click();
+  await expect(archive.locator('summary')).toHaveCount(2);
+  await expect(archive.getByText('后来公开的材料')).toHaveCount(0);
+  await expect(archive.getByRole('button', { name: '继续推理' })).toHaveCount(0);
+  await archive.getByRole('button', { name: '返回讨论' }).click();
+  await expect(archive).toBeHidden();
 });

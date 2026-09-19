@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { warmCluePresentation } from '@/lib/clueImageLoader';
 import { characterImages } from './characterImages';
 import type {
   Script,
@@ -155,12 +156,14 @@ export const gameApi = {
   // Get game state
   getGameState: async (sessionId: string): Promise<GameStateResponse> => {
     const response = await api.get(`/game/${sessionId}/state`);
+    void warmCluePresentation(response.data.clue_presentation);
     return { ...response.data, characters: (response.data.characters || []).map(characterImages) };
   },
 
   // Advance to next stage
   advanceStage: async (sessionId: string): Promise<{ success: boolean; transition: StageTransition }> => {
     const response = await api.post(`/game/${sessionId}/advance`);
+    void warmCluePresentation(response.data.clue_presentation);
     return response.data;
   },
 

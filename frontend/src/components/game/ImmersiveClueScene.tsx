@@ -40,7 +40,10 @@ export function ImmersiveClueScene({ presentation, clues, elapsed, duration }: {
   const assemble = smooth((elapsed - gatherAt) / 1800);
   const dossier = presentation.template === 'dossier';
   const shot = cues.find(cue => elapsed < cue.at + cue.duration_ms) ?? cues.at(-1)!;
-  const phase = elapsed >= gatherAt ? 'gather' : elapsed < (tracks[0]?.at ?? duration) ? 'opening' : 'evidence';
+  // The photographs can gather early, but the preceding caption must finish in place.
+  const closingCue = cues.length > 1 && !cues.at(-1)!.clue_ids.length ? cues.at(-1) : undefined;
+  const phase = closingCue && elapsed >= closingCue.at ? 'gather'
+    : elapsed < (tracks[0]?.at ?? duration) ? 'opening' : 'evidence';
   const copyAge = elapsed - shot.at;
   const copyOpacity = Math.min(ease(copyAge / 650), ease((shot.duration_ms - copyAge) / 360));
 
