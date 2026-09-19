@@ -9,6 +9,7 @@ from typing import Any
 from app.core.config import settings
 from app.core.inference import gather_inference, raise_for_inference_recovery
 from app.game.clues import derive_game_process, normalize_clue_stages, render_clue_markdown
+from app.script_editor.conversion.cache import ConversionCache, cached_output
 from app.script_editor.conversion.contracts import (
     ClueStagesResult,
     ScenesResult,
@@ -17,7 +18,6 @@ from app.script_editor.conversion.contracts import (
 )
 from app.script_editor.conversion.disclosure import (
     PersonalScript,
-    PublicCharacter,
     PublicScenes,
     RoleReading,
     TruthScenes,
@@ -33,6 +33,7 @@ from app.script_editor.conversion.progress import (
     _publish_convert_progress,
     _update_convert_task,
     get_convert_progress,
+    task_failure_reason,
 )
 from app.script_editor.conversion.prompts import (
     CHARACTER_SYSTEM,
@@ -40,9 +41,14 @@ from app.script_editor.conversion.prompts import (
     METADATA_SYSTEM,
     SCENES_SYSTEM,
 )
+from app.script_editor.conversion.public_material import public_bundle, public_character
 from app.script_editor.state import STEP_CONVERT, ScriptGenState
 
 logger = logging.getLogger(__name__)
+
+
+def character_task_id(char):
+    return f"char_{char.get('character_id') or char['name']}"
 
 
 def _character_prompt(name: str) -> str:
@@ -196,7 +202,7 @@ async def _run_game_clues(base_llm, script_id: str, state: ScriptGenState, chars
     except Exception as e:
         raise_for_inference_recovery(e)
         logger.error(f"game_clues failed: {e}", exc_info=True)
-        _update_convert_task(script_id, "game_flow", "failed")
+        _update_convert_task(script_id, "game_flow", "failed", task_failure_reason(e))
         return None
 
 
@@ -205,23 +211,26 @@ async def _run_game_scenes(base_llm, script_id: str, state: ScriptGenState, char
     _update_convert_task(script_id, "game_scenes", "running")
     try:
         public, truth = await gather_inference(
-            invoke(
-                base_llm,
-                PublicScenes,
-                SCENES_SYSTEM + "\n本次只写开场、总结邀请和投票提示，严格仅使用提供的公开材料。",
-                audience_material(state),
-            ),
-            invoke(
-                base_llm,
+            public_bundle(base_llm, state),
+            cached_output(
+                state,
+                "truth",
                 TruthScenes,
-                SCENES_SYSTEM + "\n本次只写真相和揭晓。",
-                {
-                    "终稿": state.get("final_draft", ""),
-                    "已确认事实": audience_material(state, scope="truth"),
-                },
+                state.get("final_draft", ""),
+                lambda: invoke(
+                    base_llm,
+                    TruthScenes,
+                    SCENES_SYSTEM + "\n本次只写真相和揭晓。",
+                    {
+                        "终稿": state.get("final_draft", ""),
+                        "已确认事实": audience_material(state, scope="truth"),
+                    },
+                ),
             ),
         )
-        result = ScenesResult(**public.model_dump(), **truth.model_dump())
+        result = ScenesResult(
+            **public.model_dump(include=set(PublicScenes.model_fields)), **truth.model_dump()
+        )
         if result:
             _update_convert_task(script_id, "game_scenes", "complete")
             return result
@@ -232,7 +241,7 @@ async def _run_game_scenes(base_llm, script_id: str, state: ScriptGenState, char
     except Exception as e:
         raise_for_inference_recovery(e)
         logger.error(f"game_scenes failed: {e}", exc_info=True)
-        _update_convert_task(script_id, "game_scenes", "failed")
+        _update_convert_task(script_id, "game_scenes", "failed", task_failure_reason(e))
         return None
 
 
@@ -354,12 +363,7 @@ async def _run_metadata(base_llm, script_id: str, state: ScriptGenState):
     """并行任务：生成元数据"""
     _update_convert_task(script_id, "metadata", "running")
     try:
-        user_msg = (
-            f"## 剧本标题\n{state.get('script_title', '')}\n\n"
-            f"## 开局公开材料\n{json.dumps(audience_material(state), ensure_ascii=False)}\n"
-            f"请生成概述、标签和描述。"
-        )
-        result = await invoke(base_llm, ScriptMetadata, METADATA_SYSTEM, user_msg)
+        result = ScriptMetadata.model_validate((await public_bundle(base_llm, state)).model_dump())
         if result:
             _update_convert_task(script_id, "metadata", "complete")
             return result
@@ -370,7 +374,7 @@ async def _run_metadata(base_llm, script_id: str, state: ScriptGenState):
     except Exception as e:
         raise_for_inference_recovery(e)
         logger.error(f"metadata failed: {e}", exc_info=True)
-        _update_convert_task(script_id, "metadata", "failed")
+        _update_convert_task(script_id, "metadata", "failed", task_failure_reason(e))
         return None
 
 
@@ -383,42 +387,55 @@ async def _run_character(
 ) -> tuple[str, SingleCharacterResult | None]:
     """并行任务：生成单个角色数据。返回 (name, result)"""
     char_name = char.get("name", "未知")
-    task_id = f"char_{char_name}"
+    task_id = character_task_id(char)
     _update_convert_task(script_id, task_id, "running")
     try:
-        identity = {key: char.get(key) for key in ("name", "gender", "age", "occupation")}
+        identity = {
+            key: char[key]
+            for key in ("name", "gender", "age", "occupation")
+            if char.get(key) is not None
+        }
         names = [c["name"] for c in state["disclosure_plan"]["characters"]]
         personal, public = await gather_inference(
-            invoke(
-                base_llm,
+            cached_output(
+                state,
+                f"personal:{char['character_id']}",
                 PersonalScript,
-                _character_prompt(char_name)
-                + "\n本次只写个人剧本。通常400至600字，亲历充足时适度扩展。材料按本人开局所知筛选，不能补充其他事实，也不能用否定句透露他人未知秘密。不得以全知视角解释他人的心理、动机或私下经历；对他人的判断只能来自本人见闻。保留全部本人实际行为。",
                 {"角色": identity, **audience_material(state, role=char_name)},
-                validate=lambda value: validate_no_secret_inventory(
-                    value.character_script, char_name, names
+                lambda: invoke(
+                    base_llm,
+                    PersonalScript,
+                    _character_prompt(char_name)
+                    + "\n本次只写个人剧本。通常400至600字，亲历充足时适度扩展。材料按本人开局所知筛选，不能补充其他事实，也不能用否定句透露他人未知秘密。不得以全知视角解释他人的心理、动机或私下经历；对他人的判断只能来自本人见闻。保留全部本人实际行为。",
+                    {"角色": identity, **audience_material(state, role=char_name)},
+                    validate=lambda value: validate_no_secret_inventory(
+                        value.character_script, char_name, names
+                    ),
                 ),
             ),
-            invoke(
-                base_llm,
-                PublicCharacter,
-                _character_prompt(char_name)
-                + "\n本次只写公开选角简介、外貌和音色；只用公开材料，不猜测秘密。",
-                {"角色": identity, **audience_material(state)},
-            ),
+            public_character(base_llm, state, char, _character_prompt("各角色")),
         )
-        derived = await invoke(
-            base_llm,
+        derived = await cached_output(
+            state,
+            f"reading:{char['character_id']}",
             RoleReading,
-            "仅从个人稿派生角色速览（约150–300字，禁止全文复述）和AI扮演资料，不能补充外部事实。保留本人关键行为和作案记忆；"
-            "不强制加入疑问、指定要问谁、虚构目标或推理结论。速览自然分段，AI资料忠实身份经历与关系。",
             {"角色": identity, "个人剧本": personal.character_script},
-            validate=lambda value: validate_no_secret_inventory(
-                value.script_summary + "\n" + value.system_prompt, char_name, names
+            lambda: invoke(
+                base_llm,
+                RoleReading,
+                "仅从个人稿派生角色速览（约150–300字，禁止全文复述）和AI扮演资料，不能补充外部事实。保留本人关键行为和作案记忆；"
+                "不强制加入疑问、指定要问谁、虚构目标或推理结论。速览自然分段，AI资料忠实身份经历与关系。",
+                {"角色": identity, "个人剧本": personal.character_script},
+                validate=lambda value: validate_no_secret_inventory(
+                    value.script_summary + "\n" + value.system_prompt, char_name, names
+                ),
             ),
         )
         result = SingleCharacterResult(
-            **identity, **personal.model_dump(), **public.model_dump(), **derived.model_dump()
+            **identity,
+            **personal.model_dump(),
+            **public.model_dump(exclude={"character_id"}),
+            **derived.model_dump(),
         )
         if result:
             result.name = char_name
@@ -431,7 +448,7 @@ async def _run_character(
     except Exception as e:
         raise_for_inference_recovery(e)
         logger.error(f"char '{char_name}' failed: {e}", exc_info=True)
-        _update_convert_task(script_id, task_id, "failed")
+        _update_convert_task(script_id, task_id, "failed", task_failure_reason(e))
         return char_name, None
 
 
@@ -446,13 +463,11 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
     outline = state.get("outline", "")
 
     script_id = state.get("script_id", str(uuid.uuid4()))
-    _init_convert_progress(script_id, characters, player_count)
     base_llm = _get_structured_llm()
 
     import hashlib
     import json
 
-    from app.script_editor.nodes.safety_check import GENERIC_ERROR
     from app.script_editor.outline.runtime import current_runtime
     from app.script_editor.services.execution import PROMPT_VERSION
 
@@ -460,8 +475,6 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
         key: state.get(key)
         for key in (
             "final_draft",
-            "characters",
-            "outline",
             "script_title",
             "player_count",
             "num_clue_rounds",
@@ -469,11 +482,21 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
             "ending_mode",
             "prompts",
             "refinement",
-            "game_data_sections",
         )
     }
     fingerprint = hashlib.sha256(
-        json.dumps([PROMPT_VERSION, material], sort_keys=True, ensure_ascii=False).encode()
+        json.dumps(
+            [
+                PROMPT_VERSION,
+                "conversion-v3-output-cache",
+                material,
+                state.get("game_data_sections")
+                if (state.get("refinement") or {}).get("target") == "review_game_data"
+                else None,
+            ],
+            sort_keys=True,
+            ensure_ascii=False,
+        ).encode()
     ).hexdigest()
     previous = state.get("convert_cache") or {}
     runtime = current_runtime.get()
@@ -482,15 +505,46 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
     cache = (
         dict(previous.get("results") or {}) if previous.get("fingerprint") == fingerprint else {}
     )
+    _init_convert_progress(
+        script_id,
+        characters,
+        player_count,
+        state.get("convert_progress") if previous.get("fingerprint") == fingerprint else None,
+    )
+    outputs = ConversionCache(fingerprint, cache, runtime)
+    state = {**state, "_conversion_outputs": outputs}
+    selected = state.get("conversion_retry_task")
+    old_failures = {
+        task.get("id")
+        for phase in (state.get("convert_progress") or {}).get("phases", [])
+        for task in phase.get("tasks", [])
+        if task.get("status") == "failed"
+    }
 
     def failure():
+        message = "部分游戏数据尚未整理完成，已保留成功内容，请重试对应任务。"
+        progress = get_convert_progress(script_id) or {}
         return {
             "current_step": STEP_CONVERT,
-            "error_message": GENERIC_ERROR,
+            "error_message": message,
+            "workflow_error": {
+                "scope": "task",
+                "code": "conversion_incomplete",
+                "message": message,
+                "retryable": True,
+                "task_ids": [
+                    t["id"]
+                    for p in progress.get("phases", [])
+                    for t in p.get("tasks", [])
+                    if t.get("status") == "failed"
+                ],
+            },
             "retry_step": STEP_CONVERT,
             "convert_cache": {"fingerprint": fingerprint, "results": cache},
             "disclosure_cache": state.get("disclosure_cache", {}),
-            "convert_progress": get_convert_progress(script_id) or {},
+            "convert_progress": progress,
+            "conversion_retry_task": None,
+            "conversion_metrics": outputs.metrics,
         }
 
     async def cached(key, factory, schema, validate=lambda value: True, attempts=1):
@@ -499,7 +553,11 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
             if validate(value):
                 _update_convert_task(script_id, key, "complete")
                 return value
+        if selected and key in old_failures and key != selected:
+            _update_convert_task(script_id, key, "failed")
+            return None
         for attempt in range(attempts):
+            _update_convert_task(script_id, key, "running")
             try:
                 value = await factory()
                 if isinstance(value, tuple):
@@ -514,6 +572,7 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
                 return value
             except Exception as error:
                 raise_for_inference_recovery(error)
+                _update_convert_task(script_id, key, "failed", task_failure_reason(error))
                 logger.warning(
                     "Conversion task %s attempt %s failed (%s): %s",
                     key,
@@ -539,6 +598,11 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
             )
             if discovered:
                 characters = discovered["characters"]
+                for char in characters:
+                    char.setdefault(
+                        "character_id",
+                        str(uuid.uuid5(uuid.NAMESPACE_URL, f"{script_id}:{char['name']}")),
+                    )
                 state = {**state, "disclosure_plan": discovered}
                 _update_convert_task(script_id, "discover_chars", "complete")
                 _add_character_tasks(script_id, characters)
@@ -596,7 +660,7 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
     for char in characters:
         jobs.append(
             cached(
-                f"char_{char['name']}",
+                character_task_id(char),
                 lambda c=char: _run_character(base_llm, script_id, c, state, chars_summary),
                 SingleCharacterResult,
                 lambda value, c=char: (
@@ -810,6 +874,9 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
         "convert_progress": persisted_progress,
         "convert_cache": {"fingerprint": fingerprint, "results": cache},
         "error_message": "",
+        "workflow_error": None,
+        "conversion_retry_task": None,
+        "conversion_metrics": outputs.metrics,
         "retry_step": "",
         "current_step": STEP_CONVERT,
     }

@@ -1,11 +1,9 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, lazy, Suspense } from 'react';
 import { useReducedMotion } from 'framer-motion';
 import { flushSync } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 
 import { Homepage } from '@/screens/Homepage';
-import { GamePage } from '@/screens/GamePage';
-import { ScriptEditorPage } from '@/screens/ScriptEditorPage';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useGameStore } from '@/stores/gameStore';
 import { hasStoredEditorSession } from '@/stores/editorStore';
@@ -14,6 +12,8 @@ import { SceneBackdrop } from '@/components/lobby/SceneBackdrop';
 import { transitionScene } from '@/lib/sceneTransition';
 
 type AppScreen = 'home' | 'game' | 'editor';
+const GamePage = lazy(() => import('@/screens/GamePage').then(module => ({ default: module.GamePage })));
+const ScriptEditorPage = lazy(() => import('@/screens/ScriptEditorPage').then(module => ({ default: module.ScriptEditorPage })));
 
 // Storage keys
 const STORAGE_KEY = 'sober_alone_session';
@@ -160,6 +160,7 @@ function App() {
     <div className="app-shell min-h-screen text-foreground" data-quiet={quiet || undefined}>
       <SceneBackdrop screen={currentScreen} />
       <div className="app-screen">
+        <Suspense fallback={<div role="status" aria-busy="true" className="flex min-h-[60vh] items-center justify-center gap-3 text-muted-foreground"><span className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />正在打开…</div>}>
         {currentScreen === 'home' && (
           <div key="home">
             <Homepage onStartGame={handleStartGame} onOpenEditor={handleOpenEditor} />
@@ -177,6 +178,7 @@ function App() {
             <ScriptEditorPage onBack={handleExitEditor} editScriptId={editScriptId} />
           </div>
         )}
+        </Suspense>
       </div>
       {entering && currentScreen === 'game' && <div aria-hidden="true" className={"game-entry-overlay game-entry-arrival" + (reducedMotion || !lobbyMotionEnabled ? " is-quiet" : "")} />}
     </div>

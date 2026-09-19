@@ -8,7 +8,7 @@ export function ConvertProgressPanel({
   onRetry,
 }: {
   convertProgress: AssetProgress | null;
-  onRetry?: () => Promise<void>;
+  onRetry?: (taskId?: string) => Promise<void>;
 }) {
   const phases = convertProgress?.phases || [];
   const busy = useEditorStore(state => state.isLoading);
@@ -26,7 +26,7 @@ export function ConvertProgressPanel({
       {phases.length > 0 ? (
         <div className="space-y-4">
           {phases.map((phase) => (
-            <PhaseCard key={phase.id} phase={phase} retryable={false} />
+            <PhaseCard key={phase.id} phase={phase} onRetry={onRetry} />
           ))}
           {hasFailures && onRetry && (
             <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
@@ -130,13 +130,13 @@ function PhaseCard({
         </div>
         <div className="flex flex-col items-end gap-0.5">
           <div className="flex items-center gap-2">
-            <span
+            {phase.tech !== 'LLM' && <span
               className={`text-[10px] px-1.5 py-0.5 rounded ${
                 techColors[phase.tech] || "bg-secondary text-muted-foreground"
               }`}
             >
-              {phase.tech}
-            </span>
+                {phase.tech}
+            </span>}
             <span className="text-xs text-muted-foreground">
               {completedCount}/{total}
             </span>

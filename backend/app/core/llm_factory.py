@@ -13,9 +13,8 @@ LLM Factory - LangChain模型初始化统一管理
 规则:
 - deepseek 提供商统一使用 ChatDeepSeek
 - 其他提供商统一使用 ChatOpenAI（兼容 OpenAI 协议）
-- DeepSeek 思考模式在多轮场景（agent 工具调用、结构化输出）中会导致
-  reasoning_content 回传失败（API 返回 400），因此这些场景必须禁用思考模式。
-  传入 disable_thinking=True 即可。
+- 思考策略由调用场景和提供商能力决定；Agent 并不普遍要求关闭思考。
+  游戏角色发言的策略在 game_model_paths 中维护。
 """
 
 import logging
@@ -53,9 +52,8 @@ def create_llm(
     - 其他提供商: 使用 ChatOpenAI（兼容 OpenAI 协议）
 
     Args:
-        disable_thinking: 是否使用低延迟推理配置（GLM-5.3-Flash 仅支持 low，不能关闭思考）。需要的场景：
-            1. agent 工具调用（create_agent）— 思考模式导致多轮 reasoning_content 回传失败
-            2. 结构化输出（with_structured_output）— 思考模式与 function_calling 不兼容
+        disable_thinking: 请求提供商支持的低延迟配置；不代表所有模型都能关闭思考。
+            是否启用思考、是否保留工具轮次的推理历史，应按模型和调用场景决定。
     """
     model_lower = model.lower()
     # Existing gateway games can resume after the selectable Step model retires.
@@ -215,6 +213,11 @@ def _create_openai_compatible(
     if extra_body:
         kwargs["extra_body"] = extra_body
 
+    if model == "qwen3.8-flash":
+        from app.core.reasoning_chat import ReasoningChatOpenAI
+
+        # Direct Qwen calls need the same non-visible tool reasoning history as the gateway.
+        return ReasoningChatOpenAI(**kwargs)
     return ChatOpenAI(**kwargs)  # type: ignore[arg-type]
 
 
@@ -223,8 +226,7 @@ def create_chat_model_for_agent(
 ) -> BaseChatModel:
     """创建用于 Agent（如创作小助手）的聊天模型。
 
-    DeepSeek 思考模式在多轮工具调用时会导致 reasoning_content 回传失败，
-    因此 agent 场景必须禁用思考模式。
+    创作小助手保持现有低延迟策略；角色发言使用独立的场景策略。
     """
     return create_llm(model=model, temperature=0.7, disable_thinking=True)  # type: ignore[arg-type]
 

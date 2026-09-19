@@ -8,10 +8,13 @@ export const IDEA_EXAMPLES = [
 
 export function useIdeaPrompt(paused: boolean) {
   const [motionReduced, setMotionReduced] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-  const [cursor, setCursor] = useState({ example: 0, length: 0 });
+  const [cursor, setCursor] = useState({ example: 0, length: motionReduced ? IDEA_EXAMPLES[0].length : 0 });
   useEffect(() => {
     const media = window.matchMedia('(prefers-reduced-motion: reduce)');
-    const update = () => setMotionReduced(media.matches);
+    const update = () => {
+      setMotionReduced(media.matches);
+      if (media.matches) setCursor({ example: 0, length: IDEA_EXAMPLES[0].length });
+    };
     media.addEventListener('change', update);
     return () => media.removeEventListener('change', update);
   }, []);

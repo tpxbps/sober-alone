@@ -1,5 +1,4 @@
 import { LoadingButton } from "./EditorControls";
-import { useState } from 'react';
 import { useIdeaPrompt } from './useIdeaPrompt';
 
 export function IdeaStage({
@@ -32,8 +31,7 @@ export function IdeaStage({
     num_clue_rounds: number;
   }) => void;
 }) {
-  const [focused, setFocused] = useState(false);
-  const placeholder = useIdeaPrompt(focused || Boolean(userIdea));
+  const placeholder = useIdeaPrompt(Boolean(userIdea));
   return (
     <div className="h-full flex flex-col">
       <div className="p-5 flex-1 overflow-y-auto scrollbar-thin">
@@ -44,8 +42,6 @@ export function IdeaStage({
         <textarea
           aria-label="故事创意"
           aria-describedby="idea-description"
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
           value={userIdea}
           onChange={(e) => setUserIdea(e.target.value)}
           placeholder={placeholder}

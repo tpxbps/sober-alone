@@ -8,8 +8,9 @@ function json(route: Route, body: unknown) {
   })
 }
 
-test('转换失败刷新后保留通用错误并仅提交失败任务重试', async ({ page }) => {
+test('旧转换错误刷新后保留任务列表并仅提交指定任务重试', async ({ page }) => {
   let retryAction = ''
+  let retryTask = ''
   await page.addInitScript(() => {
     localStorage.setItem('editorSession', JSON.stringify({ threadId: 'failed-thread', currentStep: 'convert_to_game_data' }))
   })
@@ -23,6 +24,7 @@ test('转换失败刷新后保留通用错误并仅提交失败任务重试', as
     if (path.endsWith('/failed-thread/state')) return json(route, failure)
     if (path.endsWith('/failed-thread/resume')) {
       retryAction = route.request().postDataJSON().action
+      retryTask = route.request().postDataJSON().conversion_task_id
       return json(route, failure)
     }
     if (path.endsWith('/convert-progress')) return json(route, { success: true, progress: { isComplete: false, phases: [{ id: 'convert', label: '转换', tasks: [{ id: 'scenes', label: '场景', status: 'failed' }] }] } })
@@ -32,12 +34,14 @@ test('转换失败刷新后保留通用错误并仅提交失败任务重试', as
     return json(route, { success: true, scripts: [] })
   })
   await page.goto('/?editor=resume')
-  await expect(page.getByText('抱歉！系统发生未知错误，请稍后重试。')).toBeVisible()
+  await expect(page.getByText('场景', { exact: true })).toBeVisible()
+  await expect(page.getByText('抱歉！系统发生未知错误，请稍后重试。')).toHaveCount(0)
   await page.reload()
   await expect(page.getByRole('button', { name: '重试', exact: true })).toBeVisible()
   await expect(page.getByText('剧本创建完成！')).toHaveCount(0)
   await page.getByRole('button', { name: '重试', exact: true }).click()
   await expect.poll(() => retryAction).toBe('retry_failed')
+  expect(retryTask).toBe('scenes')
 })
 
 test('创作长任务在刷新和返回大厅后仍恢复到同一工作流', async ({ page }) => {

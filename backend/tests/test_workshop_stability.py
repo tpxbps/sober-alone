@@ -108,31 +108,34 @@ def fact(source_id):
 @pytest.mark.asyncio
 async def test_failed_fact_batch_reuses_completed_siblings_and_cast(monkeypatch):
     calls = []
-    fail = True
+    failures = 2
 
     async def invoke(_model, schema, _system, material, **kwargs):
-        nonlocal fail
+        nonlocal failures
         if schema is disclosure.CastAndStart:
             calls.append("cast")
             value = schema(characters=[{"name": "甲"}], game_start="开局", start_source_id=1)
         else:
             ids = list(material["本批片段"])
             calls.append(ids[0])
-            if ids[0] == 1 and fail:
-                fail = False
+            if ids[0] == 1 and failures:
+                failures -= 1
                 raise ValueError("本批校验失败")
             value = schema(facts=[fact(i) for i in ids])
-        kwargs["validate"](value)
+        if kwargs.get("validate"):
+            kwargs["validate"](value)
         return value
 
     monkeypatch.setattr(disclosure, "invoke", invoke)
-    state = {"final_draft": "甲看到了灯灭。" * 40, "player_count": 1, "num_clue_rounds": 1}
+    state = {"final_draft": "甲看到了灯灭。" * 120, "player_count": 1, "num_clue_rounds": 1}
     with pytest.raises(ValueError, match="本批"):
         await disclosure.extract_plan(Model(), state)
-    assert list(state["disclosure_cache"]["batches"]) == ["25-40"]
+    assert list(state["disclosure_cache"]["batches"]) == ["97-120"]
     result = await disclosure.extract_plan(Model(), state)
-    assert len(result["facts"]) == 40
-    assert calls == ["cast", 1, 25, 1]
+    assert len(result["facts"]) == 120
+    assert calls.count("cast") == 1
+    assert calls.count(1) == 3
+    assert calls.count(97) == 1
 
 
 @pytest.mark.asyncio
@@ -148,7 +151,8 @@ async def test_fact_truncation_splits_instead_of_dropping_material(monkeypatch):
             if len(ids) > 2:
                 raise StructuredOutputTruncated()
             value = schema(facts=[fact(i) for i in ids])
-        kwargs["validate"](value)
+        if kwargs.get("validate"):
+            kwargs["validate"](value)
         return value
 
     monkeypatch.setattr(disclosure, "invoke", invoke)
@@ -159,6 +163,37 @@ async def test_fact_truncation_splits_instead_of_dropping_material(monkeypatch):
     assert "全稿" not in json.dumps(
         disclosure.audience_material({"disclosure_plan": result}, role="甲")
     )
+
+
+@pytest.mark.asyncio
+async def test_truncated_parent_and_successful_child_are_not_repeated_on_retry(monkeypatch):
+    calls, failures = [], 2
+
+    async def invoke(_model, schema, _system, material, **kwargs):
+        nonlocal failures
+        if schema is disclosure.CastAndStart:
+            value = schema(characters=[{"name": "甲"}], game_start="开局", start_source_id=1)
+        else:
+            ids = list(material["本批片段"])
+            calls.append(tuple(ids))
+            if len(ids) > 2:
+                raise StructuredOutputTruncated()
+            if ids[0] == 3 and failures:
+                failures -= 1
+                raise ValueError("暂时未完成")
+            value = schema(facts=[fact(i) for i in ids])
+        if kwargs.get("validate"):
+            kwargs["validate"](value)
+        return value
+
+    monkeypatch.setattr(disclosure, "invoke", invoke)
+    state = {"final_draft": "甲看到了灯灭。" * 4, "player_count": 1, "num_clue_rounds": 1}
+    with pytest.raises(ValueError):
+        await disclosure.extract_plan(Model(), state)
+    result = await disclosure.extract_plan(Model(), state)
+    assert len(result["facts"]) == 4
+    assert calls.count((1, 2, 3, 4)) == calls.count((1, 2)) == 1
+    assert calls.count((3, 4)) == 3
 
 
 def test_excerpt_restores_formatting_without_accepting_changed_facts():
@@ -262,7 +297,8 @@ async def test_missing_role_material_invalidates_only_related_cached_batches(mon
             if schema is disclosure.CastAndStart
             else schema(facts=[])
         )
-        kwargs["validate"](value)
+        if kwargs.get("validate"):
+            kwargs["validate"](value)
         return value
 
     monkeypatch.setattr(disclosure, "invoke", invoke)
@@ -316,7 +352,8 @@ async def test_generated_round_labels_fit_the_authors_selected_round_count(
             value = schema(characters=[{"name": "甲"}], game_start="开局", start_source_id=1)
         else:
             value = schema(facts=[{**fact(1), "release": "round", "round": round_number}])
-        kwargs["validate"](value)
+        if kwargs.get("validate"):
+            kwargs["validate"](value)
         return value
 
     monkeypatch.setattr(disclosure, "invoke", invoke)

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { loadAtmosphere } from './loadAtmosphere';
 
 export function LobbyAtmosphere({ quiet, paused }: { quiet: boolean; paused: boolean }) {
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -12,7 +13,7 @@ export function LobbyAtmosphere({ quiet, paused }: { quiet: boolean; paused: boo
     if (quiet || matchMedia("(pointer: coarse)").matches) return;
     let cancelled = false;
     let dispose: (() => void) | undefined;
-    void import("./fluidAtmosphere").then(({ createAtmosphere }) => {
+    void loadAtmosphere().then(({ createAtmosphere }) => {
       if (cancelled) return;
       try { dispose = createAtmosphere(element, root, () => pausedRef.current); }
       catch (error) { root.dataset.renderer = "fallback"; console.warn("流光不可用，使用静态背景", error); }

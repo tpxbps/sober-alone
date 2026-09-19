@@ -12,6 +12,8 @@ import { ChatArea } from "@/components/game/ChatArea";
 import { VotingModal } from "@/components/game/VotingModal";
 import { CluePresentationOverlay } from "@/components/game/CluePresentationOverlay";
 import { StageTransitionOverlay } from "@/components/game/StageTransitionOverlay";
+import { PersonalScriptHint } from "@/components/game/PersonalScriptHint";
+import { usePersonalScriptRead } from "@/hooks/usePersonalScriptRead";
 import { PlayerScriptTooltip } from "@/components/game/PlayerScriptTooltip";
 import { DraftNotebook } from "@/components/game/DraftNotebook";
 import { SettingsModal } from "@/components/SettingsModal";
@@ -44,9 +46,8 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
     nonce: number;
   } | null>(null);
   const mentionNonceRef = useRef(0);
-  const [scriptOpened, setScriptOpened] = useState(
-    () => localStorage.getItem(`script_opened_${sessionId}`) === "true",
-  );
+  const { read: scriptOpened } = usePersonalScriptRead(sessionId);
+  const scriptHintRef = useRef<HTMLDivElement>(null);
 
 
   const {
@@ -172,16 +173,7 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
     [pauseContextKey]
   );
 
-  const handleScriptOpenChange = useCallback(
-    (open: boolean) => {
-      setScriptOpen(open);
-      if (!open && sessionId) {
-        const key = `script_opened_${sessionId}`;
-        setScriptOpened(localStorage.getItem(key) === "true");
-      }
-    },
-    [sessionId]
-  );
+  const handleScriptOpenChange = setScriptOpen;
 
   // Initialize game
   useEffect(() => {
@@ -199,6 +191,30 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
   const hasVoteResults = !!voteResults && Object.keys(voteResults).length > 0;
   const showVotingModal =
     stage === "vote" && !hasVoteResults && votingDismissedRound !== voteRoundKey;
+
+  const humanCharacter = characters.find(character => character.character_id === humanCharacterId);
+  const showScriptHint = !!humanCharacterScript && !scriptOpened && stage !== "loading" && stage !== "completed"
+    && !showStageTransition && !showScriptModal && !showSettings && !showSpeechReminder
+    && !showVotingModal && !draftOpen && !scriptOpen;
+  const personalScriptHint = showScriptHint ? <PersonalScriptHint
+    name={humanCharacter?.name} summary={humanCharacter?.character_script_summary}
+    content={humanCharacterScript} onOpen={() => setScriptOpen(true)} /> : null;
+
+  useEffect(() => {
+    const hint = scriptHintRef.current;
+    const composer = document.querySelector('[data-game-composer]');
+    if (!showScriptHint || !hint || !composer) return;
+    // A wider hint may extend into the chat column. Keep it above every input
+    // control, including when the composer grows while the player is typing.
+    const position = () => {
+      hint.style.bottom = `${Math.max(96, window.innerHeight - composer.getBoundingClientRect().top + 16)}px`;
+    };
+    const observer = new ResizeObserver(position);
+    observer.observe(composer);
+    window.addEventListener('resize', position);
+    position();
+    return () => { observer.disconnect(); window.removeEventListener('resize', position); };
+  }, [showScriptHint]);
 
   // Show completion modal when game ends (removed - review stage has end button)
   useEffect(() => {
@@ -441,6 +457,8 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
             onHumanSpeechCompleted={() => handlePauseAutoSpeakChange(false)}
           />
 
+          {personalScriptHint && <div className="personal-script-hint-mobile lg:hidden shrink-0 px-4 pb-2">{personalScriptHint}</div>}
+
           {/* Mobile Bottom Toolbar - flow-based, NOT fixed */}
           <div className="lg:hidden shrink-0 border-t border-border/30 bg-background/90 backdrop-blur-md px-2 py-1.5">
             <div className="flex items-center gap-2">
@@ -505,6 +523,7 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
                     onClick={() => setScriptOpen(true)}
                     className="relative w-8 h-8 rounded-full bg-primary/80 hover:bg-primary text-primary-foreground
                                flex items-center justify-center transition-colors"
+                    data-personal-script-trigger
                     title="查看我的剧本"
                     aria-label="查看我的剧本"
                   >
@@ -586,6 +605,8 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
           <SettingsModal onClose={() => setShowSettings(false)} mode="game" />
         )}
       </AnimatePresence>
+
+      {personalScriptHint && <div ref={scriptHintRef} className="personal-script-hint-desktop hidden lg:block fixed bottom-44 right-6 z-40 w-[clamp(20rem,24vw,30rem)]">{personalScriptHint}</div>}
 
       {/* Player Script Tooltip */}
       <PlayerScriptTooltip

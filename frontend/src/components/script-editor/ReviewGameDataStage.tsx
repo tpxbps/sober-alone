@@ -23,11 +23,12 @@ const chapters = [
 const control = 'rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-primary';
 
 export function ReviewGameDataStage({ editedGameData: draft, setEditedGameData, isLoading, currentStep,
-  onConfirmGameData, interruptInfo, error, scriptTitle, workflowState }: {
+  onConfirmGameData, interruptInfo, error, scriptTitle, workflowState, recovery }: {
   editedGameData: GameDataSections | null; setEditedGameData: (value: GameDataSections | null) => void;
   isLoading: boolean; currentStep: string; onConfirmGameData: (value: GameDataSections) => Promise<void>;
   interruptInfo: EditorInterruptInfo; error: string | null; scriptTitle: string;
   workflowState: EditorWorkflowState | null;
+  recovery?: { onRetry: () => Promise<void> };
 }) {
   const [view, setView] = useTextDraft('game-data-navigation', '', { section: 'public', role: '', round: 1, reportOpen: false });
   const [preview, setPreview] = useState(false);
@@ -115,7 +116,7 @@ export function ReviewGameDataStage({ editedGameData: draft, setEditedGameData, 
         </select>
       </label>
       <div ref={scroller} className="min-h-0 min-w-0 flex-1 overflow-y-auto p-4 sm:p-6">
-        <div className="mx-auto max-w-4xl space-y-5">
+        <fieldset disabled={!!recovery} className="mx-auto min-w-0 max-w-4xl space-y-5">
           <div className="mb-6"><p className="text-xs tracking-widest text-primary">{String(chapters.indexOf(section) + 1).padStart(2, '0')} / 05</p><h3 className="mt-2 text-xl font-semibold">{section.label}</h3><p className="mt-1 text-sm text-muted-foreground">{section.note}</p></div>
           {view.section === 'public' && <>
             <div className="grid gap-4 sm:grid-cols-[2fr_1fr]">
@@ -169,16 +170,18 @@ export function ReviewGameDataStage({ editedGameData: draft, setEditedGameData, 
             <WorkshopField label="揭晓文案" value={data.truth_reveal} onChange={value => field('truth_reveal', value)} audience="结局公布" />
             <EndingEditor data={data} onChange={value => field('ending_config', value)} />
           </>}
-        </div>
+        </fieldset>
       </div>
     </fieldset>
     <footer className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-border/50 bg-background px-4 py-3">
+      {recovery ? <><p className="text-xs text-muted-foreground">当前展示已提交的数据，可切换章节查看。</p><button onClick={() => void recovery.onRetry()} className="rounded-lg bg-primary px-5 py-2.5 text-sm text-primary-foreground">重试当前步骤</button></> : <>
       <button disabled={isLoading} onClick={() => void check()} className="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2.5 text-sm disabled:opacity-40"><FileSearch className="size-4" />{report || workflowState?.quality_check_attempted ? '质检报告' : '质量检查（可选）'}</button>
       <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] gap-2"><RefineButton step="review_game_data" gameData={submissionData(data)} disabled={isLoading} />
-        <button disabled={isLoading} onClick={() => void onConfirmGameData(submissionData(data))} className="rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground disabled:opacity-40">{isLoading ? currentStep === 'check_game_quality' ? '正在检查…' : '正在进行合规评估…' : '下一步 · 生成资源'}</button>
+        <button disabled={isLoading} aria-busy={isLoading} onClick={() => void onConfirmGameData(submissionData(data))} className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground disabled:opacity-40">{isLoading && <span aria-hidden="true" className="h-4 w-4 animate-spin motion-reduce:animate-none rounded-full border-2 border-current border-t-transparent" />}{isLoading ? currentStep === 'check_game_quality' ? '正在检查…' : '正在提交…' : '下一步 · 生成资源'}</button>
       </div>
+      </>}
     </footer>
-    <Dialog open={view.reportOpen && !isLoading} onOpenChange={value => setView({ ...view, reportOpen: value })}><DialogContent className="sm:max-w-2xl" onCloseAutoFocus={event => { if (target) event.preventDefault(); }}>
+    <Dialog open={view.reportOpen && !isLoading && !recovery} onOpenChange={value => setView({ ...view, reportOpen: value })}><DialogContent className="sm:max-w-2xl" onCloseAutoFocus={event => { if (target) event.preventDefault(); }}>
       <DialogTitle>游戏数据质检报告</DialogTitle><DialogDescription>供创作参考；无论是否修改，均可继续下一步。本流程仅检查一次。</DialogDescription>
       {reportChanged && <p role="status" className="rounded-lg bg-amber-500/10 p-3 text-sm">检查后内容已有变化。这是检查时版本的报告，不代表当前草稿。</p>}
       {!report || report.status === 'incomplete' ? <p className="text-sm text-muted-foreground">{report?.error || '本次检查未完成，仍可继续创作。'}</p> : report.findings.length === 0 ? <p className="rounded-lg bg-primary/5 p-4 text-sm">本次未发现可证实的关键错误。</p> :

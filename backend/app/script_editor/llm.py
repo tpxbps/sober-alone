@@ -65,7 +65,14 @@ def validation_detail(error: Exception) -> str:
 
 
 async def invoke_structured(
-    base_llm, schema, system, material, *, validate: Callable | None = None, timeout=240
+    base_llm,
+    schema,
+    system,
+    material,
+    *,
+    validate: Callable | None = None,
+    timeout=240,
+    max_attempts=2,
 ):
     messages = [
         {"role": "system", "content": system},
@@ -80,7 +87,7 @@ async def invoke_structured(
     from app.script_editor.services.execution import observe_model
 
     runtime = current_runtime.get()
-    for attempt in range(2):
+    for attempt in range(max_attempts):
         raw = None
         previous = ""
         if runtime:
@@ -140,7 +147,7 @@ async def invoke_structured(
                 type(error).__name__,
                 validation_detail(error) if isinstance(error, ValueError) else "transport",
             )
-            if attempt:
+            if attempt + 1 == max_attempts:
                 raise ValueError(f"本轮生成未完成：{validation_detail(error)}") from error
             if isinstance(error, (ValueError, TypeError)):
                 messages.append(

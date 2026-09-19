@@ -128,7 +128,12 @@ def review_failure(state):
     )
     if response.get("action") not in ("retry_failed", "regenerate"):
         raise ValueError("失败任务只能重试")
-    return {"error_message": "", "_review_action": "retry_failed"}
+    return {
+        "error_message": "",
+        "workflow_error": None,
+        "conversion_retry_task": response.get("conversion_task_id"),
+        "_review_action": "retry_failed",
+    }
 
 
 # === 构建图 ===

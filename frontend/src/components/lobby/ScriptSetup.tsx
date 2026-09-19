@@ -30,7 +30,7 @@ export function ScriptSetup({ script, quiet, onBack, onStartGame, onBusyChange }
           <div className="setup-rating"><ScriptRating script={script} context="detail" disabled={busy} /></div>
           </div>
           <div className="setup-cover" aria-hidden="true">
-            <div className="setup-portal"><StoryCover className="setup-cover-veil" src={script.cover_image_url} /><StoryCover className="setup-cover-art" src={script.cover_image_url} loading="eager" /></div>
+            <div className="setup-portal"><StoryCover className="setup-cover-veil" src={script.cover_image_url} variants={script.cover_image_variants} sizes="(max-width: 639px) 90vw, 520px" /><StoryCover className="setup-cover-art" src={script.cover_image_url} variants={script.cover_image_variants} sizes="(max-width: 639px) 90vw, 520px" loading="eager" /></div>
           </div>
         </div>
         <div className="setup-casting">

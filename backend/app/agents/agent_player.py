@@ -30,7 +30,7 @@ from app.agents.game_model_paths import (
     bind_reaction_output,
     build_role_agent,
     create_game_model,
-    visible_speech_text,
+    visible_role_speech_text,
 )
 from app.agents.reaction import (
     REACTION_SLOW_LOG_SECONDS,
@@ -499,7 +499,7 @@ submit_final_vote(suspect_name="角色全名", reasoning="1-2句投票理由")
                     token, metadata = data
                     node = metadata.get("langgraph_node", "unknown") or "unknown"
 
-                    for text_content in visible_speech_text(token):
+                    for text_content in visible_role_speech_text(token, metadata):
                         yield StreamToken(text=text_content, node=node)
 
                 elif stream_mode == "custom":

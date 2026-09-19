@@ -6,6 +6,8 @@ import { AudioSpeedButton } from "@/components/ui/AudioSpeedButton";
 import { Markdown } from "@/components/ui/Markdown";
 import { audioPlayerManager } from "@/lib/audioPlayerManager";
 import { systemApi } from "@/lib/api";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { usePersonalScriptRead } from "@/hooks/usePersonalScriptRead";
 import { ttsCapability } from "@/lib/capabilityAdapter";
 
 interface PlayerScriptTooltipProps {
@@ -66,9 +68,7 @@ export const PlayerScriptTooltip = memo(function PlayerScriptTooltip({
   onOpenChange,
 }: PlayerScriptTooltipProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [hasOpenedBefore, setHasOpenedBefore] = useState(
-    () => !!sessionId && localStorage.getItem(`script_opened_${sessionId}`) === "true",
-  );
+  const { read: hasOpenedBefore, markRead } = usePersonalScriptRead(sessionId);
   const [showQuickOverview, setShowQuickOverview] = useState(false);
   const [speakerState, setSpeakerState] = useState<SpeakerState>("off");
   const [audioCapability, setAudioCapability] = useState({
@@ -83,14 +83,13 @@ export const PlayerScriptTooltip = memo(function PlayerScriptTooltip({
   const unsubRef = useRef<(() => void) | null>(null);
 
   const handleOpenScript = () => {
-    setIsOpen(true);
-    if (sessionId) {
-      const key = `script_opened_${sessionId}`;
-      localStorage.setItem(key, "true");
-      setHasOpenedBefore(true);
-    }
+    if (onOpenChange) onOpenChange(true);
+    else setIsOpen(true);
   };
-  const visible = isOpen || !!open;
+  const visible = open ?? isOpen;
+  useEffect(() => {
+    if (visible && scriptContent) markRead();
+  }, [visible, scriptContent, markRead]);
 
   useEffect(() => {
     systemApi
@@ -191,7 +190,7 @@ export const PlayerScriptTooltip = memo(function PlayerScriptTooltip({
 
   if (!scriptContent) return null;
 
-  const showGlow = !hasOpenedBefore && !isOpen;
+  const unread = !hasOpenedBefore;
 
   const showProgressBar =
     speakerState === "playing" || (speakerState === "off" && progress > 0);
@@ -200,61 +199,42 @@ export const PlayerScriptTooltip = memo(function PlayerScriptTooltip({
     <>
       {/* Floating button */}
       <motion.button
+        data-personal-script-trigger
         onClick={handleOpenScript}
         className={`fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full
                    bg-primary/90 hover:bg-primary text-primary-foreground
                    shadow-lg hidden lg:flex flex-col items-center justify-center gap-1
-                   transition-colors ${showGlow ? "breathing-prominent" : ""}`}
+                   transition-colors`}
         whileHover={{ scale: 1.1 }}
         whileTap={{ scale: 0.95 }}
         title="查看我的剧本"
         aria-label="查看我的剧本"
-        style={
-          showGlow
-            ? {
-                boxShadow:
-                  "0 0 20px rgba(var(--primary-rgb, 59, 130, 246), 0.5), 0 0 40px rgba(var(--primary-rgb, 59, 130, 246), 0.3)",
-              }
-            : undefined
-        }
+
       >
         <BookOpen className="w-6 h-6" />
-        {showGlow && (
-          <span className="absolute -top-1 -right-1 px-1.5 py-0.5 rounded-full bg-accent text-[10px] font-bold text-accent-foreground animate-pulse">
+        {unread && (
+          <span className="absolute -top-1 -right-1 px-1.5 py-0.5 rounded-full bg-accent text-[10px] font-bold text-accent-foreground">
             新
           </span>
         )}
       </motion.button>
 
-      {/* Modal */}
-      <AnimatePresence>
-        {visible && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-            onClick={() => {
-              handleClose();
-            }}
-          >
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              role="dialog"
-              aria-modal="true"
-              aria-label={characterName ? `${characterName}的剧本` : "我的剧本"}
-              className="bg-card rounded-xl shadow-2xl max-w-2xl w-full max-h-[80dvh] flex flex-col overflow-hidden"
-              onClick={(e) => e.stopPropagation()}
-            >
+      <Dialog open={visible} onOpenChange={next => { if (next) handleOpenScript(); else handleClose(); }}>
+        <DialogContent showCloseButton={false}
+          className="flex max-h-[80dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl"
+          onCloseAutoFocus={event => {
+            const trigger = [...document.querySelectorAll<HTMLElement>("[data-personal-script-trigger]")]
+              .find(element => element.getClientRects().length > 0);
+            if (trigger) { event.preventDefault(); trigger.focus({ preventScroll: true }); }
+          }}>
+          <DialogDescription className="sr-only">仅属于当前角色的经历与已知信息</DialogDescription>
               {/* Header */}
               <div className="flex shrink-0 items-center justify-between p-4 border-b border-border/50">
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
                   <BookOpen className="w-5 h-5 text-primary" />
-                  <h3 className="text-lg font-bold">
+                  <DialogTitle className="text-lg font-bold">
                     {characterName ? `${characterName}的剧本` : "我的剧本"}
-                  </h3>
+                  </DialogTitle>
                   {scriptSummary?.trim() && (
                     <button
                       type="button"
@@ -346,10 +326,8 @@ export const PlayerScriptTooltip = memo(function PlayerScriptTooltip({
               <div className="p-4 overflow-y-auto flex-1 min-h-0 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
                 <StableScriptContent content={scriptContent} />
               </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+        </DialogContent>
+      </Dialog>
     </>
   );
 });

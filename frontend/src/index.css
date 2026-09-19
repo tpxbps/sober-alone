@@ -452,3 +452,22 @@ html {
 
 /* Readable emphasis in the player's private script and quick overview. */
 .player-script-reading strong { color: #f2dfb9; font-weight: 700; opacity: 1; }
+
+/* Entry transitions temporarily hide the first-read hint without dismissing it. */
+.app-shell:has(.game-entry-overlay) [data-personal-script-hint] { visibility: hidden; }
+
+.personal-script-hint { animation: script-hint-breathe 4s ease-in-out infinite; }
+.personal-script-hint:is(:hover, :focus-within) { animation-play-state: paused; }
+@keyframes script-hint-breathe {
+  0%, 100% { box-shadow: 0 8px 30px #0005, 0 0 0 0 #d8bd7a00; border-color: #d8bd7a66; }
+  50% { box-shadow: 0 8px 36px #0006, 0 0 22px 3px #d8bd7a30; border-color: #e6ca8cb3; }
+}
+@media (min-width: 1024px) {
+  .personal-script-hint-desktop .personal-script-hint { padding: clamp(20px, 1.4vw, 28px); }
+  .personal-script-hint-desktop .font-serif { font-size: clamp(18px, 1.1vw, 22px); }
+  .personal-script-hint-desktop .line-clamp-3 { font-size: clamp(14px, .85vw, 16px); line-height: 1.8; }
+  .personal-script-hint-desktop button { min-height: 44px; font-size: 15px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .personal-script-hint { animation: none; }
+}

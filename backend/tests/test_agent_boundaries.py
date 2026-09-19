@@ -254,6 +254,13 @@ async def test_visible_speech_remains_incremental_even_when_tool_order_is_imperf
         async def astream(self, *_args, **_kwargs):
             yield (
                 "messages",
+                (
+                    AIMessageChunk(content="SESSION INTENT: internal secret"),
+                    {"langgraph_node": "SummarizationMiddleware.before_model"},
+                ),
+            )
+            yield (
+                "messages",
                 (AIMessageChunk(content="先说半句"), {"langgraph_node": "model"}),
             )
             await continue_stream.wait()
@@ -307,6 +314,58 @@ async def test_visible_speech_remains_incremental_even_when_tool_order_is_imperf
         "先说半句",
         "**完整结论**",
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["cancel", "account_recovery"])
+async def test_internal_stream_isolation_preserves_abort_and_context_cleanup(monkeypatch, failure):
+    from app.agents import agent_player as module
+    from app.core.inference import InferenceRecoveryError
+
+    waiting, closed = asyncio.Event(), asyncio.Event()
+    cleaned = []
+
+    class FakeAgent:
+        async def astream(self, *_args, **_kwargs):
+            try:
+                yield (
+                    "messages",
+                    (
+                        AIMessageChunk(content="内部摘要"),
+                        {"langgraph_node": "SummarizationMiddleware.before_model"},
+                    ),
+                )
+                waiting.set()
+                if failure == "account_recovery":
+                    raise InferenceRecoveryError("top_up_balance")
+                await asyncio.Event().wait()
+            finally:
+                closed.set()
+
+    async def no_knowledge(_state):
+        return ""
+
+    monkeypatch.setattr(module, "clear_db_session", lambda: cleaned.append(True))
+    player = object.__new__(AgentPlayer)
+    player._agent = FakeAgent()
+    player.thread_id = "test-thread"
+    player.session_id = "test-session"
+    player.script_id = "test-script"
+    player.character_id = "test-role"
+    player.character_name = "林越"
+    player._build_knowledge_context = no_knowledge
+    stream = player.speak({}, "free_discussion")
+    task = asyncio.create_task(anext(stream))
+    await asyncio.wait_for(waiting.wait(), timeout=1)
+    if failure == "cancel":
+        task.cancel()
+        expected = asyncio.CancelledError
+    else:
+        expected = InferenceRecoveryError
+    with pytest.raises(expected):
+        await task
+    assert closed.is_set()
+    assert cleaned == [True]
 
 
 def test_reaction_preserves_provider_string_array_facts():

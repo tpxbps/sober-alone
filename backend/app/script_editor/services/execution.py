@@ -11,7 +11,7 @@ from langchain_core.runnables import RunnableConfig
 
 from app.script_editor.state import ScriptGenState
 
-PROMPT_VERSION = "workshop-v4.2"
+PROMPT_VERSION = "workshop-v4.3"
 GENERATION_REVIEW = {
     "generate_outline": "review_outline",
     "generate_first_draft": "review_first_draft",
@@ -113,7 +113,10 @@ def observable_node(name, fn):
 
         runtime = current_runtime.get()
         model_start = len(runtime.model_responses) if runtime else 0
-        await report_stage("generate_outline" if name.startswith("outline_") else name)
+        reported_step = "generate_outline" if name.startswith("outline_") else name
+        if name == "review_failure":
+            reported_step = state.get("retry_step") or state.get("current_step", name)
+        await report_stage(reported_step)
         result = (
             fn(state, config=config) if "config" in inspect.signature(fn).parameters else fn(state)
         )
@@ -121,6 +124,16 @@ def observable_node(name, fn):
             result = await result
         if name == "save_to_database" and result.get("error_message"):
             result["retry_step"] = name
+        if result.get("error_message") and not result.get("workflow_error"):
+            result["workflow_error"] = {
+                "scope": "stage",
+                "code": f"{name}_incomplete",
+                "message": "合规评估暂未完成，已保留游戏数据，请重试。"
+                if name == "safety_check"
+                else result["error_message"],
+                "retryable": True,
+                "retry_step": result.get("retry_step") or name,
+            }
         if (
             name in GENERATION_REVIEW
             or name in {"outline_director", "outline_apply", "outline_finalize"}

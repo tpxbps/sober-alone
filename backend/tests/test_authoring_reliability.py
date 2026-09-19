@@ -16,7 +16,6 @@ from app.script_editor.conversion.contracts import (
 )
 from app.script_editor.editing import normalize_game_data
 from app.script_editor.nodes.safety_check import (
-    GENERIC_ERROR,
     SafetyBatchResult,
     review_chunks,
     safety_approved,
@@ -192,7 +191,8 @@ async def test_conversion_retries_only_failed_tasks_and_preserves_successes(monk
     state["num_clue_rounds"] = 1
     state["final_draft"] = "终稿"
     first = await service.convert_to_game_data(deepcopy(state))
-    assert first["error_message"] == GENERIC_ERROR and counts["scenes"] == 1
+    assert first["workflow_error"]["scope"] == "task" and counts["scenes"] == 1
+    assert "未知错误" not in first["error_message"]
     assert "game_data_sections" not in first
     from app.script_editor.outline.runtime import current_runtime
 

@@ -54,6 +54,17 @@ def contains_unknown_evidence(quote: str) -> bool:
         # An unresolved question discloses no answer: "不知道谁才是真凶".
         if re.match(r"(?:究竟|到底)?(?:是)?(?:谁|什么|怎么|为何|为什么|是否|有无|哪)", tail):
             continue
+        if re.match(r"(?:这|那|它)?(?:是不是|是否)", tail):
+            continue
+        if re.match(r"(?:这|那|它)?(?:是|该|要).+还是", tail):
+            # Alternatives express uncertainty, not a negated assertion of a secret.
+            continue
+        prefix = quote[: match.start()].strip(" ，,：:")
+        if re.search(
+            r"(?:是谁|是什么|在哪里|为什么|是否|哪一[个位])[^。！？]*[，,](?:她|他|我|你|他们|我们)?$",
+            prefix,
+        ):
+            continue
         return True
     return False
 
@@ -95,10 +106,12 @@ def source_excerpt(quote: str, source: str) -> str | None:
     return source[positions[start] : positions[start + len(needle) - 1] + 1]
 
 
-async def invoke(base_llm, schema, system: str, material, *, validate=None):
+async def invoke(base_llm, schema, system: str, material, *, validate=None, max_attempts=2):
     from app.script_editor.llm import invoke_structured
 
-    return await invoke_structured(base_llm, schema, system, material, validate=validate)
+    return await invoke_structured(
+        base_llm, schema, system, material, validate=validate, max_attempts=max_attempts
+    )
 
 
 def validate_plan(
@@ -152,7 +165,16 @@ class FactBatch(BaseModel):
     facts: list[Fact] = Field(default_factory=list)
 
 
-DISCLOSURE_VERSION = "disclosure-batches-v5"
+class FactRepair(BaseModel):
+    index: int
+    facts: list[Fact] = Field(min_length=1)
+
+
+class FactRepairs(BaseModel):
+    repairs: list[FactRepair]
+
+
+DISCLOSURE_VERSION = "disclosure-batches-v6-local-repair"
 
 
 def source_batches(source: str) -> tuple[dict[int, str], list[list[int]]]:
@@ -164,7 +186,7 @@ def source_batches(source: str) -> tuple[dict[int, str], list[list[int]]]:
     sources = dict(enumerate(pieces, 1))
     batches, current, size = [], [], 0
     for key, value in sources.items():
-        if current and (len(current) == 24 or size + len(value) > 3000):
+        if current and (len(current) == 96 or size + len(value) > 3000):
             batches.append(current)
             current, size = [], 0
         current.append(key)
@@ -207,6 +229,8 @@ async def extract_plan(base_llm, state: dict) -> dict:
     cache = {
         "fingerprint": fingerprint,
         "batches": dict(previous.get("batches", {})),
+        "partials": dict(previous.get("partials", {})),
+        "splits": dict(previous.get("splits", {})),
         "cast": previous.get("cast"),
         "coverage_feedback": previous.get("coverage_feedback", ""),
     }
@@ -260,7 +284,7 @@ async def extract_plan(base_llm, state: dict) -> dict:
         "同句本人行动需单独截取原文保留。禁止编造固定疑问。只返回当前批次facts，不重复角色名单。"
     )
 
-    async def extract(ids):
+    async def extract(ids, depth=0):
         key = f"{ids[0]}-{ids[-1]}"
         task_id = f"facts_{key}"
         add_disclosure_task(script_id, task_id, f"整理事实与披露范围（片段 {key}）")
@@ -310,34 +334,13 @@ async def extract_plan(base_llm, state: dict) -> dict:
             validate_batch(batch)
             _update_convert_task(script_id, task_id, "complete")
             return batch.facts
-        _update_convert_task(script_id, task_id, "running")
-        try:
-            async with semaphore:
-                batch = await invoke(
-                    base_llm,
-                    FactBatch,
-                    system,
-                    {
-                        "全稿": source,
-                        "本批片段": {i: sources[i] for i in ids},
-                        "角色与开局": cast_material,
-                        "线索轮次": rounds,
-                        "作者改进意见": feedback,
-                        "需修复的遗漏": cache["coverage_feedback"],
-                    },
-                    validate=validate_batch,
-                )
-            cache["batches"][key] = batch.model_dump()
-            await persist()
-            _update_convert_task(script_id, task_id, "complete")
-            return batch.facts
-        except StructuredOutputTruncated:
-            if len(ids) == 1:
-                _update_convert_task(script_id, task_id, "failed")
-                raise
+
+        async def split_once():
             middle = len(ids) // 2
             children = await asyncio.gather(
-                extract(ids[:middle]), extract(ids[middle:]), return_exceptions=True
+                extract(ids[:middle], depth + 1),
+                extract(ids[middle:], depth + 1),
+                return_exceptions=True,
             )
             for child in children:
                 if isinstance(child, BaseException):
@@ -348,6 +351,123 @@ async def extract_plan(base_llm, state: dict) -> dict:
             await persist()
             _update_convert_task(script_id, task_id, "complete")
             return left + right
+
+        if cache["splits"].get(key):
+            return await split_once()
+        _update_convert_task(script_id, task_id, "running")
+        try:
+            async with semaphore:
+                material = {
+                    "全稿": source,
+                    "本批片段": {i: sources[i] for i in ids},
+                    "角色与开局": cast_material,
+                    "线索轮次": rounds,
+                    "作者改进意见": feedback,
+                    "需修复的遗漏": cache["coverage_feedback"],
+                }
+                partial = cache["partials"].get(key)
+                calls_left = 2
+                if partial:
+                    batch = FactBatch.model_validate(partial)
+                else:
+                    # Own this task's two-call budget: no nested schema retries.
+                    try:
+                        calls_left -= 1
+                        batch = await invoke(base_llm, FactBatch, system, material, max_attempts=1)
+                    except StructuredOutputTruncated:
+                        raise
+                    except ValueError as error:
+                        calls_left -= 1
+                        batch = await invoke(
+                            base_llm,
+                            FactBatch,
+                            system,
+                            {**material, "格式修复": str(error)[:1200]},
+                            max_attempts=1,
+                        )
+                invalid = []
+                # Normalize literal duplicates without altering knowledge. Conflicting
+                # scopes for the same quotation need local semantic repair instead.
+                unique = {}
+                for fact in batch.facts:
+                    unique.setdefault(json.dumps(fact.model_dump(), sort_keys=True), fact)
+                batch.facts = list(unique.values())
+                for index, fact in enumerate(batch.facts):
+                    try:
+                        validate_batch(FactBatch(facts=[fact]))
+                    except ValueError as error:
+                        invalid.append(
+                            {"index": index, "fact": fact.model_dump(), "error": str(error)}
+                        )
+                by_id = {}
+                for index, fact in enumerate(batch.facts):
+                    by_id.setdefault(fact.id, []).append(index)
+                already_invalid = {item["index"] for item in invalid}
+                for indices in by_id.values():
+                    if len(indices) < 2:
+                        continue
+                    for index in indices:
+                        if index not in already_invalid:
+                            invalid.append(
+                                {
+                                    "index": index,
+                                    "fact": batch.facts[index].model_dump(),
+                                    "error": "同一原文被赋予了不同知情范围；请截取各自亲历的连续原文，不能把他人行为合并进本人材料",
+                                }
+                            )
+                cache["partials"][key] = batch.model_dump()
+                await persist()
+                if invalid:
+                    if not calls_left:
+                        raise ValueError("部分事实的信息范围尚未确认，请继续修复当前任务")
+                    expected = {item["index"] for item in invalid}
+
+                    def validate_repairs(value):
+                        if (
+                            len(value.repairs) != len(expected)
+                            or {p.index for p in value.repairs} != expected
+                        ):
+                            raise ValueError("只返回全部待修复编号，每个编号一次")
+                        for patch in value.repairs:
+                            original_id = batch.facts[patch.index].source_id
+                            if original_id in ids and any(
+                                f.source_id != original_id for f in patch.facts
+                            ):
+                                raise ValueError("修复必须保留原来的来源片段")
+                            validate_batch(FactBatch(facts=patch.facts))
+
+                    repaired = await invoke(
+                        base_llm,
+                        FactRepairs,
+                        system + "只修复指定编号。允许把混合句拆成多条连续原文，必须保留本人行为；"
+                        "不得整条删除或通过扩大知情范围规避问题。不要返回已通过的事实。"
+                        "修复模式下，每个编号的facts至少一条：若整条仅为不可知秘密或作者边界说明，"
+                        "保留原文并设known_by为空、release=reveal；若有本人行动则另行截取保留。",
+                        {**material, "待修复事实": invalid},
+                        validate=validate_repairs,
+                        max_attempts=1,
+                    )
+                    patches = {p.index: p.facts for p in repaired.repairs}
+                    batch = FactBatch(
+                        facts=[
+                            f for i, fact in enumerate(batch.facts) for f in patches.get(i, [fact])
+                        ]
+                    )
+                # Identical citations are checked together, never silently dropped.
+                validate_batch(batch)
+            cache["batches"][key] = batch.model_dump()
+            cache["partials"].pop(key, None)
+            await persist()
+            _update_convert_task(script_id, task_id, "complete")
+            return batch.facts
+        except StructuredOutputTruncated:
+            # A truncated repair must retain validated facts, not regenerate them.
+            if key in cache["partials"] or len(ids) == 1 or depth >= 1:
+                _update_convert_task(script_id, task_id, "failed")
+                raise
+            cache["splits"][key] = True
+            await persist()
+            return await split_once()
         except Exception:
             _update_convert_task(script_id, task_id, "failed")
             raise
@@ -369,6 +489,7 @@ async def extract_plan(base_llm, state: dict) -> dict:
             start, end = map(int, key.split("-"))
             if not affected or any(start <= i <= end for i in affected):
                 del cache["batches"][key]
+                cache["partials"].pop(key, None)
         await persist()
         raise ValueError(cache["coverage_feedback"])
     plan = DisclosurePlan(**cast_material, facts=facts)

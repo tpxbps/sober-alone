@@ -42,7 +42,7 @@ test('历史自我介绍不会在公开线索后获得引用权限，个人剧�
   await expect(page.locator('[data-record-id="3"]').getByTitle('TTS 未启用')).toBeVisible();
   expect(speechRequests).toBe(0);
   await page.screenshot({ path: info.outputPath('history-scope.png') });
-  await page.getByRole('button', { name: /查看.*剧本|我的剧本/ }).focus();
+  await page.getByRole('button', { name: '查看我的剧本', exact: true }).focus();
   await page.keyboard.press('Enter');
   const strong = page.locator('[data-player-script-content] strong').first();
   await expect(strong).toHaveCSS('color', 'rgb(242, 223, 185)');

@@ -133,7 +133,7 @@ export const ChatInputArea = memo(function ChatInputArea({
       humanRemainingSpeechCount <= 0);
 
   return (
-    <div className="border-t border-border/50 p-4 bg-card/30">
+    <div data-game-composer className="border-t border-border/50 p-4 bg-card/30">
       <div className="max-w-3xl mx-auto">
         {/* Stage is review - show results and end game button */}
         {stage === "review" ? (

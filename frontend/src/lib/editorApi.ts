@@ -74,6 +74,7 @@ export const editorApi = {
       request_id?: string;
       expected_checkpoint_id?: string;
       asset_task_id?: string;
+      conversion_task_id?: string;
       content?: string;
       characters?: unknown[];
       character_scripts?: Record<string, string>;

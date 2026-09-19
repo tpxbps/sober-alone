@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { editorApi } from '@/lib/editorApi';
 import { observeEditorOperation, ObservationCancelled } from '@/lib/editorProgress';
+import { OperationOrder } from '@/lib/operationOrder';
 import { applyOutlineDelta, applyOutlineSnapshot } from '@/lib/outlineStream';
 import type { OutlineProgress, OutlineDelta } from '@/types/outline';
 import type { EditorInterruptInfo, EditorWorkflowState, AssetProgress, CheckpointInfo, EditorOperationResponse, StartWorkflowResponse, ResumeWorkflowResponse, SubmittedDraft, GameDataSections } from '@/types/editor';
@@ -152,32 +153,33 @@ async function pollDelay(epoch: number): Promise<void> {
   if (epoch !== _operationPollEpoch) throw new OperationPollCancelled();
 }
 
-let activeObservation: { operation: string; promise: Promise<EditorOperationResponse>; close: () => void } | null = null;
+let activeObservation: { operation: string; epoch: number; promise: Promise<EditorOperationResponse>; close: () => void } | null = null;
 
 async function waitForOperation(
   threadId: string, operationId: string, epoch: number,
   onPending?: (result: EditorOperationResponse) => Promise<void>,
 ): Promise<EditorOperationResponse & (StartWorkflowResponse | ResumeWorkflowResponse)> {
   if (epoch !== _operationPollEpoch) throw new OperationPollCancelled();
-  if (activeObservation?.operation !== operationId) {
+  if (activeObservation?.operation !== operationId || activeObservation.epoch !== epoch) {
     activeObservation?.close();
     const store = useEditorStore;
     const accept = (data: { operation_id?: string }) =>
-      store.getState().threadId === threadId && (!data.operation_id || data.operation_id === operationId);
-    const sequences: Record<string, number> = {};
+      epoch === _operationPollEpoch && store.getState().threadId === threadId &&
+      store.getState().operationId === operationId && (!data.operation_id || data.operation_id === operationId);
+    const order = new OperationOrder();
     const fresh = (key: string, data: { operation_id?: string; seq?: number } | null) => {
       if (!data || !accept(data)) return false;
-      if (data.seq !== undefined && data.seq <= (sequences[key] ?? -1)) return false;
-      if (data.seq !== undefined) sequences[key] = data.seq;
-      return true;
+      return order.accept(key, data.seq);
     };
     const observation = observeEditorOperation(threadId, operationId, {
       snapshot: result => {
         if (!accept(result)) return;
         if (result.outline_progress) store.setState({ outlineProgress: applyOutlineSnapshot(store.getState().outlineProgress, result.outline_progress) });
-        if (result.state) store.setState({ workflowState: result.state, checkpointId: result.checkpoint_id });
-        if (result.progress?.convert_progress) store.setState({ convertProgress: result.progress.convert_progress });
-        if (result.progress?.asset_progress) store.setState({ assetProgress: result.progress.asset_progress });
+        if (result.state && fresh('state', result)) store.setState({ workflowState: result.state, checkpointId: result.checkpoint_id });
+        if (fresh('convert', result.progress?.convert_progress || null)) store.setState({ convertProgress: result.progress!.convert_progress });
+        if (fresh('assets', result.progress?.asset_progress || null)) store.setState({ assetProgress: result.progress!.asset_progress });
+        const event = result.progress?.workflow;
+        if (event && fresh('workflow', event)) store.setState({ currentStep: event.current_step });
         if (['queued', 'running'].includes(result.operation_status)) void onPending?.(result);
       },
       convert: data => { if (fresh('convert', data)) store.setState({ convertProgress: data }); },
@@ -196,7 +198,7 @@ async function waitForOperation(
         if (fresh('workflow', event) && event.current_step) store.setState({ currentStep: event.current_step });
       },
     });
-    activeObservation = { operation: operationId, ...observation };
+    activeObservation = { operation: operationId, epoch, ...observation };
   }
   const result = await activeObservation.promise;
   if (epoch !== _operationPollEpoch) throw new OperationPollCancelled();
@@ -297,7 +299,7 @@ interface EditorState {
     ending_mode?: "single" | "multiple";
   }) => Promise<void>;
   startEditWorkflow: (scriptId: string) => Promise<void>;
-  resumeWorkflow: (action: string, content?: string, prompt?: string, gameDataSections?: unknown, humanReview?: string, selectedAssetIds?: string[], qualityReportId?: string, feedback?: string, assetTaskId?: string) => Promise<void>;
+  resumeWorkflow: (action: string, content?: string, prompt?: string, gameDataSections?: unknown, humanReview?: string, selectedAssetIds?: string[], qualityReportId?: string, feedback?: string, assetTaskId?: string, conversionTaskId?: string) => Promise<void>;
   fetchState: () => Promise<void>;
   restoreSession: () => Promise<boolean>;
   openProgressStream: () => void;
@@ -340,6 +342,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({ isStarting: true, outlineProgress: null, error: null, workflowState: null, interruptInfo: null, currentStep: "generate_outline" });
     try {
       const accepted = await editorApi.startWorkflow(params);
+      if (pollEpoch !== _operationPollEpoch) return;
 
       saveSession({
         threadId: accepted.thread_id,
@@ -365,7 +368,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         isStarting: false, operationId: undefined,
       });
     } catch (err: unknown) {
-      if (err instanceof OperationPollCancelled) return;
+      if (pollEpoch !== _operationPollEpoch || err instanceof OperationPollCancelled) return;
       const message = err instanceof Error ? err.message : '启动失败';
       if (err instanceof OperationFailed) {
         const failed = err.result;
@@ -385,6 +388,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({ isStarting: true, error: null });
     try {
       const accepted = await editorApi.startEditWorkflow(scriptId);
+      if (pollEpoch !== _operationPollEpoch) return;
       saveSession({
         threadId: accepted.thread_id,
         operationId: accepted.operation_id,
@@ -408,7 +412,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         isStarting: false, operationId: undefined,
       });
     } catch (err: unknown) {
-      if (err instanceof OperationPollCancelled) return;
+      if (pollEpoch !== _operationPollEpoch || err instanceof OperationPollCancelled) return;
       const message = err instanceof Error ? err.message : '打开编辑失败';
       if (err instanceof OperationFailed) {
         const failed = err.result;
@@ -423,7 +427,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }
   },
 
-  resumeWorkflow: async (action, content, prompt, gameDataSections, humanReview, selectedAssetIds, qualityReportId, feedback, assetTaskId) => {
+  resumeWorkflow: async (action, content, prompt, gameDataSections, humanReview, selectedAssetIds, qualityReportId, feedback, assetTaskId, conversionTaskId) => {
     const before = get();
     const { threadId, currentStep } = before;
     if (!threadId || before.isLoading) return;
@@ -431,16 +435,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const requestId = crypto.randomUUID();
     const submitted: SubmittedDraft = { step: before.interruptInfo?.step || currentStep, content,
       gameData: gameDataSections as GameDataSections | undefined, humanReview };
-    const optimisticStep = action === 'quality_check' ? 'check_game_quality' : action === 'retry_asset' ? 'generate_assets'
-      : action === 'confirm' ? OPTIMISTIC_STEP_MAP[currentStep] || currentStep : currentStep;
     const interruptInfo = before.interruptInfo ? { ...before.interruptInfo,
       ...(content !== undefined ? { generated_content: content } : {}),
       ...(gameDataSections ? { game_data_sections: gameDataSections as GameDataSections } : {}),
     } : null;
-    set({ isLoading: true, error: null, currentStep: optimisticStep, submitted, interruptInfo, operationId: requestId });
+    set({ isLoading: true, error: null, submitted, interruptInfo, operationId: requestId });
     const payload = { action, content, prompt, game_data_sections: gameDataSections,
       human_review: humanReview, selected_asset_ids: selectedAssetIds, quality_report_id: qualityReportId,
-      feedback, asset_task_id: assetTaskId, request_id: requestId, expected_checkpoint_id: before.checkpointId };
+      feedback, asset_task_id: assetTaskId, conversion_task_id: conversionTaskId, request_id: requestId, expected_checkpoint_id: before.checkpointId };
     try {
       let accepted;
       try { accepted = await editorApi.resume(threadId, payload); }
@@ -448,18 +450,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         if (operationErrorStatus(error) !== null) throw error;
         accepted = await editorApi.resume(threadId, payload);
       }
+      if (pollEpoch !== _operationPollEpoch || get().threadId !== threadId) return;
       set({ operationId: accepted.operation_id });
       saveSession({ threadId, operationId: accepted.operation_id, targetStep: accepted.target_step,
-        currentStep: optimisticStep, pendingKind: 'resume', submitted });
-      const result = await waitForOperation(threadId, accepted.operation_id, pollEpoch, async pending => {
-        if (get().threadId !== threadId) return;
-        const stage = pending.progress?.workflow?.current_step || pending.current_step;
-        if (stage) set({ currentStep: stage });
-        const progress = await loadProgressSnapshots(threadId);
-        if (get().threadId === threadId && get().operationId === accepted.operation_id) set(progress);
-      });
-      if (get().threadId !== threadId) return;
+        currentStep, pendingKind: 'resume', submitted });
+      const result = await waitForOperation(threadId, accepted.operation_id, pollEpoch);
+      if (get().threadId !== threadId || pollEpoch !== _operationPollEpoch) return;
       const progress = await loadProgressSnapshots(threadId);
+      if (get().threadId !== threadId || pollEpoch !== _operationPollEpoch) return;
       set({ currentStep: result.current_step, isComplete: result.is_complete && !hasIncompleteTasks(progress.assetProgress),
         workflowState: result.state, interruptInfo: result.interrupt, checkpointId: result.checkpoint_id,
         scriptId: result.state.script_id, scriptTitle: result.state.script_title || get().scriptTitle,
@@ -472,6 +470,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       if (err instanceof OperationPollCancelled) return;
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       const failed = err instanceof OperationFailed ? err.result : undefined;
+      if (pollEpoch !== _operationPollEpoch || get().threadId !== threadId) return;
       const step = failed?.current_step || submitted.step;
       set({ error: detail || (err instanceof Error ? err.message : '操作失败'), isLoading: false,
         ...(failed?.state ? { workflowState: failed.state, checkpointId: failed.checkpoint_id, interruptInfo: failed.interrupt ?? null } : {}),
@@ -483,18 +482,16 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   fetchState: async () => {
     const { threadId, operationId } = get();
+    const epoch = _operationPollEpoch;
     if (!threadId) return;
 
     try {
       const result = await editorApi.getState(threadId);
-      if (get().threadId !== threadId || get().operationId !== operationId) return;
+      if (epoch !== _operationPollEpoch || get().threadId !== threadId || get().operationId !== operationId) return;
       set({
         outlineProgress: result.outline_progress ? applyOutlineSnapshot(get().outlineProgress, result.outline_progress) : get().outlineProgress,
-        checkpointId: result.checkpoint_id,
-        currentStep: result.current_step,
-        isComplete: result.is_complete,
-        workflowState: result.state,
-        interruptInfo: result.interrupt,
+        ...(!operationId ? { currentStep: result.current_step, interruptInfo: result.interrupt,
+          checkpointId: result.checkpoint_id, isComplete: result.is_complete, workflowState: result.state } : {}),
         scriptTitle: result.state?.script_title || get().scriptTitle,
       });
     } catch {
@@ -519,6 +516,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
     try {
       const refreshProgress = async () => {
+        if (pollEpoch !== _operationPollEpoch || get().threadId !== session.threadId) throw new OperationPollCancelled();
         if (!needsDetailedProgress(get().currentStep) && !session.operationId) {
           return { convertProgress: null, assetProgress: null };
         }
@@ -534,11 +532,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           session.threadId,
           session.operationId,
           pollEpoch,
-          async status => {
-            const stage = status.progress?.workflow?.current_step || status.current_step;
-            if (stage) set({ currentStep: stage });
-        await refreshProgress();
-          },
         );
         const progress = await refreshProgress();
         const convertIncomplete = hasIncompleteTasks(progress.convertProgress);
@@ -607,6 +600,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return !restoredComplete;
     } catch (error) {
       if (error instanceof OperationPollCancelled) return false;
+      if (pollEpoch !== _operationPollEpoch || get().threadId !== session.threadId) return false;
       if (error instanceof OperationFailed) {
         const step = error.result?.current_step || session.submitted?.step || session.currentStep;
         saveSession({ threadId: session.threadId, currentStep: step, submitted: session.submitted });
@@ -709,6 +703,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (!threadId) return;
     try {
       const result = await editorApi.getHistory(threadId);
+      if (get().threadId !== threadId) return;
       set({ history: result.checkpoints });
     } catch {
       // History might not be available
@@ -721,11 +716,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   forkFromCheckpoint: async (checkpointId: string, stateUpdates?: unknown) => {
     const { threadId } = get();
-    if (!threadId) return;
+    if (!threadId || get().isLoading) return;
+    const epoch = ++_operationPollEpoch;
+    get().closeProgressStream();
 
     set({ isLoading: true, error: null });
     try {
       const result = await editorApi.forkFromCheckpoint(threadId, checkpointId, stateUpdates);
+      if (epoch !== _operationPollEpoch || get().threadId !== threadId) return;
 
       if (result.is_complete) {
         clearSession();
@@ -745,30 +743,21 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         isLoading: false,
         viewingCheckpoint: null,
         assetProgress: null,
+        convertProgress: null, safetyProgress: null, submitted: null, operationId: undefined,
         // If forking to idea phase, keep the workflow state so the form can be pre-filled
         ...(isIdeaRestart ? {
           // Reset to idea phase — the user will use the normal "start" button
           currentStep: '',
         } : {}),
       });
+      if (!result.is_complete) saveSession({ threadId, currentStep: isIdeaRestart ? '' : result.current_step });
 
       // Refresh checkpoint history after fork
       get().fetchHistory();
     } catch (err: unknown) {
+      if (epoch !== _operationPollEpoch || get().threadId !== threadId) return;
       const message = err instanceof Error ? err.message : '回溯失败';
       set({ error: message, isLoading: false, viewingCheckpoint: null });
     }
   },
 }));
-
-// === Optimistic step mapping ===
-// When user confirms a review step, immediately advance to the next generation step
-const OPTIMISTIC_STEP_MAP: Record<string, string> = {
-  review_outline: "generate_first_draft",
-  review_first_draft: "review_by_llm",
-  review_report: "generate_final_draft",
-  review_final: "convert_to_game_data",
-  review_game_data: "safety_check",
-  safety_check: "generate_assets",
-  review_asset_plan: "generate_assets",
-};

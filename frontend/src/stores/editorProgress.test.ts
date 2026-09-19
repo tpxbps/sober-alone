@@ -3,7 +3,7 @@ import type { AssetProgress, EditorOperationResponse } from '@/types/editor';
 import { editorApi } from '@/lib/editorApi';
 import { useEditorStore } from './editorStore';
 
-vi.mock('@/lib/editorApi', () => ({ editorApi: { openProgressStream: vi.fn(), getOperation: vi.fn(), getState: vi.fn(), startWorkflow: vi.fn(), getConvertProgress: vi.fn(), getAssetProgress: vi.fn() } }));
+vi.mock('@/lib/editorApi', () => ({ editorApi: { openProgressStream: vi.fn(), getOperation: vi.fn(), getState: vi.fn(), startWorkflow: vi.fn(), getConvertProgress: vi.fn(), getAssetProgress: vi.fn(), resume: vi.fn(), getHistory: vi.fn() } }));
 const pending: EditorOperationResponse = { success: true, thread_id: 'thread', operation_id: 'current', operation_status: 'running', target_step: 'generate_outline' };
 beforeEach(() => {
   vi.useFakeTimers();
@@ -20,6 +20,40 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+it('orders timeline events and delayed HTTP snapshots together while allowing explicit rewind', async () => {
+  let resolve!: (value: EditorOperationResponse) => void;
+  vi.mocked(editorApi.getOperation).mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+  const result = useEditorStore.getState().followOutlineOperation('current');
+  const stream = vi.mocked(editorApi.openProgressStream).mock.calls[0];
+  stream[7]?.();
+  stream[6]?.({ operation_id: 'current', seq: 8, current_step: 'generate_final', finished: false });
+  resolve({ ...pending, current_step: 'review_report', progress: { workflow: { operation_id: 'current', seq: 2, current_step: 'review_report', finished: false } } });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(useEditorStore.getState().currentStep).toBe('generate_final');
+  stream[6]?.({ operation_id: 'old', seq: 99, current_step: 'review_report', finished: false });
+  expect(useEditorStore.getState().currentStep).toBe('generate_final');
+  stream[6]?.({ operation_id: 'current', seq: 9, current_step: 'review_report', finished: false });
+  expect(useEditorStore.getState().currentStep).toBe('review_report');
+  useEditorStore.getState().closeProgressStream();
+  await result;
+});
+
+it('holds the submitted review until the server executes, and ignores a response after reset', async () => {
+  let resolve!: (value: EditorOperationResponse) => void;
+  vi.mocked(editorApi.resume).mockImplementation(() => new Promise(done => { resolve = done; }));
+  useEditorStore.setState({ currentStep: 'review_report', interruptInfo: { step: 'review_report', step_label: '审稿意见', prompt_used: '', generated_content: '旧稿' } });
+  const result = useEditorStore.getState().resumeWorkflow('confirm', '提交稿');
+  expect(useEditorStore.getState().currentStep).toBe('review_report');
+  expect(useEditorStore.getState().submitted?.content).toBe('提交稿');
+  await useEditorStore.getState().resumeWorkflow('confirm', '重复');
+  expect(editorApi.resume).toHaveBeenCalledTimes(1);
+  useEditorStore.getState().reset();
+  resolve(pending);
+  await result;
+  expect(useEditorStore.getState().threadId).toBeNull();
+  expect(useEditorStore.getState().operationId).toBeUndefined();
+});
+
 it('uses no periodic reads with a healthy stream, then stops completely at a question', async () => {
   const result = useEditorStore.getState().followOutlineOperation('current');
   const stream = vi.mocked(editorApi.openProgressStream).mock.calls[0];
@@ -33,6 +67,17 @@ it('uses no periodic reads with a healthy stream, then stops completely at a que
   await vi.advanceTimersByTimeAsync(60000);
   expect(editorApi.getOperation).toHaveBeenCalledTimes(count);
   expect(editorApi.openProgressStream).toHaveBeenCalledTimes(1);
+});
+
+it('ignores a delayed start failure after leaving the workflow', async () => {
+  let reject!: (error: Error) => void;
+  vi.mocked(editorApi.startWorkflow).mockImplementationOnce(() => new Promise((_, fail) => { reject = fail; }));
+  const pendingStart = useEditorStore.getState().startWorkflow({ user_idea: '旅馆来信' });
+  useEditorStore.getState().reset();
+  reject(new Error('late network failure'));
+  await pendingStart;
+  expect(useEditorStore.getState().error).toBeNull();
+  expect(useEditorStore.getState().threadId).toBeNull();
 });
 
 it('only polls after disconnect and rejects obsolete task events across reconnects', async () => {

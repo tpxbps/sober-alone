@@ -173,6 +173,7 @@ class ScriptEditorWorkflowService:
             "quality_report_id",
             "game_data_sections",
             "selected_asset_ids",
+            "conversion_task_id",
         ):
             value = getattr(request, field)
             if value is not None:
@@ -566,6 +567,7 @@ class ScriptEditorWorkflowService:
             "refinement_counts": {},
             "asset_progress": None,
             "convert_progress": None,
+            "workflow_error": None,
             "final_draft": "",
             "character_scripts": {},
             "game_data_sections": {},

@@ -592,7 +592,8 @@ async def test_batched_disclosure_retains_own_action_without_unknown_clause(monk
                     },
                 ]
             )
-        kwargs["validate"](value)
+        if kwargs.get("validate"):
+            kwargs["validate"](value)
         return value
 
     monkeypatch.setattr(module, "invoke", extract)

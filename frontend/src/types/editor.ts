@@ -49,6 +49,7 @@ export interface EditorInterruptInfo {
 }
 
 export interface EditorWorkflowState {
+  workflow_error?: { scope: 'task' | 'stage' | 'workflow'; code: string; message: string; retryable: boolean; task_ids?: string[] } | null;
   refinement_counts?: Record<string, number>;
   quality_check_attempted?: boolean;
   asset_progress?: AssetProgress | null;
@@ -102,6 +103,9 @@ export interface StartWorkflowResponse {
 }
 
 export interface EditorOperationAccepted {
+  seq?: number;
+  execution_step?: string;
+  review_step?: string;
   success: boolean;
   thread_id: string;
   operation_id: string;
