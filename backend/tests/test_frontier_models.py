@@ -4,7 +4,7 @@ import httpx
 import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 
-from app.agents.game_model_paths import visible_speech_text
+from app.agents.game_model_paths import create_game_model, visible_speech_text
 from app.api.schemas.script_editor import ChatRequest
 from app.core.config import settings
 from app.core.inference import GatewayAuth, InferenceRecoveryError, InferenceScope, inference_scope
@@ -15,6 +15,35 @@ from app.services import model_health
 from app.services.capabilities import get_capabilities
 
 FRONTIER = [spec for spec in MODEL_SPECS if spec.tier == "frontier"]
+
+
+@pytest.mark.parametrize("backend", ["direct", "tokendance"])
+@pytest.mark.parametrize("purpose", ["speech", "reaction"])
+def test_qwen_thinking_is_scoped_to_role_speech(monkeypatch, backend, purpose):
+    monkeypatch.setattr(settings, "INFERENCE_BACKEND", backend)
+    monkeypatch.setattr(type(settings), "get_api_key", lambda *_: "test-only")
+    monkeypatch.setattr(type(settings), "get_base_url", lambda *_: "https://provider.test/v1")
+    model = create_game_model("qwen3.8-flash", purpose)
+    assert isinstance(model, ReasoningChatOpenAI)
+    assert model.extra_body == (
+        {"enable_thinking": True, "reasoning_effort": "low"}
+        if purpose == "speech"
+        else {"enable_thinking": False}
+    )
+    # Switching role speech must not enable thinking in creator/summary requests.
+    assert create_llm("qwen3.8-flash", disable_thinking=True).extra_body == {
+        "enable_thinking": False
+    }
+
+
+@pytest.mark.parametrize("spec", [s for s in MODEL_SPECS if s.id != "qwen3.8-flash" and s.backends])
+def test_other_game_models_keep_existing_inference_policy(monkeypatch, spec):
+    monkeypatch.setattr(settings, "INFERENCE_BACKEND", "tokendance")
+    old = create_llm(spec.id, disable_thinking=True)
+    for purpose in ["speech", "reaction"]:
+        current = create_game_model(spec.id, purpose)
+        assert current.extra_body == old.extra_body
+        assert current.model_name == old.model_name
 
 
 def test_frontier_cannot_be_selected_for_creator_assistant():

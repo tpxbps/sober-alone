@@ -26,7 +26,8 @@ def create_game_model(
     timeout: int | None = None,
     max_retries: int | None = None,
 ):
-    return create_llm(
+    qwen_speech = purpose == "speech" and get_model_spec(model.lower()).id == "qwen3.8-flash"
+    llm = create_llm(
         model=model.lower(),
         api_key=api_key,
         temperature=0.8 if purpose == "speech" else 0.5,
@@ -34,8 +35,15 @@ def create_game_model(
         if timeout is not None
         else (90 if purpose == "speech" else REACTION_MODEL_TIMEOUT_SECONDS),
         max_retries=max_retries if max_retries is not None else (2 if purpose == "speech" else 1),
-        disable_thinking=True,
+        disable_thinking=not qwen_speech,
     )
+    if qwen_speech:
+        # Keep this policy specific to role speech (including its health probe).
+        # Reactions, summaries and creator agents keep their existing settings.
+        return llm.model_copy(
+            update={"extra_body": {"enable_thinking": True, "reasoning_effort": "low"}}
+        )
+    return llm
 
 
 def bind_reaction_output(model, model_id: str, schema=SpeechReactionPayload):
@@ -88,3 +96,15 @@ def visible_speech_text(token: Any) -> list[str]:
             if block.get("type") == "text" and block.get("text")
         ]
     return [token.text] if token.text else []
+
+
+def visible_role_speech_text(token: Any, metadata: dict[str, Any]) -> list[str]:
+    """Expose role-model text, never internal middleware model calls.
+
+    `model` identifies the role invocation, not necessarily its final message:
+    tool preambles without tool-call metadata are still streamed unchanged.
+    This boundary only controls display; graph state and tools are untouched.
+    """
+    if metadata.get("langgraph_node") != "model":
+        return []
+    return visible_speech_text(token)

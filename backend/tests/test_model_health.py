@@ -322,7 +322,17 @@ async def test_speech_probe_uses_role_agent_and_closes_on_first_visible_token(mo
                         {},
                     ),
                 )
-                yield "messages", (AIMessageChunk(content="我是林岚。"), {})
+                yield (
+                    "messages",
+                    (
+                        AIMessageChunk(content="内部摘要"),
+                        {"langgraph_node": "SummarizationMiddleware.before_model"},
+                    ),
+                )
+                yield (
+                    "messages",
+                    (AIMessageChunk(content="我是林岚。"), {"langgraph_node": "model"}),
+                )
                 raise AssertionError("probe should close after the first visible text")
             finally:
                 captured["closed"] = True

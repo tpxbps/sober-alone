@@ -22,7 +22,7 @@ from app.agents.game_model_paths import (
     bind_reaction_output,
     build_role_agent,
     create_game_model,
-    visible_speech_text,
+    visible_role_speech_text,
 )
 from app.agents.reaction import (
     SpeechReactionPayload,
@@ -115,7 +115,7 @@ async def _measure_first_token(spec: ModelSpec) -> int:
         async with aclosing(stream):
             async for mode, data in stream:
                 if mode == "messages" and any(
-                    text.strip() for text in visible_speech_text(data[0])
+                    text.strip() for text in visible_role_speech_text(*data)
                 ):
                     return round((time.perf_counter() - started_at) * 1000)
     raise RuntimeError("empty model response")
