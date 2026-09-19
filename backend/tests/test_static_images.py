@@ -1,4 +1,5 @@
 import hashlib
+import mimetypes
 
 import httpx
 import pytest
@@ -7,7 +8,9 @@ from app.core.static_images import ImageStaticFiles
 
 
 @pytest.mark.asyncio
-async def test_only_content_addressed_clue_images_are_cached_immutably(tmp_path):
+async def test_only_content_addressed_clue_images_are_cached_immutably(tmp_path, monkeypatch):
+    monkeypatch.setattr(mimetypes, "guess_type", lambda *args, **kwargs: ("text/plain", None))
+    monkeypatch.setattr(mimetypes, "guess_file_type", lambda *args, **kwargs: ("text/plain", None))
     data = b"immutable derivative"
     folder = tmp_path / "scripts/s/clues"
     folder.mkdir(parents=True)
@@ -16,7 +19,9 @@ async def test_only_content_addressed_clue_images_are_cached_immutably(tmp_path)
     (folder / "mutable.webp").write_bytes(data)
     (folder / "preview.json").write_text("{}")
     app = ImageStaticFiles(directory=tmp_path)
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
         response = await client.get(f"/scripts/s/clues/{name}")
         assert response.content == data
         assert response.headers["content-type"] == "image/webp"

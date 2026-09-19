@@ -226,7 +226,9 @@ def test_prefetch_exposes_only_next_round_image_urls_from_snapshot():
     second["items"][0]["media"]["image_url"] = "/images/second.webp"
     second["presentation"]["shots"][0]["clue_ids"] = ["c01", "c02"]
     data.append(second)
-    session = SimpleNamespace(current_stage="intro", revealed_clues=[], clue_presentation_state=None)
+    session = SimpleNamespace(
+        current_stage="intro", revealed_clues=[], clue_presentation_state=None
+    )
     assert upcoming_presentation_assets(session, data) == ["/images/scripts/test/paper.webp"]
     session.revealed_clues = data[0]["items"]
     session.current_stage = "clue_analysis"
@@ -234,7 +236,8 @@ def test_prefetch_exposes_only_next_round_image_urls_from_snapshot():
     assert upcoming_presentation_assets(session, data) == []
     session.clue_presentation_state["status"] = "acknowledged"
     assert upcoming_presentation_assets(session, data) == [
-        "/images/scripts/test/paper.webp", "/images/second.webp"
+        "/images/scripts/test/paper.webp",
+        "/images/second.webp",
     ]
     assert len(public_presentation(session, data)["reference_clues"]) == 1
     second["presentation"]["status"] = "needs_review"

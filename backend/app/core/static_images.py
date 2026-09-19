@@ -11,6 +11,10 @@ class ImageStaticFiles(StaticFiles):
     async def get_response(self, path, scope):
         response = await super().get_response(path, scope)
         # Other runtime images may be replaced in place; keep their existing policy.
-        if response.status_code in (200, 304) and _CONTENT_ADDRESSED_CLUE.fullmatch(path.replace("\\", "/")):
+        immutable = _CONTENT_ADDRESSED_CLUE.fullmatch(path.replace("\\", "/"))
+        if immutable and response.status_code in (200, 206):
+            # Platform MIME registries can omit or misclassify WebP.
+            response.headers["Content-Type"] = "image/webp"
+        if immutable and response.status_code in (200, 206, 304):
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         return response
