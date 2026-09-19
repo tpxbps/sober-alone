@@ -12,14 +12,15 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.types import interrupt
 
 from app.core.config import settings
-from app.core.llm_factory import create_llm
+from app.script_editor.llm import create_editor_llm as create_llm
 from app.script_editor.outline.contracts import Direction
+from app.script_editor.outline.conversation import append_event, ensure_conversation
 from app.script_editor.outline.runtime import current_runtime
 from app.script_editor.prompts.templates import get_prompt
 
 
 def session_of(state: dict) -> dict:
-    return deepcopy(state["outline_session"])
+    return ensure_conversation(deepcopy(state["outline_session"]))
 
 
 def context(state: dict, session: dict) -> str:
@@ -51,36 +52,10 @@ def llm(temperature: float):
     )
 
 
-async def structured(schema, system: str, content: str):
-    messages = [SystemMessage(content=system), HumanMessage(content=content)]
-    runtime = current_runtime.get()
-    for attempt in range(2):
-        if runtime:
-            runtime.calls += 1
-        try:
-            result = await asyncio.wait_for(
-                llm(0.35)
-                .with_structured_output(schema, method="function_calling", include_raw=True)
-                .ainvoke(messages),
-                timeout=150,
-            )
-            if isinstance(result, dict) and "raw" in result:
-                from app.script_editor.services.execution import observe_model
+async def structured(schema, system: str, content: str, *, validate=None):
+    from app.script_editor.llm import invoke_structured
 
-                observe_model(result["raw"])
-                if result.get("parsing_error"):
-                    raise ValueError("模型返回结构不完整") from result["parsing_error"]
-                result = result.get("parsed")
-            return schema.model_validate(result)
-        except (ValueError, TypeError, AttributeError) as error:
-            if attempt:
-                raise ValueError("结构化结果仍不完整，请重试本轮") from error
-            messages.append(
-                HumanMessage(
-                    content=f"上一结果未通过格式校验：{str(error)[:500]}。请严格返回完整结构。"
-                )
-            )
-    raise ValueError("未返回结构化结果")
+    return await invoke_structured(llm(0.35), schema, system, content, validate=validate)
 
 
 async def stream_text(state: dict, session: dict, task: str, segment_id: str, status: str) -> str:
@@ -131,10 +106,11 @@ async def write_segment(state: dict) -> dict:
     if session.get("status") in {"ready", "needs_revision"}:
         session.update(check=None, next_action="review", status="ready")
         return {"outline_session": session, "current_step": "generate_outline"}
-    segment_id = f"r{session['revision']}-s{len(session['segments']) + 1}"
+    segment_id = f"passage-{uuid.uuid4()}"
     text = await stream_text(state, session, session["next_task"], segment_id, "writing")
     segment = {"id": segment_id, "content": text}
     session["segments"].append(segment)
+    append_event(session, "passage", text, event_id=segment_id)
     session.update(status="directing", next_action="direct")
     if session.get("questions_stopped") or session["questions_asked"] >= 5:
         session["automatic_segments"] += 1
@@ -153,16 +129,19 @@ async def direct_outline(state: dict) -> dict:
         await runtime.begin(session, "directing")
         stopped = stopped or runtime.control.get("questions_stopped", False)
     session["questions_stopped"] = stopped
-    if session["automatic_segments"] >= 4 or len(session["segments"]) >= 10:
+    if (
+        session["automatic_segments"] >= 4
+        or sum(e["kind"] == "passage" for e in session["events"]) >= 10
+    ):
         session.update(next_action="finalize", status="finalizing")
         return {"outline_session": session}
     can_ask = not stopped and session["questions_asked"] < 5
     result = await structured(
         Direction,
         "你是大纲共创的调度编辑，只返回结构化结果。每次最多询问一个显著影响案件冲突、人物关系、真相动机或反转的问题。通常3–5问，但创意已明确的内容不重复问，次要细节自行补全。"
-        "问题必须有独立引导标题title、问题正文question、2–4个options（id/label/impact），并在question对象上返回recommended_option_id，值为某个选项id。"
-        "只讨论故事本身，采用单一结局，不询问或决策投票结果分支。未选中的方向不能写进正文。next_task是回答之后要写的200–400字分段任务。"
-        "信息足够时finalize；尚有内容待补全可continue，ai_decisions只记录本轮新确定且需要保留的剧情事实，不重复旧决定，不把未来可选线索清单当成已确认要求。",
+        "问题必须有独立引导标题title、问题正文question、2–4个options（id/label/impact）；有明确推荐时返回对应recommended_option_id，否则可省略。"
+        "只讨论故事本身，采用单一结局，不询问或决策投票结果分支。未选中的方向不能写进正文。ask时next_task可省略；continue时必须说明下一段200–400字的写作任务。"
+        "信息足够时finalize；尚有内容待补全可continue，不把未来可选方向当成已确认要求。",
         context(state, session) + f"\n允许提问：{can_ask}。已问{session['questions_asked']}题。",
     )
     # Re-read after the model call: stop_questions may arrive while it was running.
@@ -173,11 +152,14 @@ async def direct_outline(state: dict) -> dict:
     # enter the authoritative context just because the director mentioned it.
     if result.action == "ask":
         question = {**result.question.model_dump(), "id": str(uuid.uuid4())}
-        session["next_task"] = result.next_task
+        session["next_task"] = (
+            result.next_task or "根据作者刚确认的方向和最新有效设定，继续写200–400字相关剧情。"
+        )
         if stopped or session["questions_asked"] >= 5:
             # Stopping questions delegates completion, never acceptance of an option.
             session.update(next_action="finalize", pending_question=None, status="finalizing")
         else:
+            append_event(session, "question", event_id=question["id"], question=question)
             session["questions_asked"] += 1
             session.update(next_action="wait", pending_question=question, status="awaiting_answer")
     else:
@@ -201,7 +183,7 @@ async def wait_for_answer(state: dict) -> dict:
     if explicit and explicit.get("question_id") == question["id"]:
         response = explicit
     elif stopped:
-        response = {"option_id": question["recommended_option_id"], "source": "ai"}
+        response = {"source": "ai"}
     else:
         response = interrupt(
             {
@@ -239,10 +221,26 @@ async def wait_for_answer(state: dict) -> dict:
     request_id = response.get("request_id")
     if request_id:
         session["consumed_requests"].append(request_id)
+    append_event(
+        session,
+        "answer",
+        "\n".join(
+            filter(
+                None,
+                [
+                    (option["label"] + "：" + option["impact"]) if option else "",
+                    other,
+                ],
+            )
+        ),
+        event_id=request_id or f"answer-{question['id']}",
+    )
     session["pending_input"] = {
         "choice": (option["label"] + "：" + option["impact"]) if option else "",
         "other_text": other,
         "after": "write",
+        "question": question,
+        "request_id": request_id,
         "source": response.get("source", "user"),
     }
     session.update(
@@ -263,6 +261,7 @@ async def finalize_outline(state: dict) -> dict:
         )
         text = await stream_text(state, session, task, "final", "finalizing")
     title_match = re.search(r"^#\s+(.+)$", text, re.MULTILINE)
+    append_event(session, "final", text, event_id=f"final-{session['revision']}")
     session.update(status="ready", next_action="review", final_outline=text, check=None)
     runtime = current_runtime.get()
     if runtime:

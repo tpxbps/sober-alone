@@ -19,7 +19,7 @@ def _init_convert_progress(
         char_tasks.append(
             {
                 "id": "discover_chars",
-                "label": f"从终稿中识别 {player_count} 个角色",
+                "label": f"识别 {player_count} 个角色与开局时点",
                 "status": "pending",
             }
         )
@@ -35,7 +35,7 @@ def _init_convert_progress(
     char_label = (
         f"角色数据生成（{len(characters)}人）"
         if characters
-        else f"角色识别与数据生成（{player_count}人）"
+        else f"角色与事实整理（{player_count}人）"
     )
 
     phases = [
@@ -127,3 +127,13 @@ def get_convert_progress(script_id: str) -> dict | None:
 
 def reset_convert_progress(script_id: str):
     convert_progress_registry.reset(script_id)
+
+
+def add_disclosure_task(script_id: str, task_id: str, label: str):
+    def add(progress):
+        phase = next((p for p in progress["phases"] if p["id"] == "characters"), None)
+        if phase and not any(t["id"] == task_id for t in phase["tasks"]):
+            phase["tasks"].append({"id": task_id, "label": label, "status": "pending"})
+
+    convert_progress_registry.mutate(script_id, add)
+    _publish_convert_progress(script_id)

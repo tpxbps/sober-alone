@@ -27,6 +27,42 @@ logger = logging.getLogger(__name__)
 
 VECTORIZE_MAX_ATTEMPTS = 2
 VECTORIZE_RETRY_DELAY_SECONDS = 1
+MAX_ASSET_RETRIES = 3
+
+
+def _asset_task(script_id, task_id):
+    return next(
+        (
+            task
+            for phase in (get_asset_progress(script_id) or {}).get("phases", [])
+            for task in phase.get("tasks", [])
+            if task.get("id") == task_id
+        ),
+        None,
+    )
+
+
+def _finish_asset_failure(script_id, task_id, reason, *, permanent=False):
+    task = _asset_task(script_id, task_id) or {}
+    fallback = permanent or task.get("retry_count", 0) >= MAX_ASSET_RETRIES
+    if fallback:
+
+        def record(progress):
+            for phase in progress.get("phases", []):
+                for item in phase.get("tasks", []):
+                    if item.get("id") == task_id:
+                        item.update(
+                            fallback=True, failure_reason=reason, retry_exhausted=not permanent
+                        )
+
+        asset_progress_registry.mutate(script_id, record)
+    _update_task_status(
+        script_id,
+        task_id,
+        "skipped" if fallback else "failed",
+        "资源暂不可用，已使用默认展示或文本模式" if fallback else reason,
+    )
+    _check_and_mark_asset_complete(script_id)
 
 
 @dataclass(slots=True)
@@ -172,16 +208,29 @@ async def _generate_assets(state: ScriptGenState) -> dict:
     previous_progress = state.get("asset_progress") or {}
     if previous_progress.get("input_fingerprint") != resource_input:
         previous_progress = {}
-    restored = {
+    previous_tasks = {
         task["id"]: task
         for phase in previous_progress.get("phases", [])
         for task in phase.get("tasks", [])
+    }
+    restored = {
+        key: task
+        for key, task in previous_tasks.items()
         if task.get("status") in {"complete", "skipped"}
     }
     for phase in phases:
         for task in phase["tasks"]:
             if task["id"] in restored:
                 task.update(restored[task["id"]])
+            elif task["id"] in previous_tasks:
+                # Never reset a task's retry budget when the node is recovered.
+                task.update(
+                    {
+                        key: value
+                        for key, value in previous_tasks[task["id"]].items()
+                        if key in {"retry_count", "retry_operation_id"}
+                    }
+                )
     _init_asset_progress(script_id, phases)
     asset_progress_registry.mutate(
         script_id, lambda progress: progress.update(input_fingerprint=resource_input)
@@ -440,8 +489,12 @@ async def _run_single_image(script_id: str, task_id: str, func_name: str, func_k
             _update_task_status(script_id, task_id, "failed", "供应商未返回有效图片")
     except Exception as e:
         raise_for_inference_recovery(e)
-        logger.error(f"Image task {task_id} failed: {e}")
-        _update_task_status(script_id, task_id, "failed", str(e))
+        from app.script_editor.services.image_gen import ImageGenerationRejected
+
+        logger.warning("Image task %s failed: %s", task_id, type(e).__name__)
+        _finish_asset_failure(
+            script_id, task_id, str(e), permanent=isinstance(e, ImageGenerationRejected)
+        )
 
 
 async def _run_tts(
@@ -523,7 +576,39 @@ async def _retry_single_asset(script_id: str, task_id: str, state: ScriptGenStat
     """重试单个失败的资产生成任务"""
     characters = state.get("characters", [])
 
+    if not get_asset_progress(script_id) and state.get("asset_progress"):
+        asset_progress_registry.restore(script_id, state["asset_progress"])
+    task = _asset_task(script_id, task_id)
+    if not task:
+        return TaskResult(ok=False, error="资源任务不存在")
+    if task.get("status") in {"complete", "skipped"}:
+        return TaskResult(ok=True)
+    from app.script_editor.outline.runtime import current_runtime
+
+    runtime = current_runtime.get()
+    operation_id = runtime.operation_id if runtime else str(uuid.uuid4())
+    replay = task.get("retry_operation_id") == operation_id
+    if replay and task.get("status") == "failed":
+        return TaskResult(ok=False, error=task.get("reason", "资源生成失败"))
+    if not replay and task.get("retry_count", 0) >= MAX_ASSET_RETRIES:
+        _finish_asset_failure(script_id, task_id, task.get("reason", "资源生成失败"))
+        return TaskResult(ok=False, error="资源暂不可用，已使用默认展示或文本模式")
+
+    def reserve(progress):
+        for phase in progress.get("phases", []):
+            for item in phase.get("tasks", []):
+                if item.get("id") == task_id:
+                    item.update(
+                        retry_count=task.get("retry_count", 0) + (0 if replay else 1),
+                        retry_operation_id=operation_id,
+                    )
+
+    asset_progress_registry.mutate(script_id, reserve)
+
     _update_task_status(script_id, task_id, "running")
+    if runtime:
+        # Persist the reservation before dispatch, including for restart recovery.
+        await runtime.drain_progress()
 
     try:
         result = TaskResult(ok=False, error=f"未知任务: {task_id}")
@@ -716,7 +801,7 @@ async def _retry_single_asset(script_id: str, task_id: str, state: ScriptGenStat
                     result = TaskResult(ok=False, error="角色不存在")
 
         if not result.ok:
-            _update_task_status(script_id, task_id, "failed", result.error)
+            _finish_asset_failure(script_id, task_id, result.error)
             return result
 
         _update_task_status(script_id, task_id, "complete")
@@ -730,10 +815,16 @@ async def _retry_single_asset(script_id: str, task_id: str, state: ScriptGenStat
         try:
             raise_for_inference_recovery(e)
         except InferenceRecoveryError:
-            _update_task_status(script_id, task_id, "failed", "模型账户需要处理，恢复后可重试")
+            _finish_asset_failure(script_id, task_id, "模型账户需要处理，恢复后可重试")
+            if (_asset_task(script_id, task_id) or {}).get("status") == "skipped":
+                return TaskResult(ok=False, error="资源暂不可用，已使用默认展示或文本模式")
             raise
-        logger.error(f"Asset retry failed for task {task_id}: {e}")
-        _update_task_status(script_id, task_id, "failed", str(e))
+        from app.script_editor.services.image_gen import ImageGenerationRejected
+
+        logger.warning("Asset retry failed for task %s: %s", task_id, type(e).__name__)
+        _finish_asset_failure(
+            script_id, task_id, str(e), permanent=isinstance(e, ImageGenerationRejected)
+        )
         return TaskResult(ok=False, error=str(e))
 
 

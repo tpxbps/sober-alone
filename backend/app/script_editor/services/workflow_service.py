@@ -438,7 +438,7 @@ class ScriptEditorWorkflowService:
             interrupt = {
                 **interrupt,
                 "game_data_sections": values.get("game_data_sections", {}),
-                "quality_report": values.get("quality_report", {}),
+                "quality_report": values.get("quality_report") or None,
             }
         return {
             "success": True,
@@ -483,7 +483,7 @@ class ScriptEditorWorkflowService:
                     "review_opinion": value.get("review_opinion", ""),
                     "human_review": value.get("human_review", ""),
                     "first_draft": value.get("first_draft", ""),
-                    "quality_report": value.get("quality_report", {}),
+                    "quality_report": value.get("quality_report") or None,
                     "game_data_sections": value.get("game_data_sections", {}),
                     "prompt_used": value.get("prompt_used", ""),
                     "rejected": value.get("rejected", False),
@@ -515,7 +515,7 @@ class ScriptEditorWorkflowService:
             "review_opinion": state.get("review_opinion", ""),
             "human_review": state.get("human_review", ""),
             "first_draft": state.get("first_draft", ""),
-            "quality_report": state.get("quality_report", {}),
+            "quality_report": state.get("quality_report") or None,
             "game_data_sections": state.get("game_data_sections", {}),
             "prompt_used": "",
             "rejected": False,
@@ -560,7 +560,7 @@ class ScriptEditorWorkflowService:
             "first_draft": "",
             "review_opinion": "",
             "human_review": "",
-            "quality_report": {},
+            "quality_report": None,
             "quality_acceptance": {},
             "quality_check_attempted": False,
             "refinement_counts": {},
@@ -580,7 +580,10 @@ class ScriptEditorWorkflowService:
             "workflow_mode": "create",
             "data_validation_errors": [],
         }
-        return {key: values.get(key, default) for key, default in defaults.items()}
+        serialized = {key: values.get(key, default) for key, default in defaults.items()}
+        # Empty legacy checkpoints mean no check was requested, not a completed report.
+        serialized["quality_report"] = values.get("quality_report") or None
+        return serialized
 
     @staticmethod
     def prompt_key_for_action(current_step: str, action: str) -> str | None:

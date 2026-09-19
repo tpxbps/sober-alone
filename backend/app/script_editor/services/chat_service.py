@@ -20,10 +20,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.config import get_config, get_stream_writer
 
 from app.core.inference import model_retry_middleware, raise_for_inference_recovery
-from app.core.llm_factory import (
-    create_chat_model_for_agent,
-    create_summary_llm,
-)
+from app.script_editor.llm import MODEL, create_editor_llm
 from app.script_editor.state import STEP_LABELS
 
 logger = logging.getLogger(__name__)
@@ -278,8 +275,9 @@ _chat_agents: dict[str, Any] = {}
 
 def _get_chat_agent(model: str):
     """获取指定 model 的 chat agent 实例（懒加载）"""
+    model = MODEL
     if model not in _chat_agents:
-        llm = create_chat_model_for_agent(model)
+        llm = create_editor_llm(temperature=0.7)
 
         _chat_agents[model] = create_agent(
             model=llm,  # type: ignore[arg-type]
@@ -287,7 +285,7 @@ def _get_chat_agent(model: str):
             middleware=[
                 model_retry_middleware(),
                 SummarizationMiddleware(
-                    model=create_summary_llm(),
+                    model=create_editor_llm(temperature=0.3),
                     trigger=("tokens", 200000),
                     keep=("messages", 20),
                 ),

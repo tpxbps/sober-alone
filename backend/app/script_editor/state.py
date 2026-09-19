@@ -67,6 +67,7 @@ class ScriptGenState(TypedDict, total=False):
     current_step: str  # 当前步骤标识
     error_message: str  # 错误信息
     safety_report: dict
+    disclosure_cache: dict
     convert_cache: dict
     retry_step: str
     safety_passed: bool  # 是否通过安全审查

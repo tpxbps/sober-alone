@@ -50,6 +50,8 @@ async def queue_action(runner, thread_id: str, request: OutlineAction, owner_key
             )
             if previous:
                 return runner._accepted(previous)
+        if request.action in {"rewrite", "revise", "undo"}:
+            raise OutlineConflict("编辑器已更新，请刷新页面后在当前提问卡中补充想法")
         service = ScriptEditorWorkflowService()
         snapshot = await service._get_snapshot(service.config(thread_id))
         session = snapshot.values.get("outline_session") or {}
@@ -81,9 +83,7 @@ async def queue_action(runner, thread_id: str, request: OutlineAction, owner_key
                 "revise",
                 "undo",
             }:
-                raise OutlineConflict(
-                    "当前操作尚未结束，请稍后重试；修改历史回答请使用“从这里修改”"
-                )
+                raise OutlineConflict("当前操作尚未结束，请稍后重试")
             if request.action == "save" and (
                 session.get("status") not in {"ready", "needs_revision"}
                 or (service.extract_interrupt(snapshot) or {}).get("step") != "review_outline"

@@ -66,7 +66,7 @@ async def env(tmp_path, monkeypatch):
             else f"第{len(session['segments']) + 1}段：雾港出现案件。"
         )
 
-    async def structured(schema, system, content):
+    async def structured(schema, system, content, **kwargs):
         from app.script_editor.outline.revisions import OutlineRevision
 
         if schema is OutlineRevision:
@@ -209,8 +209,8 @@ async def test_duplicate_request_and_stale_question_do_not_consume_next_question
 
 
 @pytest.mark.asyncio
-async def test_stop_questions_survives_rewrite_and_archives_old_version(env):
-    runner, _, graph, calls, _ = env
+async def test_stop_questions_does_not_select_an_option_and_rejects_retired_commands(env):
+    runner, _, _, calls, _ = env
     thread, state = await start(env)
     question = state["state"]["outline_session"]["pending_question"]
     await actions.queue_action(runner, thread, command("stop_questions", state), "owner")
@@ -218,22 +218,14 @@ async def test_stop_questions_survives_rewrite_and_archives_old_version(env):
     live = await workflow_service.ScriptEditorWorkflowService().get_state(thread)
     assert live["current_step"] == "review_outline"
     assert live["state"]["outline_session"]["decisions"] == []
-    assert live["state"]["outline_session"]["canon"] == state["state"]["outline_session"]["canon"]
-    await actions.queue_action(
-        runner,
-        thread,
-        command("rewrite", live, question_id=question["id"], other_text="改为利益争夺"),
-        "owner",
-    )
-    await settle(runner)
-    live = await workflow_service.ScriptEditorWorkflowService().get_state(thread)
-    session = live["state"]["outline_session"]
-    assert session["revision"] == 2
-    assert session["questions_stopped"] is True
-    assert session["decisions"][0]["other_text"] == "改为利益争夺"
-    assert session["decisions"][0]["source"] == "user"
-    history = [cp async for cp in graph.aget_state_history({"configurable": {"thread_id": thread}})]
-    assert {cp.values.get("outline_session", {}).get("revision") for cp in history} >= {1, 2}
+    for action in ["rewrite", "undo", "revise"]:
+        with pytest.raises(OutlineConflict, match="刷新"):
+            await actions.queue_action(
+                runner,
+                thread,
+                command(action, live, question_id=question["id"], other_text="改为合作"),
+                "owner",
+            )
     assert "旧案复仇" not in calls[-1][1]
 
 
@@ -366,8 +358,7 @@ def test_explicit_option_recommendation_is_normalized_without_guessing():
     raw["options"][1]["recommended"] = False
     assert OutlineQuestion.model_validate(raw).recommended_option_id == "revenge"
     raw["options"][1]["recommended"] = True
-    with pytest.raises(ValidationError):
-        OutlineQuestion.model_validate(raw)
+    assert OutlineQuestion.model_validate(raw).recommended_option_id is None
 
 
 @pytest.mark.asyncio
@@ -404,10 +395,10 @@ async def test_structured_question_repairs_once_then_reports_error(monkeypatch):
             }
 
     monkeypatch.setattr(nodes, "llm", lambda _: BrokenModel())
-    with pytest.raises(ValueError, match="结构化结果仍不完整"):
+    with pytest.raises(ValueError, match="本轮生成未完成"):
         await nodes.structured(Direction, "独立协议", "有效正文")
     assert len(calls) == 2
-    assert "上一结果未通过格式校验" in calls[1][-1].content
+    assert "question.title" in calls[1][-1]["content"]
 
 
 @pytest.mark.asyncio
@@ -496,7 +487,7 @@ async def test_legacy_final_outline_skips_model_review_and_reconsolidation(env, 
 
 
 @pytest.mark.asyncio
-async def test_rewrite_cancels_active_writer_without_pause_command(env):
+async def test_retired_rewrite_cannot_cancel_an_active_writer(env):
     runner, _, _, calls, blocker = env
     thread, state = await start(env)
     q = state["state"]["outline_session"]["pending_question"]
@@ -504,22 +495,22 @@ async def test_rewrite_cancels_active_writer_without_pause_command(env):
     await actions.queue_action(
         runner, thread, command("answer", state, question_id=q["id"], option_id="secret"), "owner"
     )
-    while len(calls) < 2:
+    for _ in range(200):
+        if len(calls) >= 2:
+            break
         await asyncio.sleep(0.01)
-    blocker["event"] = None
-    await actions.queue_action(
-        runner,
-        thread,
-        command("rewrite", state, question_id=q["id"], other_text="改写后的决定"),
-        "owner",
-    )
+    with pytest.raises(OutlineConflict, match="刷新"):
+        await actions.queue_action(
+            runner,
+            thread,
+            command("rewrite", state, question_id=q["id"], other_text="改写"),
+            "owner",
+        )
+    blocker["event"].set()
     await settle(runner)
     result = await workflow_service.ScriptEditorWorkflowService().get_state(thread)
-    session = result["state"]["outline_session"]
-    assert session["revision"] == 2
-    assert len(session["segments"]) == 2
-    assert session["decisions"][0]["other_text"] == "改写后的决定"
-    assert (await runtime.projection(thread, session))["control"]["paused"] is False
+    assert len(result["state"]["outline_session"]["decisions"]) == 1
+    assert not (await runtime.projection(thread))["control"]["paused"]
 
 
 @pytest.mark.asyncio

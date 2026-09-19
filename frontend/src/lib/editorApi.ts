@@ -182,31 +182,50 @@ export const editorApi = {
     threadId: string,
     onConvertProgress: (data: AssetProgress | null) => void,
     onAssetProgress: (data: AssetProgress | null) => void,
-    onDone: () => void,
-    onSafetyProgress?: (progress: { completed: number; total: number }) => void,
+    onDone: (reason?: 'complete' | 'disconnected' | 'unauthorized') => void,
+    onSafetyProgress?: (progress: { completed: number; total: number; operation_id?: string; seq?: number }) => void,
     onOutline?: (type: string, data: OutlineProgress | OutlineDelta) => void,
     onWorkflow?: (data: import('@/types/editor').WorkflowProgress) => void,
+    onConnected?: () => void,
+    operationId?: string,
   ): (() => void) => {
-    const url = `${RAW_API_BASE}/script-editor/${threadId}/progress-stream`;
+    const query = operationId ? `?operation_id=${encodeURIComponent(operationId)}` : '';
+    const url = `${RAW_API_BASE}/script-editor/${threadId}/progress-stream${query}`;
     const controller = new AbortController();
+    let closed = false;
+    let watchdog: ReturnType<typeof setTimeout>;
+    const finish = (reason: 'complete' | 'disconnected' | 'unauthorized') => {
+      if (closed) return;
+      closed = true;
+      clearTimeout(watchdog);
+      controller.abort();
+      onDone(reason);
+    };
+    const activity = () => {
+      clearTimeout(watchdog);
+      watchdog = setTimeout(() => finish('disconnected'), 45000);
+    };
+    activity();
     void (async () => {
       try {
         const response = await fetch(url, {
-          headers: { [AUTHOR_KEY_HEADER]: getOrCreateAuthorKey() },
-          signal: controller.signal,
+          headers: { [AUTHOR_KEY_HEADER]: getOrCreateAuthorKey() }, signal: controller.signal,
         });
+        if ([401, 403, 404].includes(response.status)) { finish('unauthorized'); return; }
         if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
+        onConnected?.();
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
         while (!controller.signal.aborted) {
           const { done, value } = await reader.read();
           if (done) break;
+          activity();
           buffer += decoder.decode(value, { stream: true });
           const events = buffer.split('\n\n');
           buffer = events.pop() || '';
           for (const event of events) {
-            const line = event.split('\n').find((item) => item.startsWith('data: '));
+            const line = event.split('\n').find(item => item.startsWith('data: '));
             if (!line) continue;
             const parsed = JSON.parse(line.slice(6));
             if (parsed.type?.startsWith('outline_')) onOutline?.(parsed.type, parsed.data);
@@ -214,25 +233,22 @@ export const editorApi = {
             else if (parsed.type === 'safety_progress') onSafetyProgress?.(parsed.data);
             else if (parsed.type === 'asset_progress') onAssetProgress(parsed.data ?? null);
             else if (parsed.type === 'workflow_progress') onWorkflow?.(parsed.data);
-            else if (parsed.type === 'done') {
-              onDone();
-              controller.abort();
-            }
+            else if (parsed.type === 'done') finish('complete');
           }
         }
-        if (!controller.signal.aborted) onDone();
-      } catch (error) {
-        if (!(error instanceof DOMException && error.name === 'AbortError')) onDone();
+        if (!closed) finish('disconnected');
+      } catch {
+        if (!closed) finish('disconnected');
       }
     })();
-    return () => controller.abort();
+    return () => { closed = true; clearTimeout(watchdog); controller.abort(); };
   },
 
   // Stream chat with AI assistant (SSE)
   streamChat: async (
     params: {
       message: string;
-      model: string;
+      model?: string;
       chat_session_id: string;
       workflow_thread_id?: string;
     },

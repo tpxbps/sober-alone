@@ -58,13 +58,13 @@ def test_explicit_model_outage_blocks_aliases_without_disabling_other_providers(
     assert capabilities.settings.is_model_enabled("deepseek-flash")
 
 
-def test_conversion_honors_creator_model_configuration(monkeypatch):
+def test_conversion_uses_fixed_creator_model(monkeypatch):
     from app.script_editor.conversion import service
 
     monkeypatch.setattr(capabilities.settings, "SCRIPT_EDITOR_MODEL", "step-3.5-flash")
-    monkeypatch.setattr(llm_factory, "create_llm", lambda **kwargs: kwargs)
+    monkeypatch.setattr("app.script_editor.llm.create_llm", lambda **kwargs: kwargs)
     options = service._get_structured_llm()
-    assert options["model"] == "step-3.5-flash"
+    assert options["model"] == "deepseek-flash"
     assert options["disable_thinking"] is True
 
 
@@ -94,7 +94,8 @@ def test_model_registry_keeps_configured_models_available_during_slow_periods(mo
     models = {item["id"]: item for item in capabilities.get_capabilities()["models"]}
 
     assert "qwen3.5-flash-2026-02-23" not in models
-    assert {"qwen3.8-flash", "mimo-v2.5"} <= models.keys()
+    assert {"qwen3.8-flash", "doubao-seed-2-0-lite-260215"} <= models.keys()
+    assert "mimo-v2.5" not in models
     assert models["hy3"]["configured"] is True
     assert models["glm-5.3-flash"]["configured"] is True
 
@@ -120,16 +121,16 @@ def test_openai_compatible_providers_receive_supported_low_latency_parameters(mo
 
     monkeypatch.setattr(llm_factory, "_create_openai_compatible", fake_openai)
     monkeypatch.setattr(llm_factory.settings, "QWEN_API_KEY", "q")
-    monkeypatch.setattr(llm_factory.settings, "MIMO_API_KEY", "m")
+    monkeypatch.setattr(llm_factory.settings, "DOUBAO_API_KEY", "d")
     monkeypatch.setattr(llm_factory.settings, "ZHIPUAI_API_KEY", "z")
     monkeypatch.setattr(llm_factory.settings, "HUNYUAN_API_KEY", "h")
 
-    for model in ("qwen3.8-flash", "mimo-v2.5", "hy3", "glm-5.3-flash"):
+    for model in ("qwen3.8-flash", "doubao-seed-2-0-lite-260215", "hy3", "glm-5.3-flash"):
         llm_factory.create_llm(model=model, disable_thinking=True)
 
     assert captured == [
         ("qwen3.8-flash", {"enable_thinking": False}),
-        ("mimo-v2.5", None),
+        ("doubao-seed-2-0-lite-260215", {"thinking": {"type": "disabled"}}),
         ("hy3", None),
         ("glm-5.3-flash", {"reasoning_effort": "low"}),
     ]

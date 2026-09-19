@@ -13,6 +13,11 @@ from app.core.inference import InferenceRecoveryError, raise_for_inference_recov
 
 logger = logging.getLogger(__name__)
 
+
+class ImageGenerationRejected(ValueError):
+    """The provider explicitly rejected this input; repeating it cannot repair it."""
+
+
 # 图片存储目录
 IMAGE_ROOT = settings.image_dir / "scripts"
 
@@ -25,10 +30,13 @@ def _get_doubao_client() -> AsyncOpenAI:
             api_key="scoped-at-dispatch",
             base_url=gateway_url("ark/v3"),
             http_client=gateway_async_client(timeout=180),
+            max_retries=0,
         )
     return AsyncOpenAI(
         base_url=settings.DOUBAO_API_BASE_URL,
         api_key=settings.DOUBAO_API_KEY,
+        max_retries=0,
+        timeout=180,
     )
 
 
@@ -182,5 +190,11 @@ async def _generate_image(
         raise
     except Exception as e:
         raise_for_inference_recovery(e)
-        logger.error(f"Image generation error: {e}", exc_info=True)
+        body = getattr(e, "body", None) or {}
+        error = body.get("error", body) if isinstance(body, dict) else {}
+        code = error.get("code", "") if isinstance(error, dict) else ""
+        if code in {"InputTextSensitiveContentDetected", "OutputImageSensitiveContentDetected"}:
+            logger.warning("Image request rejected by provider: %s", code)
+            raise ImageGenerationRejected("图片服务未接受本次内容，已改用默认展示") from e
+        logger.error("Image generation failed: %s", type(e).__name__)
         return False

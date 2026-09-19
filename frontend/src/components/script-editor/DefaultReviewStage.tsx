@@ -15,7 +15,6 @@ export function DefaultReviewStage({
   error,
   onConfirm,
   onRegenerate,
-  moleActive,
 }: {
   interruptInfo: EditorInterruptInfo;
   editedContent: string;
@@ -27,7 +26,6 @@ export function DefaultReviewStage({
   error: string | null;
   onConfirm: (content: string) => Promise<void>;
   onRegenerate: (prompt?: string) => Promise<void>;
-  moleActive: boolean;
 }) {
   const displayContent = editedContent;
 
@@ -100,11 +98,9 @@ export function DefaultReviewStage({
       </div>
 
       <div
-        className={`p-3 ${
-          moleActive ? "pl-12" : ""
-        } border-t border-border/30`}
+        className={`grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] items-center gap-2 p-3  border-t border-border/30`}
       >
-        <div className="mb-2"><RefineButton step={interruptInfo.step} content={displayContent} disabled={isLoading} /></div>
+        <RefineButton step={interruptInfo.step} content={displayContent} disabled={isLoading} />
         <LoadingButton
           isLoading={isLoading}
           loadingText={getButtonLoadingMessage(currentStep)}

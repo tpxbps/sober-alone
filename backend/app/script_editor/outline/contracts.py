@@ -17,7 +17,7 @@ class OutlineQuestion(BaseModel):
     )
     question: str = Field(min_length=1, max_length=400)
     options: list[QuestionOption] = Field(min_length=2, max_length=4)
-    recommended_option_id: str
+    recommended_option_id: str | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -37,7 +37,9 @@ class OutlineQuestion(BaseModel):
     @model_validator(mode="after")
     def valid_options(self):
         ids = [item.id for item in self.options]
-        if len(ids) != len(set(ids)) or self.recommended_option_id not in ids:
+        if len(ids) != len(set(ids)) or (
+            self.recommended_option_id is not None and self.recommended_option_id not in ids
+        ):
             raise ValueError("选项 ID 必须唯一且推荐选项必须存在")
         return self
 
@@ -47,13 +49,12 @@ class Direction(BaseModel):
     next_task: str = Field(default="", max_length=1600)
     question: OutlineQuestion | None = None
     unresolved: list[str] = Field(default_factory=list, max_length=12)
-    ai_decisions: list[str] = Field(default_factory=list, max_length=8)
 
     @model_validator(mode="after")
     def valid_action(self):
         if self.action == "ask" and self.question is None:
             raise ValueError("ask 必须返回完整问题")
-        if self.action != "finalize" and not self.next_task.strip():
+        if self.action == "continue" and not self.next_task.strip():
             raise ValueError("必须明确下一段写作任务")
         return self
 
@@ -94,7 +95,8 @@ class OutlineAction(BaseModel):
 
 def new_session() -> dict:
     return {
-        "protocol_version": 2,
+        "protocol_version": 3,
+        "events": [],
         "revision": 1,
         "status": "writing",
         "segments": [],

@@ -6,13 +6,10 @@ import logging
 import uuid
 from typing import Any
 
-from langchain_core.messages import HumanMessage, SystemMessage
-
 from app.core.config import settings
 from app.core.inference import gather_inference, raise_for_inference_recovery
 from app.game.clues import derive_game_process, normalize_clue_stages, render_clue_markdown
 from app.script_editor.conversion.contracts import (
-    CharacterDiscoveryResult,
     ClueStagesResult,
     ScenesResult,
     ScriptMetadata,
@@ -27,6 +24,7 @@ from app.script_editor.conversion.disclosure import (
     audience_material,
     extract_plan,
     invoke,
+    validate_no_secret_inventory,
 )
 from app.script_editor.conversion.progress import (
     _add_character_tasks,
@@ -39,7 +37,6 @@ from app.script_editor.conversion.progress import (
 from app.script_editor.conversion.prompts import (
     CHARACTER_SYSTEM,
     CLUES_SYSTEM,
-    DISCOVER_SYSTEM,
     METADATA_SYSTEM,
     SCENES_SYSTEM,
 )
@@ -60,7 +57,7 @@ def _character_prompt(name: str) -> str:
 
 
 def _get_structured_llm():
-    from app.core.llm_factory import create_llm
+    from app.script_editor.llm import create_editor_llm as create_llm
 
     return create_llm(
         model=settings.SCRIPT_EDITOR_MODEL or "deepseek-flash",
@@ -157,86 +154,6 @@ def _clamp_free_speech_limits(limits: list[int], num_rounds: int) -> list[int]:
     return clamped
 
 
-async def _discover_characters(
-    final_draft: str, player_count: int, max_retries: int = 3
-) -> list[dict]:
-    """从终稿中提取角色列表（当 characters 为空时的降级方案）
-
-    带有严格验证：识别出的角色数量必须等于 player_count，否则重试。
-    """
-    base_llm = _get_structured_llm()
-    llm = base_llm.with_structured_output(
-        CharacterDiscoveryResult,
-        method="function_calling",
-        tool_choice=CharacterDiscoveryResult.__name__
-        if settings.INFERENCE_BACKEND == "tokendance"
-        else "auto",
-    )
-
-    user_prompt = (
-        f"【关键约束】你必须返回恰好 {player_count} 个角色，不能多也不能少。\n\n"
-        f"从以下剧本终稿中，找出所有 {player_count} 个可扮演的角色。\n"
-        "对每个角色，提取姓名、性别（男/女）、年龄、职业/身份。\n"
-        "请逐段仔细检查全文，确保不遗漏任何一个角色。\n\n"
-        f"剧本终稿：\n---\n{final_draft}\n---"
-    )
-
-    for attempt in range(max_retries):
-        result = await asyncio.wait_for(
-            llm.ainvoke(
-                [
-                    SystemMessage(content=DISCOVER_SYSTEM),
-                    HumanMessage(content=user_prompt),
-                ]
-            ),
-            timeout=120,
-        )
-
-        if not result or not getattr(result, "characters", None):
-            logger.warning(f"Character discovery attempt {attempt + 1}: returned empty")
-            continue
-
-        # Pydantic 级别验证
-        if isinstance(result, CharacterDiscoveryResult) and not result.validate_count(player_count):
-            logger.warning(
-                f"Character discovery attempt {attempt + 1}: "
-                f"Pydantic validation failed, found {result.count}, expected {player_count}"
-            )
-            continue
-
-        discovered = []
-        for c in result.characters:  # type: ignore[union-attr]
-            discovered.append(
-                {
-                    "name": c.name.strip(),
-                    "gender": c.gender,
-                    "age": c.age,
-                    "occupation": c.occupation,
-                    "character_id": str(uuid.uuid4()),
-                    "profile": "",
-                    "appearance": "",
-                }
-            )
-
-        if len(discovered) == player_count:
-            logger.info(
-                f"Character discovery OK ({attempt + 1} attempts): "
-                f"{[c['name'] for c in discovered]}"
-            )
-            return discovered
-
-        logger.warning(
-            f"Character discovery attempt {attempt + 1}: found {len(discovered)}, "
-            f"expected {player_count}. Retrying..."
-        )
-
-    logger.error(
-        f"Character discovery failed after {max_retries} attempts: "
-        f"could not find exactly {player_count} characters"
-    )
-    return []
-
-
 # === 并行 LLM 调用封装 ===
 
 
@@ -245,27 +162,29 @@ async def _run_game_clues(base_llm, script_id: str, state: ScriptGenState, chars
     _update_convert_task(script_id, "game_flow", "running")
     num_rounds = state.get("num_clue_rounds", 2)
     try:
-        llm = base_llm.with_structured_output(
-            ClueStagesResult,
-            method="function_calling",
-            tool_choice=ClueStagesResult.__name__
-            if settings.INFERENCE_BACKEND == "tokendance"
-            else "auto",
-        )
         user_msg = (
             f"## 剧本标题\n{state.get('script_title', '')}\n\n"
             f"## 角色列表（{state.get('player_count', 4)}人）\n{chars_summary}\n\n"
             f"## 按轮次披露的材料\n{json.dumps(audience_material(state, scope='clues'), ensure_ascii=False)}\n"
             f"请设计恰好 {num_rounds} 轮线索发现阶段。"
         )
-        result = await asyncio.wait_for(
-            llm.ainvoke(
-                [
-                    SystemMessage(content=CLUES_SYSTEM.format(num_rounds=num_rounds)),
-                    HumanMessage(content=user_msg),
-                ]
-            ),
-            timeout=300,
+
+        def validate_clues(value):
+            if len(value.clue_stages) != num_rounds:
+                raise ValueError(f"clue_stages 必须包含恰好 {num_rounds} 轮")
+            if any(
+                not stage.items
+                or any(not item.content.strip() or not item.summary.strip() for item in stage.items)
+                for stage in value.clue_stages
+            ):
+                raise ValueError("每轮必须包含有完整content与summary的items")
+
+        result = await invoke(
+            base_llm,
+            ClueStagesResult,
+            CLUES_SYSTEM.format(num_rounds=num_rounds),
+            user_msg,
+            validate=validate_clues,
         )
         if result:
             _update_convert_task(script_id, "game_flow", "complete")
@@ -435,27 +354,12 @@ async def _run_metadata(base_llm, script_id: str, state: ScriptGenState):
     """并行任务：生成元数据"""
     _update_convert_task(script_id, "metadata", "running")
     try:
-        llm = base_llm.with_structured_output(
-            ScriptMetadata,
-            method="function_calling",
-            tool_choice=ScriptMetadata.__name__
-            if settings.INFERENCE_BACKEND == "tokendance"
-            else "auto",
-        )
         user_msg = (
             f"## 剧本标题\n{state.get('script_title', '')}\n\n"
             f"## 开局公开材料\n{json.dumps(audience_material(state), ensure_ascii=False)}\n"
             f"请生成概述、标签和描述。"
         )
-        result = await asyncio.wait_for(
-            llm.ainvoke(
-                [
-                    SystemMessage(content=METADATA_SYSTEM),
-                    HumanMessage(content=user_msg),
-                ]
-            ),
-            timeout=120,
-        )
+        result = await invoke(base_llm, ScriptMetadata, METADATA_SYSTEM, user_msg)
         if result:
             _update_convert_task(script_id, "metadata", "complete")
             return result
@@ -483,13 +387,17 @@ async def _run_character(
     _update_convert_task(script_id, task_id, "running")
     try:
         identity = {key: char.get(key) for key in ("name", "gender", "age", "occupation")}
+        names = [c["name"] for c in state["disclosure_plan"]["characters"]]
         personal, public = await gather_inference(
             invoke(
                 base_llm,
                 PersonalScript,
                 _character_prompt(char_name)
-                + "\n本次只写个人剧本。通常400至600字，亲历充足时适度扩展。材料已经按本人开局所知筛选，不能补充其他事实，也不能用否定句透露他人未知秘密。保留全部本人实际行为。",
+                + "\n本次只写个人剧本。通常400至600字，亲历充足时适度扩展。材料按本人开局所知筛选，不能补充其他事实，也不能用否定句透露他人未知秘密。不得以全知视角解释他人的心理、动机或私下经历；对他人的判断只能来自本人见闻。保留全部本人实际行为。",
                 {"角色": identity, **audience_material(state, role=char_name)},
+                validate=lambda value: validate_no_secret_inventory(
+                    value.character_script, char_name, names
+                ),
             ),
             invoke(
                 base_llm,
@@ -505,6 +413,9 @@ async def _run_character(
             "仅从个人稿派生角色速览（约150–300字，禁止全文复述）和AI扮演资料，不能补充外部事实。保留本人关键行为和作案记忆；"
             "不强制加入疑问、指定要问谁、虚构目标或推理结论。速览自然分段，AI资料忠实身份经历与关系。",
             {"角色": identity, "个人剧本": personal.character_script},
+            validate=lambda value: validate_no_secret_inventory(
+                value.script_summary + "\n" + value.system_prompt, char_name, names
+            ),
         )
         result = SingleCharacterResult(
             **identity, **personal.model_dump(), **public.model_dump(), **derived.model_dump()
@@ -542,6 +453,8 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
     import json
 
     from app.script_editor.nodes.safety_check import GENERIC_ERROR
+    from app.script_editor.outline.runtime import current_runtime
+    from app.script_editor.services.execution import PROMPT_VERSION
 
     material = {
         key: state.get(key)
@@ -560,9 +473,12 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
         )
     }
     fingerprint = hashlib.sha256(
-        json.dumps(material, sort_keys=True, ensure_ascii=False).encode()
+        json.dumps([PROMPT_VERSION, material], sort_keys=True, ensure_ascii=False).encode()
     ).hexdigest()
     previous = state.get("convert_cache") or {}
+    runtime = current_runtime.get()
+    if runtime and runtime.convert_cache.get("fingerprint") == fingerprint:
+        previous = runtime.convert_cache
     cache = (
         dict(previous.get("results") or {}) if previous.get("fingerprint") == fingerprint else {}
     )
@@ -573,10 +489,11 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
             "error_message": GENERIC_ERROR,
             "retry_step": STEP_CONVERT,
             "convert_cache": {"fingerprint": fingerprint, "results": cache},
+            "disclosure_cache": state.get("disclosure_cache", {}),
             "convert_progress": get_convert_progress(script_id) or {},
         }
 
-    async def cached(key, factory, schema, validate=lambda value: True, attempts=3):
+    async def cached(key, factory, schema, validate=lambda value: True, attempts=1):
         if key in cache:
             value = schema.model_validate(cache[key]) if schema else cache[key]
             if validate(value):
@@ -590,6 +507,10 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
                 if value is None or not validate(value):
                     raise ValueError("转换结果不完整")
                 cache[key] = value.model_dump() if schema else value
+                if runtime:
+                    runtime.convert_cache = {"fingerprint": fingerprint, "results": dict(cache)}
+                    runtime.queue_progress("convert_cache", runtime.convert_cache)
+                    await runtime.drain_progress()
                 return value
             except Exception as error:
                 raise_for_inference_recovery(error)
@@ -874,6 +795,7 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
 
     return {
         "disclosure_plan": state.get("disclosure_plan", {}),
+        "disclosure_cache": state.get("disclosure_cache", {}),
         "game_full_process": game_full_process,
         "clue_stages": clue_stages,
         "full_truth": full_truth,
