@@ -1,91 +1,106 @@
-import { useMemo } from 'react';
+import { useMemo, useSyncExternalStore, type CSSProperties } from 'react';
 import type { ClueMedia, CluePresentation } from '@/types/cluePresentation';
 import type { PublicClue } from '@/types/game';
 
 const clamp = (value: number) => Math.min(1, Math.max(0, value));
 const ease = (value: number) => 1 - Math.pow(1 - clamp(value), 3);
+const smooth = (value: number) => { const t = clamp(value); return t * t * (3 - 2 * t); };
 const mix = (a: number, b: number, value: number) => a + (b - a) * value;
-const berths = [[-34, -19], [34, -17], [-32, 16], [33, 19], [-8, -26], [9, 23], [0, -8]];
+const berths = [[-35, -19], [35, -17], [-34, 17], [34, 19], [-9, -28], [10, 24], [0, -8]];
+const smallScreen = () => window.matchMedia('(max-width: 700px)').matches;
+const subscribe = (listener: () => void) => {
+  const query = window.matchMedia('(max-width: 700px)');
+  query.addEventListener('change', listener);
+  return () => query.removeEventListener('change', listener);
+};
 
-/** All evidence stays in one continuous space; the playhead also owns every transform. */
+/** One playhead owns the camera, optical reveal, focus and final gathering. */
 export function ImmersiveClueScene({ presentation, clues, elapsed, duration }: {
   presentation: CluePresentation; clues: PublicClue[]; elapsed: number; duration: number;
 }) {
-  const tracks = useMemo(() => {
+  const mobile = useSyncExternalStore(subscribe, smallScreen, () => false);
+  const { tracks, cues } = useMemo(() => {
     const map = new Map(clues.map(clue => [clue.id, clue]));
-    let start = 0;
-    const entries: { id: string; media: ClueMedia; at: number; hold: number }[] = [];
-    for (const shot of presentation.shots) {
+    const entries: { id: string; media: ClueMedia; at: number; span: number }[] = [];
+    const cues = presentation.shots.map((shot, shotIndex) => {
+      const at = presentation.shots.slice(0, shotIndex).reduce((sum, cue) => sum + cue.duration_ms, 0);
       const slot = shot.duration_ms / Math.max(1, shot.clue_ids.length);
       for (const [index, id] of shot.clue_ids.entries()) {
         const clue = map.get(id);
         if (clue?.media?.status === 'ready') entries.push({
-          id: shot.id + id, media: clue.media, at: start + index * slot,
-          hold: Math.max(850, Math.min(1800, slot * 0.7)),
+          id: shot.id + id, media: clue.media, at: at + index * slot, span: slot,
         });
       }
-      start += shot.duration_ms;
-    }
-    return entries;
+      return { ...shot, at };
+    });
+    return { tracks: entries, cues };
   }, [presentation, clues]);
   const progress = clamp(elapsed / duration);
-  const assemble = ease((elapsed - duration + 2100) / 1800);
+  const gatherAt = duration - Math.min(2300, duration * 0.2);
+  const assemble = smooth((elapsed - gatherAt) / 1800);
   const dossier = presentation.template === 'dossier';
-  const currentIndex = tracks.reduce((active, track, index) => elapsed >= track.at ? index : active, -1);
-  const shot = presentation.shots.find((_, index) => elapsed < presentation.shots.slice(0, index + 1)
-    .reduce((sum, item) => sum + item.duration_ms, 0)) ?? presentation.shots.at(-1)!;
+  const shot = cues.find(cue => elapsed < cue.at + cue.duration_ms) ?? cues.at(-1)!;
+  const phase = elapsed >= gatherAt ? 'gather' : elapsed < (tracks[0]?.at ?? duration) ? 'opening' : 'evidence';
+  const copyAge = elapsed - shot.at;
+  const copyOpacity = Math.min(ease(copyAge / 650), ease((shot.duration_ms - copyAge) / 360));
 
-  return <main className="cinema-immersive" data-scene={shot.id}>
+  return <main className="cinema-immersive" data-scene={shot.id} data-phase={phase}>
     <div className="cinema-space" aria-hidden="true"
-      style={{ transform: `perspective(1500px) rotateX(${mix(2, -1, progress)}deg) rotateY(${Math.sin(progress * Math.PI * 2) * 2}deg) scale(${1 + progress * 0.075})` }}>
-      <svg className="cinema-trace" viewBox="0 0 1000 700" preserveAspectRatio="none">
-        <path d={dossier ? 'M-80 560 Q220 650 420 330 T1100 160' : 'M-80 620 C220 700 180 30 510 150 S790 690 1080 350'}
-          pathLength="1" style={{ strokeDashoffset: 1 - progress }} />
-      </svg>
+      style={{ transform: `perspective(1800px) rotateY(${Math.sin(progress * Math.PI) * 1.2}deg) scale(${1 + progress * 0.025})` }}>
       {tracks.map((track, index) => {
         const age = elapsed - track.at;
-        const arrival = ease(age / 720);
-        const departure = ease((age - track.hold) / 1250);
-        const berth = berths[index % berths.length];
+        const arrival = smooth(age / 1000);
+        const departure = smooth((age - track.span * 0.76) / 1550);
+        const drift = clamp(age / (track.span + 1500));
         const side = index % 2 === 0 ? -1 : 1;
-        const x = mix(mix(side * (dossier ? 55 : 76), side * 4, arrival), berth[0], departure);
-        const y = mix(mix(dossier ? 60 : side * 22, -3, arrival), berth[1], departure);
-        const rotation = mix(mix(side * (dossier ? 35 : 18), side * -2, arrival), side * (7 + index % 3 * 3), departure);
-        const float = Math.sin(elapsed / 1650 + index * 1.7) * 1.2 * departure;
-        const scale = mix(mix(0.3, 0.91, arrival), 0.34, departure);
-        const opacity = age < 0 ? 0 : clamp(age / 330) * mix(1, 0.58, departure);
-        const position = {
-          transform: `translate3d(calc(-50% + ${mix(x, (index - (tracks.length - 1) / 2) * 10.5, assemble)}vw), calc(-50% + ${mix(y + float, Math.abs(index - (tracks.length - 1) / 2) * 3.2 - 5, assemble)}vh), ${mix(mix(-650, 80, arrival), -160, departure)}px) rotateX(${dossier ? mix(38, 0, arrival) : 0}deg) rotateY(${mix(side * 26, 0, arrival)}deg) rotate(${mix(rotation, (index - (tracks.length - 1) / 2) * 6, assemble)}deg) scale(${mix(scale, 0.32, assemble)})`,
-          opacity: mix(opacity, age >= 0 ? 0.88 : 0, assemble),
-          zIndex: currentIndex === index ? 30 : index + 1,
-          filter: `brightness(${mix(1, 0.76, departure)})`,
-          '--reveal': `${(1 - arrival) * 100}%`,
-        } as React.CSSProperties;
-        return <div key={track.id} className="cinema-card" data-active={currentIndex === index} style={position}>
-          <FilmImage media={track.media} />
-          <div className="cinema-card-wash" />
-          <span className="cinema-card-index">{String(index + 1).padStart(2, '0')}</span>
-          <span className="cinema-card-edge" />
+        const variant = index % 3;
+        const berth = berths[index % berths.length];
+        // Alternating wide, off-axis and close compositions; no repeated flying-card entrance.
+        const heroX = mobile ? side * 3 : variant === 1 ? side * 13 : side * 4;
+        const heroY = mobile ? -5 : variant === 2 ? -4 : 0;
+        const x = mix(heroX + side * (1 - arrival) * 9, berth[0], departure);
+        const y = mix(heroY + (dossier ? 9 : 2) * (1 - arrival), berth[1], departure);
+        const fan = index - (tracks.length - 1) / 2;
+        const scale = mix(mix(1.025, 0.985, drift), mobile ? 0.28 : 0.3, departure);
+        const angle = mix(dossier ? side * 2.5 * (1 - arrival) : 0, side * (4 + index % 3), departure);
+        const insetX = variant === 1 && !mobile ? 13 : 0;
+        const insetY = variant === 2 && !mobile ? 8 : 0;
+        const reveal = (1 - arrival) * (dossier ? 48 : 42);
+        const crop = 1 - Math.max(departure, assemble);
+        const opacity = age < 0 ? 0 : ease(age / 700) * mix(1, 0.22, departure);
+        const focus = track.media.focus;
+        const phoneFocus = track.media.mobile_focus ?? focus;
+        const style = {
+          transform: `translate3d(calc(-50% + ${mix(x, fan * (mobile ? 11 : 10.5), assemble)}vw), calc(-50% + ${mix(y, Math.abs(fan) * 3.2 - 5, assemble)}vh), ${mix(-90 * (1 - arrival), -220, departure) * (1 - assemble)}px) rotateX(${dossier ? (1 - arrival) * 9 * (1 - assemble) : 0}deg) rotateY(${side * (1 - arrival) * 6 * (1 - assemble)}deg) rotate(${mix(angle, fan * 6, assemble)}deg) scale(${mix(scale, mobile ? 0.27 : 0.24, assemble)})`,
+          opacity: mix(opacity, age >= 0 ? 1 : 0, assemble),
+          zIndex: age >= 0 && departure < 0.8 ? 20 + index : index + 1,
+          filter: `blur(${((1 - arrival) * 2 + departure * 0.8) * (1 - assemble)}px) brightness(${mix(mix(0.78, 1, arrival), 0.82, departure)})`,
+          clipPath: `inset(${(insetY + (dossier ? reveal : 0)) * crop}% ${(insetX + (!dossier ? reveal : 0)) * crop}% ${insetY * crop}% ${insetX * crop}%)`,
+          '--focus': `${focus[0] * 100}% ${focus[1] * 100}%`,
+          '--mobile-focus': `${phoneFocus[0] * 100}% ${phoneFocus[1] * 100}%`,
+          '--edge-opacity': Math.max(departure * 0.3, assemble * 0.65),
+        } as CSSProperties;
+        const lens = {
+          transform: `scale(${mix(mix(variant === 2 ? 1.3 : 1.14, 1.02, drift), 1, assemble)}) translate3d(${side * mix(2.8, -1.8, drift) * (1 - assemble)}%, ${mix(1.5, -1.5, drift) * (1 - assemble)}%, 0)`,
+        };
+        return <div key={track.id} className="cinema-card" data-active={age >= 0 && departure < 0.8} style={style}>
+          <FilmImage media={track.media} style={lens} />
+          <div className="cinema-card-wash" style={{ opacity: 1 - assemble * 0.75 }} />
+          <div className="cinema-card-edge" />
         </div>;
       })}
     </div>
-    <div className="cinema-searchlight" aria-hidden="true"
-      style={{ transform: `translateX(${mix(-65, 65, progress)}vw) rotate(-24deg)`, opacity: Math.sin(progress * Math.PI) * 0.22 }} />
+    <div className="cinema-optical-shade" aria-hidden="true" />
     <div className="cinema-film-grain" aria-hidden="true" />
-    <div className="cinema-iris" aria-hidden="true" style={{ opacity: Math.max(0, 1 - elapsed / 1300) }} />
-    <div className="cinema-copy" key={shot.id}>
-      <p className="cinema-shot-number">{dossier ? '纸页之间' : '暗处的回声'}</p>
+    <div className="cinema-iris" aria-hidden="true" style={{ opacity: Math.max(0, 1 - elapsed / 1100) }} />
+    <div className="cinema-copy" style={{ opacity: copyOpacity, transform: `translateY(${(1 - ease(copyAge / 900)) * 14}px)` }}>
       <h2>{shot.title}</h2>
       {shot.caption && <p className="cinema-caption">{shot.caption}</p>}
     </div>
   </main>;
 }
 
-function FilmImage({ media }: { media: ClueMedia }) {
-  return <img src={media.image_url} alt="" decoding="async"
-    onError={event => { event.currentTarget.style.visibility = 'hidden'; }}
-    style={{
-      '--focus': `${media.focus[0] * 100}% ${media.focus[1] * 100}%`,
-      '--mobile-focus': `${(media.mobile_focus ?? media.focus)[0] * 100}% ${(media.mobile_focus ?? media.focus)[1] * 100}%`,
-    } as React.CSSProperties} />;
+function FilmImage({ media, style }: { media: ClueMedia; style: CSSProperties }) {
+  return <img src={media.image_url} alt="" decoding="async" style={style}
+    onError={event => { event.currentTarget.style.visibility = 'hidden'; }} />;
 }

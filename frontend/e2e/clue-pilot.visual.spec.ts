@@ -13,7 +13,7 @@ for (const device of [{ name: 'desktop', width: 1440, height: 900 }, { name: 'mo
     const url = new URL(pilotUrl!);
     const response = await page.request.get(new URL(url.searchParams.get('src')!, url.origin).href);
     const data = await response.json();
-    const output = path.resolve('../output/playwright/clue-pilot-v2');
+    const output = path.resolve('../output/playwright/clue-pilot-optical');
     await mkdir(output, { recursive: true });
     await page.goto(pilotUrl!);
     for (const stage of data.clue_stages) {
@@ -22,7 +22,8 @@ for (const device of [{ name: 'desktop', width: 1440, height: 900 }, { name: 'mo
       for (const shot of stage.presentation.shots) {
         const title = page.locator('.cinema-copy h2');
         await expect(title).toHaveText(shot.title, { timeout: 16000 });
-        await expect.poll(async () => title.evaluate(element => Number(getComputedStyle(element).opacity))).toBeGreaterThan(0.99);
+        await expect.poll(async () => page.locator('.cinema-copy').evaluate(element => Number(getComputedStyle(element).opacity))).toBeGreaterThan(0.99);
+        await expect(page.locator('.cinema-progress, .cinema-trace')).toHaveCount(0);
         if (shot.caption) await expect(page.locator('.cinema-caption')).toHaveText(shot.caption);
         else await expect(page.locator('.cinema-caption')).toHaveCount(0);
         const bounds = await page.locator('.cinema-copy').boundingBox();
@@ -52,7 +53,10 @@ for (const device of [{ name: 'desktop', width: 1440, height: 900 }, { name: 'mo
       const details = page.getByRole(device.name === 'mobile' ? 'dialog' : 'tooltip');
       await expect(details.locator('section')).toHaveCount(2);
       const thumbnail = await details.locator('img').first().boundingBox();
-      expect(thumbnail!.width).toBeLessThanOrEqual(96);
+      expect(thumbnail!.width).toBeGreaterThan(300);
+      expect(thumbnail!.height).toBe(164);
+      await expect(details.locator('img').first()).not.toHaveAttribute('alt', /场景示意/);
+      await expect(details.getByText('场景示意', { exact: true })).toHaveCount(0);
       await page.screenshot({ path: path.join(output, device.name + '-' + stage.stage + '-details.png') });
       await page.keyboard.press('Escape');
     }

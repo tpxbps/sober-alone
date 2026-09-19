@@ -8,6 +8,7 @@ import { Markdown } from '@/components/ui/Markdown';
 import { ClueImage } from './ClueImage';
 import { ImmersiveClueScene } from './ImmersiveClueScene';
 import './cluePresentation.css';
+import './immersiveClueScene.css';
 
 function Highlight({ text, emphasis }: { text: string; emphasis?: string }) {
   if (!emphasis || !text.includes(emphasis)) return <>{text}</>;
@@ -108,7 +109,7 @@ export function CluePresentationOverlay({ state, onContinue }: {
     <Dialog.Content aria-describedby="clue-cinema-description" onEscapeKeyDown={event => event.preventDefault()}
       onPointerDownOutside={event => event.preventDefault()} className={`clue-cinema ${presentation?.template === 'dossier' ? 'is-dossier' : ''} ${presentation?.version === 2 && !finished ? 'is-immersive' : ''} ${reduced ? 'is-reduced' : ''} ${stopped ? 'is-paused' : ''}`}
       onClick={event => { if (event.target === event.currentTarget && finished) void confirm(); }}>
-      <div className="cinema-backdrop" aria-hidden="true" style={presentation?.background ? { backgroundImage: `url("${presentation.background.image_url}")` } : undefined} />
+      <div className="cinema-backdrop" aria-hidden="true" style={presentation?.background ? { backgroundImage: `url("${presentation.background.image_url}")`, ...(presentation.version === 2 && !finished ? { transform: `scale(${1.06 + elapsed / Math.max(total, 1) * 0.12}) translateX(${elapsed / Math.max(total, 1) * 1.5 - 1}%)` } : {}) } : undefined} />
       <div className="cinema-shade" aria-hidden="true" />
       <header className="cinema-header">
         <div><p className="cinema-eyebrow">第 {String(state.round).padStart(2, '0')} 轮 · 公开线索</p><Dialog.Title>{presentation?.title ?? '新的线索已送达'}</Dialog.Title></div>
@@ -133,7 +134,6 @@ export function CluePresentationOverlay({ state, onContinue }: {
             </div>
           </motion.main>
         </AnimatePresence>}
-        <footer className="cinema-progress"><div className="cinema-progress-bars">{shots.map((item, i) => <span key={item.id}><i style={{ width: `${i < index ? 100 : i === index ? Math.min(100, (elapsed - start) / item.duration_ms * 100) : 0}%` }} /></span>)}</div><p>场景示意 · 判断依据以线索正文为准</p></footer>
       </> : <main className="cinema-end">
         <p className="cinema-eyebrow">{state.clues.length} 条线索已公开</p><h2>接下来，听听彼此的解释。</h2>
         <p className="cinema-end-intro">可以展开回看完整线索。准备好后，再开始本轮推理。</p>
