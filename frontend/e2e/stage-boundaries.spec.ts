@@ -36,9 +36,9 @@ test('历史自我介绍不会在公开线索后获得引用权限，个人剧�
   await page.reload();
   for (const id of [1, 2]) {
     await expect(page.locator(`[data-record-id="${id}"]`)).toContainText('[c01]');
-    await expect(page.locator(`[data-record-id="${id}"]`).getByRole('button', { name: '查看线索 门锁痕迹' })).toHaveCount(0);
+    await expect(page.locator(`[data-record-id="${id}"]`).getByLabel('查看线索 门锁痕迹', { exact: true })).toHaveCount(0);
   }
-  await expect(page.locator('[data-record-id="3"]').getByRole('button', { name: '查看线索 门锁痕迹' })).toBeVisible();
+  await expect(page.locator('[data-record-id="3"]').getByLabel('查看线索 门锁痕迹', { exact: true })).toBeVisible();
   await expect(page.locator('[data-record-id="3"]').getByTitle('TTS 未启用')).toBeVisible();
   expect(speechRequests).toBe(0);
   await page.screenshot({ path: info.outputPath('history-scope.png') });

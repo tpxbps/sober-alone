@@ -104,6 +104,6 @@ export function ImmersiveClueScene({ presentation, clues, elapsed, duration }: {
 }
 
 function FilmImage({ media, style }: { media: ClueMedia; style: CSSProperties }) {
-  return <img src={media.image_url} alt="" decoding="async" style={style}
+  return <img draggable={false} src={media.image_url} alt="" decoding="async" style={style}
     onError={event => { event.currentTarget.style.visibility = 'hidden'; }} />;
 }

@@ -60,8 +60,8 @@ for (const device of [{ name: 'desktop', width: 1440, height: 900 }, { name: 'mo
       const sampleIds = stage.items.slice(0, 2).map((clue: { id: string }) => clue.id).join(',');
       await page.getByRole('textbox', { name: '发言输入框' }).fill(`[材料之间的联系仍需核实][${sampleIds}]`);
       await page.getByRole('button', { name: '预览发言', exact: true }).click();
-      await page.getByRole('button', { name: '查看 2 条引用线索' }).click();
-      const details = page.getByRole(device.name === 'mobile' ? 'dialog' : 'tooltip');
+      await page.getByLabel('查看 2 条引用线索', { exact: true }).hover();
+      const details = page.getByRole('tooltip');
       await expect(details.locator('section')).toHaveCount(2);
       const thumbnail = await details.locator('img').first().boundingBox();
       expect(thumbnail!.width).toBeGreaterThan(300);
@@ -70,14 +70,7 @@ for (const device of [{ name: 'desktop', width: 1440, height: 900 }, { name: 'mo
       await expect(details.getByText('场景示意', { exact: true })).toHaveCount(0);
       await page.screenshot({ path: path.join(output, device.name + '-' + stage.stage + '-details.png') });
       await page.keyboard.press('Escape');
-      await page.getByRole('button', { name: /^查看已公开线索/ }).click();
-      const archive = page.getByRole('dialog', { name: '线索档案' });
-      await expect(archive.locator('summary')).toHaveCount(stage.items.length);
-      await page.screenshot({ path: path.join(output, device.name + '-' + stage.stage + '-archive.png') });
-      await archive.locator('summary').first().click();
-      await expect(archive.locator('.cinema-evidence-body').first()).toBeVisible();
-      await page.screenshot({ path: path.join(output, device.name + '-' + stage.stage + '-archive-reading.png') });
-      await archive.getByRole('button', { name: '关闭线索档案' }).click();
+
     }
   });
 }

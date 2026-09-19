@@ -5,7 +5,6 @@ import type { CluePresentationState } from '@/types/cluePresentation';
 import { CluePresentationOverlay } from '@/components/game/CluePresentationOverlay';
 import { MentionComposer, type MentionComposerHandle } from '@/components/game/MentionComposer';
 import { ClueDetails } from '@/components/game/ClueReferencePanel';
-import { ClueArchive } from '@/components/game/ClueArchive';
 import { GameMessageMarkdown } from '@/components/ui/GameMessageMarkdown';
 import { citedIds } from '@/lib/clueScope';
 import { warmCluePresentation } from '@/lib/clueImageLoader';
@@ -69,7 +68,6 @@ export function CluePreview() {
       <section className="rounded-xl border border-border p-5"><h2 className="mb-4 text-lg">本轮完整线索</h2><ClueDetails clues={stage.items} /></section>
     </>}
     {active && <CluePresentationOverlay state={active} onContinue={async () => setActive(null)} />}
-    {!active && <ClueArchive clues={clues} />}
   </main>;
 }
 createRoot(document.getElementById('root')!).render(<StrictMode><CluePreview /></StrictMode>);

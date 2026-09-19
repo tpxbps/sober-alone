@@ -47,7 +47,7 @@ test('上一阶段闲时预取图片，不提前显示下一轮线索', async ({
   await expect(page.locator('img[src="/images/scripts/test/future.svg"]')).toHaveCount(0);
   await expect(page.getByRole('button', { name: /查看已公开线索/ })).toHaveCount(0);
 });
-test('引用编辑、多选、换行、重开、复制删除与手机详情', async ({ page }) => {
+test('引用编辑、多选、换行、重开、复制删除与悬停详情', async ({ page }) => {
   await images(page);
   await page.goto('/clue-preview.html?src=/images/scripts/test/preview.json');
   const editor = page.getByRole('textbox', { name: '发言输入框' });
@@ -76,7 +76,7 @@ test('引用编辑、多选、换行、重开、复制删除与手机详情', as
   });
   expect(copied).toContain('[c01,c02]');
   await page.getByRole('button', { name: '预览发言', exact: true }).click();
-  const citation = page.getByRole('button', { name: '查看 2 条引用线索' });
+  const citation = page.getByLabel('查看 2 条引用线索', { exact: true });
   await expect(citation).toBeVisible();
   await citation.hover();
   const tooltip = page.getByRole('tooltip');
@@ -90,18 +90,18 @@ test('引用编辑、多选、换行、重开、复制删除与手机详情', as
   await expect(tooltip.getByRole('heading', { name: /窗台红泥/ })).toBeInViewport();
   await page.keyboard.press('Escape');
   await page.setViewportSize({ width: 390, height: 844 });
+  await citation.hover();
+  await expect(tooltip).toBeVisible();
+  expect((await tooltip.boundingBox())!.width).toBeLessThan(390);
   await citation.click();
-  const sheet = page.getByRole('dialog', { name: '引用线索 · 2' });
-  await expect(sheet).toBeVisible();
-  await expect(sheet.getByRole('heading', { name: /门锁痕迹/ })).toBeVisible();
-  await sheet.locator('section').last().scrollIntoViewIfNeeded();
-  await expect(sheet.getByRole('heading', { name: /窗台红泥/ })).toBeInViewport();
-  await sheet.getByRole('button', { name: '关闭线索详情' }).click();
+  await page.mouse.move(0, 0);
+  await expect(tooltip).toBeHidden();
+  await expect(page.getByRole('dialog', { name: '引用线索 · 2' })).toHaveCount(0);
   await editor.fill('/');
   await editor.press('Enter');
   await reason.fill('未应用也会发送');
   await page.getByRole('button', { name: '预览发言', exact: true }).click();
-  await expect(page.getByRole('button', { name: '查看 1 条引用线索' })).toHaveText('未应用也会发送1');
+  await expect(page.getByLabel('查看 1 条引用线索', { exact: true })).toHaveText('未应用也会发送\u20601');
   await editor.fill('/');
   await editor.press('Enter');
   await reason.press('Escape');
@@ -127,6 +127,7 @@ test('连续镜头保留所有物证，暂停冻结运动，结尾仍可读正�
   await expect.poll(() => page.locator('.cinema-card').first().evaluate(el => Number(getComputedStyle(el).opacity))).toBeGreaterThan(0.5);
   await page.getByRole('button', { name: '暂停演出' }).click();
   const transforms = () => page.locator('.cinema-space, .cinema-card, .cinema-card img, .cinema-copy, .cinema-backdrop').evaluateAll(elements => elements.map(el => [getComputedStyle(el).transform, getComputedStyle(el).opacity, getComputedStyle(el).clipPath]));
+  await assertNonInteractiveArt(page);
   const paused = await transforms();
   await page.waitForTimeout(300);
   expect(await transforms()).toEqual(paused);
@@ -137,6 +138,7 @@ test('连续镜头保留所有物证，暂停冻结运动，结尾仍可读正�
   await page.getByRole('button', { name: '跳至结尾' }).click();
   await page.getByText('门锁痕迹', { exact: true }).last().click();
   await expect(page.getByRole('dialog').getByText('门锁没有撬动痕迹。')).toBeVisible();
+  await expect(page.locator('.cinema-evidence-body').first()).not.toHaveCSS('user-select', 'none');
   await page.getByRole('button', { name: '继续推理' }).click();
   await expect(page.getByRole('dialog')).toBeHidden();
 });
@@ -168,6 +170,7 @@ test('暂停、跳至结尾、确认失败重试、刷新与多标签页恢复',
   await expect(dialog).toBeVisible();
   await page.getByRole('button', { name: '暂停演出' }).click();
   const art = dialog.locator('.cinema-art img').first();
+  await assertNonInteractiveArt(page);
   const position = await art.evaluate(el => getComputedStyle(el).transform);
   await page.waitForTimeout(700);
   expect(await art.evaluate(el => getComputedStyle(el).transform)).toBe(position);
@@ -186,13 +189,7 @@ test('暂停、跳至结尾、确认失败重试、刷新与多标签页恢复',
   await page.getByRole('button', { name: '继续推理' }).click();
   await expect(dialog).toBeHidden();
   await expect(other.getByRole('dialog', { name: '线索演出' })).toBeHidden({ timeout: 6000 });
-  for (const width of [1440, 1024, 390]) {
-    await page.setViewportSize({ width, height: 900 });
-    await page.getByRole('button', { name: '查看已公开线索（2条）' }).click();
-    const archive = page.getByRole('dialog', { name: '线索档案' });
-    await expect(archive).toBeVisible();
-    await archive.getByRole('button', { name: '返回讨论' }).click();
-  }
+  await expect(page.getByRole('button', { name: /查看已公开线索/ })).toHaveCount(0);
 
   await page.reload();
   await expect(page.getByRole('textbox', { name: '发言输入框' })).toBeVisible();
@@ -209,6 +206,7 @@ test('资源失效与减少动态效果仍有可读摘要和继续入口', async
   await expect(page.getByRole('button', { name: '继续推理' })).toBeVisible();
   await page.getByText('门锁痕迹', { exact: true }).last().click();
   await expect(page.getByRole('dialog').getByText('门锁没有撬动痕迹。')).toBeVisible();
+  await expect(page.locator('.cinema-evidence-body').first()).not.toHaveCSS('user-select', 'none');
   await page.getByRole('button', { name: '继续推理' }).click();
   await expect(page.getByRole('dialog')).toBeHidden();
 });
@@ -273,6 +271,7 @@ test('图片全部损坏时自动显示正文摘要，确认仍由玩家触发',
   await expect(page.getByRole('button', { name: '继续推理' })).toBeVisible();
   await page.getByText('门锁痕迹', { exact: true }).last().click();
   await expect(page.getByRole('dialog').getByText('门锁没有撬动痕迹。')).toBeVisible();
+  await expect(page.locator('.cinema-evidence-body').first()).not.toHaveCSS('user-select', 'none');
   await page.route('**/art.svg', route => route.fulfill({ contentType: 'image/svg+xml', body: testArt }));
   await page.getByRole('button', { name: '重试加载演出' }).click();
   await expect(page.locator('.cinema-copy h2')).toHaveText('观察现场');
@@ -291,29 +290,79 @@ test('仅一张必需图片损坏也不播放残缺动画', async ({ page }) => 
   await expect(page.locator('.cinema-card')).toHaveCount(0);
 });
 
-test('线索圆圈按轮次回看，关闭恢复焦点且不触发阶段确认', async ({ page }) => {
-  await images(page);
-  await page.route(url => url.pathname.endsWith('/preview.json'), route => json(route, { clue_stages: [stage, { ...stage, stage: 2,
-    items: [{ ...clues[0], id: 'c03', stage: 2, summary: '后来公开的材料' }], presentation: { ...presentation, title: '第二轮' },
-  }] }));
-  await page.goto('/clue-preview.html?src=/images/scripts/test/preview.json');
-  const trigger = page.getByRole('button', { name: '查看已公开线索（2条）' });
-  await trigger.click();
-  const archive = page.getByRole('dialog', { name: '线索档案' });
-  await expect(archive.locator('summary')).toHaveCount(2);
-  await expect(archive.getByRole('button', { name: /第 2 轮/ })).toHaveCount(0);
-  await archive.getByText('门锁痕迹', { exact: true }).click();
-  await expect(archive.getByText('门锁没有撬动痕迹。')).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(trigger).toBeFocused();
-  await page.getByRole('button', { name: '第 2 轮 · 第二轮' }).click();
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByRole('button', { name: '查看已公开线索（3条）' }).click();
-  await expect(archive.getByText('后来公开的材料')).toBeVisible();
-  await archive.getByRole('button', { name: /第 1 轮/ }).click();
-  await expect(archive.locator('summary')).toHaveCount(2);
-  await expect(archive.getByText('后来公开的材料')).toHaveCount(0);
-  await expect(archive.getByRole('button', { name: '继续推理' })).toHaveCount(0);
-  await archive.getByRole('button', { name: '返回讨论' }).click();
-  await expect(archive).toBeHidden();
+async function assertNonInteractiveArt(page: Page) {
+  const title = page.locator('.cinema-copy h2');
+  await expect(title).toHaveCSS('user-select', 'none');
+  const box = (await title.boundingBox())!;
+  await page.evaluate(() => window.getSelection()?.removeAllRanges());
+  await page.mouse.move(box.x + 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width - 2, box.y + box.height / 2, { steps: 8 });
+  await page.mouse.up();
+  expect(await page.evaluate(() => window.getSelection()?.toString())).toBe('');
+  const art = page.locator('.cinema-card img, .cinema-art img').first();
+  await expect(art).toHaveAttribute('draggable', 'false');
+  expect(await art.evaluate(el => el.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true })))).toBe(false);
+}
+
+for (const width of [720, 390]) {
+  test(`关联引用与前后正文同行并自然跨行，${width}px`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 900 });
+    await images(page);
+    await page.goto('/clue-preview.html?src=/images/scripts/test/preview.json');
+    const reasoning = '那这次会议室刷卡到底是人跨门离开，还是有人在门内重触后刷卡？刷卡本身不区分门里门外，仍需要结合时间判断。';
+    await page.getByRole('textbox', { name: '发言输入框' }).fill(`接着追问，[${reasoning}][c01,c02]。请解释。`);
+    await page.getByRole('button', { name: '预览发言', exact: true }).click();
+    const citation = page.getByLabel('查看 2 条引用线索', { exact: true });
+    const geometry = await citation.evaluate(el => {
+      const paragraph = el.closest('p')!;
+      const rect = (node: Node, start: number, end: number) => {
+        const range = document.createRange(); range.setStart(node, start); range.setEnd(node, end);
+        const box = range.getBoundingClientRect(); return { x: box.x, y: box.y };
+      };
+      const before = el.previousSibling!, after = el.nextSibling!, label = el.firstChild!.firstChild!;
+      return {
+        tag: el.tagName, display: getComputedStyle(el).display,
+        lines: el.getClientRects().length,
+        before: rect(before, before.textContent!.length - 1, before.textContent!.length),
+        start: rect(label, 0, 1), after: rect(after, 0, 1),
+        end: rect(label, label.textContent!.length - 1, label.textContent!.length),
+        paragraphs: paragraph.parentElement!.querySelectorAll('p').length,
+      };
+    });
+    expect(geometry.tag).toBe('SPAN');
+    expect(geometry.display).toBe('inline');
+    expect(geometry.lines).toBeGreaterThan(1);
+    expect(geometry.paragraphs).toBe(1);
+    expect(Math.abs(geometry.before.y - geometry.start.y)).toBeLessThan(2);
+    expect(geometry.start.x).toBeGreaterThan(geometry.before.x);
+    // Closing punctuation stays on the final text line, not on a separate row.
+    expect(Math.abs(geometry.after.y - geometry.end.y)).toBeLessThan(2);
+    await page.screenshot({ path: info.outputPath('inline-evidence.png') });
+    await citation.hover();
+    const tooltip = page.getByRole('tooltip');
+    await expect(tooltip).toBeVisible();
+    await tooltip.hover();
+    await tooltip.locator('h3').first().evaluate(el => {
+      const range = document.createRange(); range.selectNodeContents(el);
+      window.getSelection()?.addRange(range);
+    });
+    await page.mouse.move(0, 0);
+    await expect(tooltip).toBeHidden();
+  });
+}
+
+test.describe('触屏引用保持正文阅读', () => {
+  test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+  test('点击引用不打开或固定详情', async ({ page }) => {
+    await images(page);
+    await page.goto('/clue-preview.html?src=/images/scripts/test/preview.json');
+    await page.getByRole('textbox', { name: '发言输入框' }).fill('[门锁完整][c01] [c02]');
+    await page.getByRole('button', { name: '预览发言', exact: true }).tap();
+    for (const label of ['查看 1 条引用线索', '查看线索 窗台红泥']) {
+      await page.getByLabel(label, { exact: true }).tap();
+      await expect(page.getByRole('tooltip')).toHaveCount(0);
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+    }
+  });
 });

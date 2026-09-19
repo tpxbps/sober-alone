@@ -22,7 +22,7 @@ function SceneImage({ media, index, motionName, duration, paused }: {
   const [failed, setFailed] = useState(false);
   if (failed) return <div className="cinema-image-unavailable">图片暂不可用 · 线索文字仍可查看</div>;
   return <div className={`cinema-art cinema-art-${motionName}`} style={{ animationDelay: `${index * 160}ms`, animationPlayState: paused ? 'paused' : 'running' }}>
-    <img src={media.image_url} alt={media.alt} onError={() => setFailed(true)} decoding="async"
+    <img draggable={false} src={media.image_url} alt={media.alt} onError={() => setFailed(true)} decoding="async"
       style={{
         '--focus': `${media.focus[0] * 100}% ${media.focus[1] * 100}%`,
         '--mobile-focus': `${(media.mobile_focus ?? media.focus)[0] * 100}% ${(media.mobile_focus ?? media.focus)[1] * 100}%`,
@@ -111,7 +111,8 @@ export function CluePresentationOverlay({ state, onContinue }: {
   return <Dialog.Root open><Dialog.Portal>
     <Dialog.Overlay className="fixed inset-0 z-[110] bg-black" />
     <Dialog.Content aria-describedby="clue-cinema-description" onEscapeKeyDown={event => event.preventDefault()}
-      onPointerDownOutside={event => event.preventDefault()} className={`clue-cinema ${presentation?.template === 'dossier' ? 'is-dossier' : ''} ${presentation?.version === 2 && !finished ? 'is-immersive' : ''} ${reduced ? 'is-reduced' : ''} ${stopped ? 'is-paused' : ''}`}
+      onPointerDownOutside={event => event.preventDefault()} className={`clue-cinema ${!finished ? 'is-playing' : ''} ${presentation?.template === 'dossier' ? 'is-dossier' : ''} ${presentation?.version === 2 && !finished ? 'is-immersive' : ''} ${reduced ? 'is-reduced' : ''} ${stopped ? 'is-paused' : ''}`}
+      onDragStart={event => { if (!finished) event.preventDefault(); }}
       onClick={event => { if (event.target === event.currentTarget && finished) void confirm(); }}>
       <div className="cinema-backdrop" aria-hidden="true" style={loaded && presentation?.background ? {
         backgroundImage: `url("${presentation.background.image_url}")`,
