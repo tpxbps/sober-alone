@@ -186,6 +186,14 @@ test('暂停、跳至结尾、确认失败重试、刷新与多标签页恢复',
   await page.getByRole('button', { name: '继续推理' }).click();
   await expect(dialog).toBeHidden();
   await expect(other.getByRole('dialog', { name: '线索演出' })).toBeHidden({ timeout: 6000 });
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.getByRole('button', { name: '查看已公开线索（2条）' }).click();
+    const archive = page.getByRole('dialog', { name: '线索档案' });
+    await expect(archive).toBeVisible();
+    await archive.getByRole('button', { name: '返回讨论' }).click();
+  }
+
   await page.reload();
   await expect(page.getByRole('textbox', { name: '发言输入框' })).toBeVisible();
   await expect(dialog).toBeHidden();
