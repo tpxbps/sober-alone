@@ -20,7 +20,7 @@ export interface ClueShot {
   labels: string[];
 }
 export interface CluePresentation {
-  version: 1;
+  version: 1 | 2;
   revision: string;
   template: 'cinematic' | 'dossier';
   title: string;

@@ -8,14 +8,18 @@ import { ClueImage } from './ClueImage';
 
 export function ClueDetails({ clues }: { clues: PublicClue[] }) {
   return <div className="max-h-[65dvh] overflow-y-auto overscroll-contain scrollbar-thin divide-y divide-amber-200/15">
-    {clues.map((clue, index) => <section key={clue.id} className="py-3 first:pt-0 last:pb-0">
-      {clue.media?.status === 'ready' && <figure className="mb-3 overflow-hidden rounded-lg">
-        <ClueImage media={clue.media} className="aspect-video w-full object-cover" />
-        <figcaption className="bg-black/20 px-2 py-1 text-[10px] text-muted-foreground">场景示意 · 判断依据以线索正文为准</figcaption>
-      </figure>}
-      <h3 className="text-sm font-semibold text-amber-200">{clues.length > 1 && <span className="mr-2 text-amber-300/50">{String(index + 1).padStart(2, '0')}</span>}{clue.summary}</h3>
-      <p className="mb-2 mt-1 text-[10px] text-muted-foreground">第 {clue.stage} 轮公开线索</p>
-      <Markdown className="text-xs leading-relaxed">{clue.content}</Markdown>
+    {clues.map((clue, index) => <section key={clue.id} className="py-4 first:pt-0 last:pb-0">
+      <header className="mb-3 flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <p className="mb-1.5 text-[10px] tracking-wider text-amber-200/50">第 {clue.stage} 轮公开{clues.length > 1 && ` · 证据 ${String(index + 1).padStart(2, '0')}`}</p>
+          <h3 className="text-sm font-semibold leading-relaxed text-amber-100">{clue.summary}</h3>
+        </div>
+        {clue.media?.status === 'ready' && <figure className="clue-detail-figure w-24 shrink-0">
+          <ClueImage media={clue.media} thumbnail className="h-16 w-24 rounded-md border border-white/10 object-cover" />
+          <figcaption className="mt-1 text-right text-[9px] text-muted-foreground">场景示意</figcaption>
+        </figure>}
+      </header>
+      <Markdown className="text-[13px] leading-[1.85] text-foreground/85">{clue.content}</Markdown>
     </section>)}
   </div>;
 }
@@ -62,7 +66,7 @@ export function ClueCitationHover({ clue, clues: group, children }: {
     setOpen(value);
   }}><HoverCard.Trigger asChild>{trigger}</HoverCard.Trigger><HoverCard.Portal>
     <HoverCard.Content role="tooltip" side="top" collisionPadding={12} onEscapeKeyDown={close}
-      className="z-[90] w-[min(30rem,calc(100vw-2rem))] select-text rounded-xl border border-amber-300/20 bg-popover p-4 text-popover-foreground shadow-2xl">
+      className="z-[90] w-[min(26rem,calc(100vw-2rem))] select-text rounded-xl border border-amber-300/20 bg-popover p-4 text-popover-foreground shadow-2xl">
       <ClueDetails clues={clues} /><HoverCard.Arrow className="fill-popover" />
     </HoverCard.Content></HoverCard.Portal></HoverCard.Root>;
 }

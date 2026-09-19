@@ -44,14 +44,14 @@ class CitationStreamFilter:
         if not body:
             return None if wait else len(text)
         if body.startswith("["):
-            from app.game.citation_syntax import ID, bracket_end
+            from app.game.citation_syntax import bracket_end, ids_in
 
             end = bracket_end(text, prefix)
             if end is None:
                 return None if wait else 1
             if end == len(text) and wait:
                 return None
-            if text[end : end + 1] == "[" and not ID.fullmatch(text[prefix + 1 : end - 1]):
+            if text[end : end + 1] == "[" and not ids_in(text[prefix + 1 : end - 1]):
                 group_end = bracket_end(text, end)
                 if group_end is None:
                     return None if wait else end

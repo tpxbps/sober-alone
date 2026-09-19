@@ -6,6 +6,7 @@ import type { ClueMedia, CluePresentationState } from '@/types/cluePresentation'
 import { audioPlayerManager } from '@/lib/audioPlayerManager';
 import { Markdown } from '@/components/ui/Markdown';
 import { ClueImage } from './ClueImage';
+import { ImmersiveClueScene } from './ImmersiveClueScene';
 import './cluePresentation.css';
 
 function Highlight({ text, emphasis }: { text: string; emphasis?: string }) {
@@ -34,7 +35,7 @@ export function CluePresentationOverlay({ state, onContinue }: {
 }) {
   const reduced = useReducedMotion();
   const presentation = state.presentation;
-  const valid = presentation?.version === 1 && presentation.status === 'ready'
+  const valid = (presentation?.version === 1 || presentation?.version === 2) && presentation.status === 'ready'
     && Array.isArray(presentation.shots) && presentation.shots.length > 0
     && presentation.shots.every(shot => shot && Number.isFinite(shot.duration_ms) && shot.duration_ms >= 1000
       && shot.duration_ms <= 15000 && typeof shot.title === 'string' && typeof shot.caption === 'string'
@@ -88,7 +89,7 @@ export function CluePresentationOverlay({ state, onContinue }: {
     let last = performance.now();
     const tick = (now: number) => {
       const delta = now - last;
-      if (delta >= 40) { setElapsed(value => Math.min(total, value + Math.min(delta, 150))); last = now; }
+      if (delta >= 15) { setElapsed(value => Math.min(total, value + Math.min(delta, 150))); last = now; }
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
@@ -105,7 +106,7 @@ export function CluePresentationOverlay({ state, onContinue }: {
   return <Dialog.Root open><Dialog.Portal>
     <Dialog.Overlay className="fixed inset-0 z-[110] bg-black" />
     <Dialog.Content aria-describedby="clue-cinema-description" onEscapeKeyDown={event => event.preventDefault()}
-      onPointerDownOutside={event => event.preventDefault()} className={`clue-cinema ${presentation?.template === 'dossier' ? 'is-dossier' : ''} ${reduced ? 'is-reduced' : ''} ${stopped ? 'is-paused' : ''}`}
+      onPointerDownOutside={event => event.preventDefault()} className={`clue-cinema ${presentation?.template === 'dossier' ? 'is-dossier' : ''} ${presentation?.version === 2 && !finished ? 'is-immersive' : ''} ${reduced ? 'is-reduced' : ''} ${stopped ? 'is-paused' : ''}`}
       onClick={event => { if (event.target === event.currentTarget && finished) void confirm(); }}>
       <div className="cinema-backdrop" aria-hidden="true" style={presentation?.background ? { backgroundImage: `url("${presentation.background.image_url}")` } : undefined} />
       <div className="cinema-shade" aria-hidden="true" />
@@ -115,7 +116,9 @@ export function CluePresentationOverlay({ state, onContinue }: {
       </header>
       <Dialog.Description id="clue-cinema-description" className="sr-only">观看本轮线索演出。可以暂停或跳至结尾，完成后确认继续推理。</Dialog.Description>
       {!finished ? <>
-        {!loaded ? <div className="cinema-loading" role="status">正在展开本轮线索…</div> : <AnimatePresence mode="wait">
+        {!loaded ? <div className="cinema-loading" role="status">正在展开本轮线索…</div> : presentation?.version === 2
+          ? <ImmersiveClueScene presentation={presentation} clues={state.reference_clues ?? state.clues} elapsed={elapsed} duration={total} />
+          : <AnimatePresence mode="wait">
           <motion.main key={shot.id} className={`cinema-scene scene-${shot.motion}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.22 }}>
             <div className={`cinema-pictures ${currentArt.length > 1 ? 'is-split' : ''}`}>
               {currentArt.map((media, i) => <SceneImage key={media.image_url} media={media} index={i} motionName={shot.motion} duration={shot.duration_ms} paused={stopped} />)}

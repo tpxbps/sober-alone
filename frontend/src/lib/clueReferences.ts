@@ -66,14 +66,14 @@ export function tokenizeClues(content: string): ClueToken[] {
           tokens.push({ raw: content.slice(cursor, end + link[0].length), ids: legacy ? [legacy[1].toLowerCase()] : undefined });
           cursor = end + link[0].length; continue;
         }
-        if (content[end] === '[' && !ID.test(label.trim())) {
+        if (content[end] === '[' && !idsIn(label)) {
           const groupEnd = bracketEnd(content, end);
           const ids = groupEnd ? idsIn(content.slice(end + 1, groupEnd - 1)) : undefined;
           if (ids && label.trim()) {
             flush(); tokens.push({ raw: content.slice(cursor, groupEnd), ids, label }); cursor = groupEnd!; continue;
           }
         }
-        flush(); tokens.push({ raw: content.slice(cursor, end), ids: ID.test(label) ? [label.toLowerCase()] : undefined });
+        flush(); tokens.push({ raw: content.slice(cursor, end), ids: idsIn(label) });
         cursor = end; continue;
       }
       flush(); tokens.push({ raw: rest }); break;
@@ -87,10 +87,11 @@ export function tokenizeClues(content: string): ClueToken[] {
 export function trustedClueTokens(content: string, allowed: Set<string>): ClueToken[] {
   const tokens = tokenizeClues(content);
   const explicit = new Set(tokens.filter(t => !t.bare).flatMap(t => t.ids ?? []).filter(id => allowed.has(id)));
-  return tokens.map(token => {
-    if (!token.ids?.every(id => allowed.has(id))) return { raw: token.raw };
-    if (token.bare && explicit.has(token.ids[0])) return { raw: '' };
-    return token;
+  return tokens.flatMap(token => {
+    if (!token.ids?.every(id => allowed.has(id))) return [{ raw: token.raw }];
+    if (token.bare && explicit.has(token.ids[0])) return [{ raw: '' }];
+    if (token.label === undefined && token.ids.length > 1) return token.ids.map(id => ({ raw: `[${id}]`, ids: [id] }));
+    return [token];
   });
 }
 export function escapeClueLabel(value: string) {

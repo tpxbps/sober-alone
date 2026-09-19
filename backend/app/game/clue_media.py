@@ -70,7 +70,7 @@ class Shot(BaseModel):
 
 class Presentation(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    version: Literal[1] = 1
+    version: Literal[1, 2] = 1
     revision: str = Field(min_length=1, max_length=80)
     template: Literal["cinematic", "dossier"]
     title: str = Field(min_length=1, max_length=120)

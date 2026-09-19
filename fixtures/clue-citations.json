@@ -182,6 +182,32 @@
         "c01"
       ],
       "unknown": []
+    },
+    {
+      "name": "legacy_group_falls_back_to_direct",
+      "input": "证据[c01，c02,c01][c01]",
+      "ai": "证据[c01][c02][c01]",
+      "refs": [
+        "c01",
+        "c02"
+      ],
+      "humanRefs": [
+        "c01",
+        "c02"
+      ],
+      "unknown": []
+    },
+    {
+      "name": "legacy_group_cannot_leak_unknown_ids",
+      "input": "证据[c01,c99]",
+      "ai": "证据[c01]",
+      "refs": [
+        "c01"
+      ],
+      "humanRefs": [],
+      "unknown": [
+        "c99"
+      ]
     }
   ]
 }

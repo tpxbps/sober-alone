@@ -70,6 +70,15 @@ def test_media_snapshot_and_text_fingerprint_are_independent():
     assert content_fingerprint(changed) != before
 
 
+def test_continuous_presentation_survives_normalization_and_snapshot():
+    data = stages()
+    data[0]["presentation"]["version"] = 2
+    normalized = normalize_clue_stages(data, script_id="s")
+    snapshot = build_runtime_snapshot({"script_id": "s", "clue_stages": normalized})
+    assert snapshot["clue_stages"][0]["presentation"]["version"] == 2
+    assert snapshot["clue_stages"][0]["presentation"]["status"] == "ready"
+
+
 def test_editor_preserves_omitted_media_and_marks_changes_for_review():
     script, characters = completed_script()
     script.clue_stages = stages()

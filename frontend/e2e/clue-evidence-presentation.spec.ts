@@ -14,9 +14,9 @@ const stage = { stage: 1, overview: '材料', free_discussion_notice: '讨论', 
 function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 }
-async function images(page: Page, broken = false) {
+async function images(page: Page, broken = false, version = 1) {
   await page.route(url => url.pathname.startsWith('/images/'), route => {
-    if (route.request().url().endsWith('preview.json')) return json(route, { title: '验证资源', clue_stages: [stage] });
+    if (route.request().url().endsWith('preview.json')) return json(route, { title: '验证资源', clue_stages: [{ ...stage, presentation: { ...presentation, version } }] });
     return route.fulfill({ status: broken ? 404 : 200, contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="450"><rect width="800" height="450" fill="#21364a"/></svg>' });
   });
 }
@@ -55,6 +55,9 @@ test('引用编辑、多选、换行、重开、复制删除与手机详情', as
   const tooltip = page.getByRole('tooltip');
   await expect(tooltip.locator('section')).toHaveCount(2);
   await expect(tooltip.locator('img')).toHaveCount(2);
+  const thumbnail = await tooltip.locator('img').first().boundingBox();
+  expect(thumbnail!.width).toBeLessThanOrEqual(96);
+  expect(thumbnail!.height).toBeLessThanOrEqual(64);
   await page.keyboard.press('Escape');
   await page.setViewportSize({ width: 390, height: 844 });
   await citation.click();
@@ -82,6 +85,26 @@ test('引用编辑、多选、换行、重开、复制删除与手机详情', as
   await editor.fill('字'.repeat(3001));
   await expect(page.getByRole('alert')).toBeVisible();
   await expect(serialized).toHaveText('已保存');
+});
+
+test('连续镜头保留所有物证，暂停冻结运动，结尾仍可读正文', async ({ page }) => {
+  await images(page, false, 2);
+  await page.goto('/clue-preview.html?src=/images/scripts/test/preview.json');
+  await page.getByRole('button', { name: '播放本轮演出' }).click();
+  await expect(page.locator('.cinema-card')).toHaveCount(2);
+  await expect.poll(() => page.locator('.cinema-card').first().evaluate(el => Number(getComputedStyle(el).opacity))).toBeGreaterThan(0.5);
+  await page.getByRole('button', { name: '暂停演出' }).click();
+  const transforms = () => page.locator('.cinema-space, .cinema-card').evaluateAll(elements => elements.map(el => getComputedStyle(el).transform));
+  const paused = await transforms();
+  await page.waitForTimeout(300);
+  expect(await transforms()).toEqual(paused);
+  await page.getByRole('button', { name: '继续播放' }).click();
+  await expect.poll(transforms).not.toEqual(paused);
+  await page.getByRole('button', { name: '跳至结尾' }).click();
+  await page.getByText('门锁痕迹', { exact: true }).last().click();
+  await expect(page.getByRole('dialog').getByText('门锁没有撬动痕迹。')).toBeVisible();
+  await page.getByRole('button', { name: '继续推理' }).click();
+  await expect(page.getByRole('dialog')).toBeHidden();
 });
 test('暂停、跳至结尾、确认失败重试、刷新与多标签页恢复', async ({ page, context }) => {
   await images(page);

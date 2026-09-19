@@ -117,7 +117,7 @@ def tokenize(content: str) -> list[Token]:
                     )
                     cursor = link.end()
                     continue
-                if content[end : end + 1] == "[" and not ID.fullmatch(label.strip()):
+                if content[end : end + 1] == "[" and not ids_in(label):
                     group_end = bracket_end(content, end)
                     ids = ids_in(content[end + 1 : group_end - 1]) if group_end else None
                     if ids and label.strip():
@@ -125,9 +125,10 @@ def tokenize(content: str) -> list[Token]:
                         result.append(Token(content[cursor:group_end], ids, label))
                         cursor = group_end
                         continue
-                if ID.fullmatch(label):
+                direct_ids = ids_in(label)
+                if direct_ids:
                     flush()
-                    result.append(Token(content[cursor:end], [label.lower()]))
+                    result.append(Token(content[cursor:end], direct_ids))
                     cursor = end
                     continue
                 # Unknown bracketed prose is opaque to naked-ID repair.
@@ -166,7 +167,7 @@ def normalize(content: str, allowed_ids, *, strip_unknown: bool):
         if token.label is not None:
             output.append(f"[{token.label}][{','.join(ids)}]" if ids else token.label)
         elif ids:
-            output.append(f"[{ids[0]}]")
+            output.append("".join(f"[{id}]" for id in ids))
         elif "#clue-ref-" in token.raw:
             output.append(token.raw[1 : token.raw.index("]")])
     text = "".join(output)
