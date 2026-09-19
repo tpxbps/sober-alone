@@ -80,3 +80,28 @@ export function warmCluePresentation(state?: CluePresentationState | null, retry
     || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return Promise.resolve([]);
   return warmClueAssets(presentationMedia(state).map(media => media.image_url), retry);
 }
+
+/** Opportunistic next-round work: one low-priority image per idle turn. */
+export function prefetchClueAssets(urls: string[]): () => void {
+  if (typeof window === 'undefined' || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return () => {};
+  const pending = [...new Set(urls)];
+  let cancelled = false;
+  let cancelIdle = () => {};
+  const schedule = () => {
+    if (cancelled || !pending.length) return;
+    const next = () => {
+      if (cancelled || document.hidden) return;
+      void loadClueImage(pending.shift()!).then(schedule);
+    };
+    if (typeof window.requestIdleCallback === 'function') {
+      const id = window.requestIdleCallback(next);
+      cancelIdle = () => window.cancelIdleCallback(id);
+    } else {
+      const id = window.setTimeout(next, 800);
+      cancelIdle = () => window.clearTimeout(id);
+    }
+  };
+  schedule();
+  // In-flight requests can populate the shared cache; no further work is queued.
+  return () => { cancelled = true; cancelIdle(); };
+}

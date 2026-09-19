@@ -226,6 +226,7 @@ export interface GameStateResponse {
   vote_results?: VoteResults | null;
   public_clues?: PublicClue[];
   clue_presentation?: CluePresentationState | null;
+  clue_asset_preload?: string[];
 }
 
 // Agent LLM info type
@@ -255,6 +256,7 @@ export interface GameState {
   records: GameRecord[];
   publicClues: PublicClue[];
   cluePresentation: CluePresentationState | null;
+  clueAssetPreload: string[];
   currentSpeakerId: string | null;
   speechQueue: string[];
   agentLlmInfo: Record<string, AgentLlmInfo>; // character_id -> LLM info

@@ -50,6 +50,7 @@ interface GameActions {
     current_speaker_id?: string;
     turn_processing?: boolean;
     clue_presentation?: GameState['cluePresentation'];
+    clue_asset_preload?: string[];
     next_speaker_id?: string;
     speech_queue: string[];
     has_all_spoken: boolean;
@@ -83,6 +84,7 @@ const initialState: GameState = {
   records: [],
   publicClues: [],
   cluePresentation: null,
+  clueAssetPreload: [],
   currentSpeakerId: null,
   speechQueue: [],
   agentLlmInfo: {}, // character_id -> { model, provider, is_human }
@@ -179,6 +181,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
           voteResults: state.vote_results || null,
           publicClues: state.public_clues || [],
           cluePresentation: state.clue_presentation ?? null,
+          clueAssetPreload: state.clue_asset_preload ?? [],
           isAdvancingStage: false,
         });
 
@@ -540,6 +543,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
 
   updateFromAPI: (data) => {
     set({
+      ...(data.clue_asset_preload !== undefined ? { clueAssetPreload: data.clue_asset_preload } : {}),
       ...(data.clue_presentation !== undefined ? { cluePresentation: data.clue_presentation } : {}),
       isProcessingReactions: Boolean(data.turn_processing),
       sessionId: data.session_id,

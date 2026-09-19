@@ -14,6 +14,7 @@ import { CluePresentationOverlay } from "@/components/game/CluePresentationOverl
 import { ClueArchive } from "@/components/game/ClueArchive";
 import { StageTransitionOverlay } from "@/components/game/StageTransitionOverlay";
 import { PersonalScriptHint } from "@/components/game/PersonalScriptHint";
+import { useCluePrefetch } from "@/hooks/useCluePrefetch";
 import { usePersonalScriptRead } from "@/hooks/usePersonalScriptRead";
 import { PlayerScriptTooltip } from "@/components/game/PlayerScriptTooltip";
 import { DraftNotebook } from "@/components/game/DraftNotebook";
@@ -30,6 +31,7 @@ interface GamePageProps {
 }
 
 export function GamePage({ sessionId, onExit }: GamePageProps) {
+  useCluePrefetch(sessionId);
   const [votingDismissedRound, setVotingDismissedRound] = useState<string | null>(null);
   const [showScriptModal, setShowScriptModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);

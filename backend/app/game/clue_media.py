@@ -134,3 +134,37 @@ def public_presentation(session, stages):
             item for s in stages if s["stage"] <= state["round"] for item in s["items"]
         ],
     }
+
+
+def upcoming_presentation_assets(session, stages):
+    """Image-only hints from this game's snapshot; never publish future clue text."""
+    if presentation_pending(session) or session.current_stage in (
+        "summary", "vote", "review", "completed"
+    ):
+        return []
+    revealed = {item["id"] for item in (session.revealed_clues or [])}
+    upcoming = next(
+        (stage for stage in stages if any(item["id"] not in revealed for item in stage["items"])),
+        None,
+    )
+    if not upcoming:
+        return []
+    config = upcoming.get("presentation")
+    if not config or config.get("status") != "ready":
+        return []
+    references = {
+        item["id"]: item
+        for stage in stages if stage["stage"] <= upcoming["stage"]
+        for item in stage["items"]
+    }
+    media = [
+        config.get("background"),
+        *[
+            references.get(clue_id, {}).get("media")
+            for shot in config["shots"] for clue_id in shot["clue_ids"]
+        ],
+        *[item.get("media") for item in upcoming["items"]],
+    ]
+    return list(dict.fromkeys(
+        item["image_url"] for item in media if item and item.get("status") == "ready"
+    ))

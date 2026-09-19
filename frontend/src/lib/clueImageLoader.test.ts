@@ -16,6 +16,47 @@ beforeEach(() => {
 });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
+it('defers next-round work to idle time, fetches sequentially and stops on cancellation', async () => {
+  const callbacks = new Map<number, () => void>();
+  let sequence = 0;
+  window.requestIdleCallback = vi.fn(callback => {
+    callbacks.set(++sequence, callback as () => void); return sequence;
+  });
+  window.cancelIdleCallback = vi.fn(id => { callbacks.delete(id); });
+  vi.stubGlobal('document', { hidden: false });
+  const { prefetchClueAssets, loadClueImage } = await import('./clueImageLoader');
+  const cancel = prefetchClueAssets(['/images/a.webp', '/images/b.webp', '/images/c.webp']);
+  expect(TestImage.requests).toHaveLength(0);
+  callbacks.get(1)!();
+  expect(TestImage.requests).toHaveLength(1);
+  TestImage.requests[0].onload!();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(TestImage.requests).toHaveLength(1);
+  expect(await loadClueImage('/images/a.webp')).toBe(true);
+  expect(TestImage.requests).toHaveLength(1);
+  callbacks.get(2)!();
+  expect(TestImage.requests).toHaveLength(2);
+  cancel();
+  TestImage.requests[1].onload!();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(window.requestIdleCallback).toHaveBeenCalledTimes(2);
+});
+
+it('supports browsers without idle callbacks and never starts hidden-page work', async () => {
+  window.setTimeout = setTimeout;
+  window.clearTimeout = clearTimeout;
+  vi.stubGlobal('document', { hidden: false });
+  const { prefetchClueAssets } = await import('./clueImageLoader');
+  const cancel = prefetchClueAssets(['/images/a.webp']);
+  cancel();
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(TestImage.requests).toHaveLength(0);
+  prefetchClueAssets(['/images/b.webp']);
+  vi.stubGlobal('document', { hidden: true });
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(TestImage.requests).toHaveLength(0);
+});
+
 it('deduplicates warmup/render/replay and only publishes a decoded image', async () => {
   const { loadClueImage } = await import('./clueImageLoader');
   const first = loadClueImage('/images/a.webp');

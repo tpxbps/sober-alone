@@ -21,6 +21,32 @@ async function images(page: Page, broken = false, version = 1) {
     return route.fulfill({ status: broken ? 404 : 200, contentType: broken ? 'text/plain' : 'image/svg+xml', body: broken ? 'Image unavailable' : testArt });
   });
 }
+
+test('上一阶段闲时预取图片，不提前显示下一轮线索', async ({ page }) => {
+  let requests = 0;
+  await page.route('**/images/scripts/test/future.svg', route => {
+    requests++;
+    return route.fulfill({ contentType: 'image/svg+xml', body: testArt });
+  });
+  await page.route('**/api/v1/**', route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith('/state')) return json(route, {
+      success: true, session_id: 'prefetch', status: 'playing', current_stage: 'intro', current_round: 0,
+      current_speaker_id: 'human', speech_queue: ['human'], human_character_id: 'human',
+      characters: [{ character_id: 'human', name: '真人', character_script: '资料', is_human: true }],
+      script: { script_id: 'test', title: '预取测试' }, player_states: [], public_clues: [],
+      clue_asset_preload: ['/images/scripts/test/future.svg'], clue_presentation: null,
+    });
+    if (path.endsWith('/records')) return json(route, { success: true, records: [] });
+    return json(route, { success: true });
+  });
+  await page.goto('/?session=prefetch');
+  await expect(page.getByRole('textbox', { name: '发言输入框' })).toBeVisible();
+  await expect.poll(() => requests).toBe(1);
+  await expect(page.getByRole('dialog', { name: '线索演出' })).toBeHidden();
+  await expect(page.locator('img[src="/images/scripts/test/future.svg"]')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /查看已公开线索/ })).toHaveCount(0);
+});
 test('引用编辑、多选、换行、重开、复制删除与手机详情', async ({ page }) => {
   await images(page);
   await page.goto('/clue-preview.html?src=/images/scripts/test/preview.json');

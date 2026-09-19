@@ -18,6 +18,7 @@ export type GameStatePatch = Pick<
   | 'voteResults'
   | 'publicClues'
   | 'cluePresentation'
+  | 'clueAssetPreload'
 > & { isProcessingReactions: boolean }
 
 export function adaptGameState(state: GameStateResponse): GameStatePatch {
@@ -74,5 +75,6 @@ export function adaptGameState(state: GameStateResponse): GameStatePatch {
     voteResults: state.vote_results || null,
     publicClues: state.public_clues || [],
     cluePresentation: state.clue_presentation ?? null,
+    clueAssetPreload: state.clue_asset_preload ?? [],
   }
 }

@@ -15,7 +15,11 @@ from app.agents import get_agent_manager, remove_agent_manager
 from app.core.inference import InferenceRecoveryError, raise_for_inference_recovery
 from app.db.models import GameRecord, GameSession, GameStage, GameStatus, PlayerState
 from app.game import GameFlowController
-from app.game.clue_media import presentation_pending, public_presentation
+from app.game.clue_media import (
+    presentation_pending,
+    public_presentation,
+    upcoming_presentation_assets,
+)
 from app.game.resource_revision import resource_namespace
 from app.services.game_presenter import GameStatePresenter
 from app.services.game_runtime import (
@@ -320,6 +324,9 @@ class GameService:
             "vote_results": game_session.vote_result or None,
             "public_clues": list(game_session.revealed_clues or []),
             "clue_presentation": public_presentation(
+                game_session, (script_data or {}).get("clue_stages", [])
+            ),
+            "clue_asset_preload": upcoming_presentation_assets(
                 game_session, (script_data or {}).get("clue_stages", [])
             ),
         }

@@ -17,7 +17,7 @@ from app.db.models import (
     PlayerState,
     RecordType,
 )
-from app.game.clue_media import public_presentation
+from app.game.clue_media import public_presentation, upcoming_presentation_assets
 from app.game.clues import (
     build_agent_clue_context,
     normalize_clue_stages,
@@ -1182,6 +1182,7 @@ class GameFlowController:
             "human_character_id": self.session.human_character_id,
             "turn_processing": bool(self.session.pending_speech),
             "clue_presentation": public_presentation(self.session, self.clue_stages),
+            "clue_asset_preload": upcoming_presentation_assets(self.session, self.clue_stages),
             "has_all_spoken": len(self.session.speech_queue or []) == 0,
             "agent_llm_info": agent_llm_info,
             "public_clues": stage_public_clues(

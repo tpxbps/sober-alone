@@ -79,3 +79,14 @@ uv run python -m scripts.clue_citation_eval --models deepseek-flash qwen3.8-flas
 本轮有界抽测及失败分析见 [CLUE_CITATION_EVALUATION.md](CLUE_CITATION_EVALUATION.md)。
 
 可选素材视觉验收：设置 `CLUE_PILOT_URL` 为本地预览 URL，运行 `pnpm exec playwright test e2e/clue-pilot.visual.spec.ts --project=flows --workers=1`。未设置时跳过，不影响普通离线 CI。
+
+
+### 闲时预加载
+
+状态接口的 `clue_asset_preload` 只包含本局快照中下一轮演出所需的图片 URL，
+不包含未公开的标题、线索正文或演出字幕。图片会提前下载，可由开发者工具查看。
+当前轮待确认时不预取下一轮；完成本轮确认后才开始准备下一轮。
+前端在页面可见且没有发言流、阶段切换或反应处理时，每个空闲时段顺序预取一张低优先级图片；
+不支持 `requestIdleCallback` 的浏览器使用可取消的短延迟。切出页面或开始游戏请求会停止后续预取，
+已经开始的请求继续填充共享缓存。预取失败不影响游戏操作。
+无论是否预取成功，正式开场仍须本轮全部图片加载并解码成功；否则提供重试和文字摘要。

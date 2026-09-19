@@ -1,4 +1,5 @@
 from copy import deepcopy
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -7,7 +8,7 @@ from test_script_editing import completed_script
 from test_state_reliability import game as base_game
 
 from app.db.models import GameRecord, GameSession
-from app.game.clue_media import public_presentation
+from app.game.clue_media import public_presentation, upcoming_presentation_assets
 from app.game.clues import normalize_clue_stages
 from app.game.content_quality import content_fingerprint
 from app.game.flow_controller import GameFlowController
@@ -215,3 +216,32 @@ async def test_reveal_and_gate_roll_back_with_announcement(game, monkeypatch):
     assert session.current_stage == "intro" and session.current_round == 0
     assert not session.clue_presentation_state and not session.revealed_clues
     assert list((await db.scalars(select(GameRecord))).all()) == []
+
+
+def test_prefetch_exposes_only_next_round_image_urls_from_snapshot():
+    data = stages()
+    second = deepcopy(data[0])
+    second["stage"] = 2
+    second["items"][0].update(id="c02", content="未公开正文")
+    second["items"][0]["media"]["image_url"] = "/images/second.webp"
+    second["presentation"]["shots"][0]["clue_ids"] = ["c01", "c02"]
+    data.append(second)
+    session = SimpleNamespace(current_stage="intro", revealed_clues=[], clue_presentation_state=None)
+    assert upcoming_presentation_assets(session, data) == ["/images/scripts/test/paper.webp"]
+    session.revealed_clues = data[0]["items"]
+    session.current_stage = "clue_analysis"
+    session.clue_presentation_state = {"status": "pending", "round": 1}
+    assert upcoming_presentation_assets(session, data) == []
+    session.clue_presentation_state["status"] = "acknowledged"
+    assert upcoming_presentation_assets(session, data) == [
+        "/images/scripts/test/paper.webp", "/images/second.webp"
+    ]
+    assert len(public_presentation(session, data)["reference_clues"]) == 1
+    second["presentation"]["status"] = "needs_review"
+    assert upcoming_presentation_assets(session, data) == []
+    second["presentation"]["status"] = "ready"
+    session.revealed_clues += second["items"]
+    assert upcoming_presentation_assets(session, data) == []
+    session.revealed_clues = []
+    session.current_stage = "review"
+    assert upcoming_presentation_assets(session, data) == []
