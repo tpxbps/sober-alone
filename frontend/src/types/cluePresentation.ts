@@ -18,11 +18,13 @@ export interface ClueShot {
   emphasis: string;
   motion: 'push' | 'pan' | 'split' | 'reveal' | 'timeline' | 'chain';
   labels: string[];
+  composition?: 'pan' | 'detail' | 'pair' | 'occlusion' | 'light';
 }
 export interface CluePresentation {
   version: 1 | 2;
   revision: string;
   template: 'cinematic' | 'dossier';
+  visual_preset?: 'warm-noir' | 'cold-occlusion';
   title: string;
   background?: ClueMedia;
   shots: ClueShot[];

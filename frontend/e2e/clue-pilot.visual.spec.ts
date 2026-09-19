@@ -13,7 +13,8 @@ for (const device of [{ name: 'desktop', width: 1440, height: 900 }, { name: 'mo
     const url = new URL(pilotUrl!);
     const response = await page.request.get(new URL(url.searchParams.get('src')!, url.origin).href);
     const data = await response.json();
-    const output = path.resolve('../output/playwright/clue-pilot-ready');
+    const label = (process.env.CLUE_REVIEW_LABEL || 'clue-pilot-ready').replace(/[^a-zA-Z0-9_-]/g, '-');
+    const output = path.resolve('../output/playwright', label);
     await mkdir(output, { recursive: true });
     await page.goto(pilotUrl!);
     for (const stage of data.clue_stages) {
@@ -29,7 +30,8 @@ for (const device of [{ name: 'desktop', width: 1440, height: 900 }, { name: 'mo
       for (const shot of stage.presentation.shots) {
         const title = page.locator('.cinema-copy h2');
         await expect(title).toHaveText(shot.title, { timeout: 16000 });
-        await expect.poll(async () => page.locator('.cinema-copy').evaluate(element => Number(getComputedStyle(element).opacity))).toBeGreaterThan(0.99);
+        await expect.poll(async () => page.locator('.cinema-copy').evaluate(element => Number(getComputedStyle(element).opacity)),
+          { intervals: [16, 33, 50] }).toBeGreaterThan(0.99);
         await expect(page.locator('.cinema-progress, .cinema-trace')).toHaveCount(0);
         if (shot.caption) await expect(page.locator('.cinema-caption')).toHaveText(shot.caption);
         else await expect(page.locator('.cinema-caption')).toHaveCount(0);
@@ -46,6 +48,26 @@ for (const device of [{ name: 'desktop', width: 1440, height: 900 }, { name: 'mo
         await page.waitForTimeout(200);
         expect(await moving.evaluate(element => getComputedStyle(element).transform)).not.toBe(before);
         await page.screenshot({ path: path.join(output, device.name + '-' + stage.stage + '-' + shot.id + '.png') });
+        if (shot === stage.presentation.shots.at(-1) && !shot.clue_ids.length) {
+          const pause = page.getByRole('button', { name: '暂停演出' });
+          await pause.focus();
+          await expect.poll(() => page.locator('.cinema-immersive').getAttribute('data-gathered'),
+            { intervals: [16, 33, 50] }).toBe('true');
+          // Keyboard activation avoids waiting out the hover transition in the short final hold.
+          await pause.press('Enter');
+          const cards = await page.locator('.cinema-card').evaluateAll(elements => elements.map(element => {
+            const box = element.getBoundingClientRect();
+            return { left: box.left, right: box.right, top: box.top, bottom: box.bottom };
+          }));
+          for (const card of cards) {
+            expect(card.left).toBeGreaterThanOrEqual(0);
+            expect(card.right).toBeLessThanOrEqual(device.width);
+            expect(card.top).toBeGreaterThan(60);
+            expect(card.bottom).toBeLessThan(device.height - 100);
+          }
+          await page.screenshot({ path: path.join(output, device.name + '-' + stage.stage + '-gathered.png') });
+          await page.getByRole('button', { name: '继续播放' }).click();
+        }
       }
       await expect(page.getByRole('button', { name: '继续推理' })).toBeVisible({ timeout: 16000 });
       const phases = await page.evaluate(() => (window as unknown as { captionPhases: { phase: string; title: string }[] }).captionPhases);

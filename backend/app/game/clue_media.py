@@ -66,6 +66,7 @@ class Shot(BaseModel):
     emphasis: str = Field(default="", max_length=200)
     motion: Literal["push", "pan", "split", "reveal", "timeline", "chain"] = "push"
     labels: list[str] = Field(default_factory=list, max_length=6)
+    composition: Literal["pan", "detail", "pair", "occlusion", "light"] | None = None
 
 
 class Presentation(BaseModel):
@@ -73,6 +74,7 @@ class Presentation(BaseModel):
     version: Literal[1, 2] = 1
     revision: str = Field(min_length=1, max_length=80)
     template: Literal["cinematic", "dossier"]
+    visual_preset: Literal["warm-noir", "cold-occlusion"] | None = None
     title: str = Field(min_length=1, max_length=120)
     background: Media | None = None
     shots: list[Shot] = Field(min_length=1, max_length=20)

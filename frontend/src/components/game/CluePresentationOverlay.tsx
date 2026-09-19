@@ -6,7 +6,7 @@ import type { ClueMedia, CluePresentationState } from '@/types/cluePresentation'
 import { audioPlayerManager } from '@/lib/audioPlayerManager';
 import { ClueEvidenceList } from './ClueEvidenceList';
 import { ImmersiveClueScene } from './ImmersiveClueScene';
-import { warmCluePresentation } from '@/lib/clueImageLoader';
+import { prepareCluePresentation } from '@/lib/clueImageLoader';
 import './cluePresentation.css';
 import './immersiveClueScene.css';
 
@@ -74,17 +74,14 @@ export function CluePresentationOverlay({ state, onContinue }: {
   }, []);
   useEffect(() => {
     if (!valid || reduced) return;
-    let active = true;
-    const timeout = window.setTimeout(() => { if (active) { active = false; setAllImagesFailed(true); } }, 12000);
-    void warmCluePresentation(state, loadAttempt > 0).then(results => {
-      if (active) {
-        clearTimeout(timeout);
-        const ready = results.length > 0 && results.every(Boolean);
+    const controller = new AbortController();
+    void prepareCluePresentation(state, controller.signal).then(ready => {
+      if (!controller.signal.aborted) {
         setLoaded(ready);
         setAllImagesFailed(!ready);
       }
     });
-    return () => { active = false; clearTimeout(timeout); };
+    return () => controller.abort();
     // Polling creates equivalent state objects; it must not restart the readiness deadline.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.presentation_id, valid, reduced, loadAttempt]);
@@ -145,7 +142,7 @@ export function CluePresentationOverlay({ state, onContinue }: {
       </> : <main className="cinema-end">
         <p className="cinema-eyebrow">{state.clues.length} 条线索已公开</p><h2>接下来，听听彼此的解释。</h2>
         <p className="cinema-end-intro">可以展开回看完整线索。准备好后，再开始本轮推理。</p>
-        {allImagesFailed && <p className="cinema-end-intro">图片尚未全部就绪，可以先阅读线索，或重试加载演出。</p>}
+        {allImagesFailed && <p className="cinema-end-intro">部分图片暂不可用，已跳过演出。线索已完整公开，可以直接继续推理，或重试加载。</p>}
         <ClueEvidenceList clues={state.clues} />
         {error && <p role="alert" className="cinema-error">{error}</p>}
         <div className="cinema-end-actions">{valid && !reduced && <button type="button" className="cinema-replay" onClick={() => {

@@ -102,3 +102,58 @@ it('warms only the active presentation and its referenced public images', async 
   expect(await loadClueImage('https://other.example/image.webp')).toBe(false);
   expect(TestImage.requests).toHaveLength(0);
 });
+
+function playbackState(): CluePresentationState {
+  const media = (id: string) => ({ status: 'ready', image_url: `/images/${id}.webp`, thumbnail_url: `/images/${id}.webp` });
+  return { status: 'pending', presentation: { status: 'ready', shots: [{ clue_ids: ['a', 'b'] }] },
+    clues: [{ id: 'a', media: media('a') }, { id: 'b', media: media('b') }],
+  } as unknown as CluePresentationState;
+}
+
+it('retries transient failures without fetching successful images again', async () => {
+  const { prepareCluePresentation } = await import('./clueImageLoader');
+  const ready = prepareCluePresentation(playbackState(), new AbortController().signal);
+  TestImage.requests[0].onload!(); TestImage.requests[1].onerror!();
+  await vi.advanceTimersByTimeAsync(300);
+  expect(TestImage.requests.map(image => image.src)).toEqual(['/images/a.webp', '/images/b.webp', '/images/b.webp']);
+  TestImage.requests[2].onload!();
+  expect(await ready).toBe(true);
+});
+
+it('gives up after three failed requests and never treats partial readiness as playable', async () => {
+  const { prepareCluePresentation } = await import('./clueImageLoader');
+  const ready = prepareCluePresentation(playbackState(), new AbortController().signal);
+  TestImage.requests[0].onload!(); TestImage.requests[1].onerror!();
+  await vi.advanceTimersByTimeAsync(300);
+  TestImage.requests[2].onerror!();
+  await vi.advanceTimersByTimeAsync(900);
+  TestImage.requests[3].onerror!();
+  expect(await ready).toBe(false);
+  expect(TestImage.requests).toHaveLength(4);
+  await vi.advanceTimersByTimeAsync(30000);
+  expect(TestImage.requests).toHaveLength(4);
+});
+
+it('bounds stalled decodes and cancels retry work when the presentation closes', async () => {
+  const { prepareCluePresentation } = await import('./clueImageLoader');
+  const controller = new AbortController();
+  const ready = prepareCluePresentation(playbackState(), controller.signal);
+  for (const image of TestImage.requests) { image.decode.mockImplementation(() => new Promise<void>(() => {})); image.onload!(); }
+  await vi.advanceTimersByTimeAsync(15000);
+  expect(await ready).toBe(false);
+  const before = TestImage.requests.length;
+  const aborted = prepareCluePresentation(playbackState(), controller.signal);
+  controller.abort();
+  expect(await aborted).toBe(false);
+  await vi.advanceTimersByTimeAsync(16000);
+  // Already in-flight requests may settle, but cancellation must not enqueue retries.
+  expect(TestImage.requests.length).toBeLessThanOrEqual(before + 2);
+});
+
+it('rejects a config whose current or referenced clue has lost its image', async () => {
+  const { prepareCluePresentation } = await import('./clueImageLoader');
+  const state = playbackState();
+  delete state.clues[0].media;
+  expect(await prepareCluePresentation(state, new AbortController().signal)).toBe(false);
+  expect(TestImage.requests).toHaveLength(0);
+});

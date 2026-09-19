@@ -80,6 +80,35 @@ def test_continuous_presentation_survives_normalization_and_snapshot():
     assert snapshot["clue_stages"][0]["presentation"]["status"] == "ready"
 
 
+@pytest.mark.parametrize("preset", ["warm-noir", "cold-occlusion"])
+@pytest.mark.parametrize("composition", ["pan", "detail", "pair", "occlusion", "light"])
+def test_visual_directions_survive_editor_and_snapshot(preset, composition):
+    script, characters = completed_script()
+    script.clue_stages = stages()
+    before = content_fingerprint({"clue_stages": script.clue_stages})
+    config = script.clue_stages[0]["presentation"]
+    config.update(version=2, visual_preset=preset)
+    config["shots"][0]["composition"] = composition
+    state = hydrate_completed_script(script, characters, "")
+    result = normalize_game_data(state)
+    assert result.get("data_validation_errors") == []
+    snapshot = build_runtime_snapshot(result)
+    saved = snapshot["clue_stages"][0]["presentation"]
+    assert saved["visual_preset"] == preset
+    assert saved["shots"][0]["composition"] == composition
+    assert content_fingerprint({"clue_stages": snapshot["clue_stages"]}) == before
+
+
+@pytest.mark.parametrize("field,value", [("visual_preset", "custom-script"), ("composition", "url(javascript:run())")])
+def test_visual_directions_reject_untrusted_styles(field, value):
+    data = stages()
+    config = data[0]["presentation"]
+    target = config["shots"][0] if field == "composition" else config
+    target[field] = value
+    with pytest.raises(ValueError):
+        normalize_clue_stages(data, script_id="s")
+
+
 def test_editor_preserves_omitted_media_and_marks_changes_for_review():
     script, characters = completed_script()
     script.clue_stages = stages()

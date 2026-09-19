@@ -305,6 +305,53 @@ async function assertNonInteractiveArt(page: Page) {
   expect(await art.evaluate(el => el.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true })))).toBe(false);
 }
 
+for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+  test(`11 张图片双层收拢不越界，${viewport.width}px`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await images(page, false, 2);
+    const many = Array.from({ length: 11 }, (_, i) => ({ ...clues[0], id: `c${i + 1}`, summary: `材料 ${i + 1}` }));
+    await page.route(url => url.pathname.endsWith('/preview.json'), route => json(route, { clue_stages: [{ ...stage, items: many,
+      presentation: { ...presentation, version: 2, visual_preset: 'warm-noir', shots: [
+        ...[0, 3, 6, 9].map((start, i) => ({ ...presentation.shots[0], id: `shot${i}`, duration_ms: 1000,
+          clue_ids: many.slice(start, start + 3).map(clue => clue.id), composition: 'pair' })),
+        { ...presentation.shots[0], id: 'gather', duration_ms: 4000, clue_ids: [], title: '汇聚' },
+      ] },
+    }] }));
+    await page.goto('/clue-preview.html?src=/images/scripts/test/preview.json');
+    await page.getByRole('button', { name: '播放本轮演出' }).click();
+    await expect(page.locator('.cinema-immersive')).toHaveAttribute('data-phase', 'gather', { timeout: 10000 });
+    await page.waitForTimeout(3300);
+    await page.getByRole('button', { name: '暂停演出' }).click();
+    const boxes = await page.locator('.cinema-card').evaluateAll(elements => elements.map(element => {
+      const box = element.getBoundingClientRect();
+      return { left: box.left, right: box.right, top: box.top, bottom: box.bottom };
+    }));
+    expect(boxes).toHaveLength(11);
+    for (const box of boxes) {
+      expect(box.left).toBeGreaterThanOrEqual(0);
+      expect(box.right).toBeLessThanOrEqual(viewport.width);
+      expect(box.top).toBeGreaterThan(70);
+      expect(box.bottom).toBeLessThan(viewport.height - 120);
+    }
+    await assertNonInteractiveArt(page);
+  });
+}
+
+test('临时坏图自动重试成功后才开场', async ({ page }) => {
+  await images(page, false, 2);
+  let attempts = 0;
+  await page.route('**/art.svg', route => {
+    attempts++;
+    return route.fulfill({ status: attempts < 3 ? 503 : 200,
+      contentType: attempts < 3 ? 'text/plain' : 'image/svg+xml', body: attempts < 3 ? 'temporary' : testArt });
+  });
+  await page.goto('/clue-preview.html?src=/images/scripts/test/preview.json');
+  await page.getByRole('button', { name: '播放本轮演出' }).click();
+  await expect(page.locator('.cinema-copy h2')).toHaveText('观察现场');
+  expect(attempts).toBeGreaterThanOrEqual(3);
+  await expect(page.locator('.cinema-end')).toHaveCount(0);
+});
+
 for (const width of [720, 390]) {
   test(`关联引用与前后正文同行并自然跨行，${width}px`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 900 });

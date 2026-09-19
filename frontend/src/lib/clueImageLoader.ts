@@ -81,6 +81,43 @@ export function warmCluePresentation(state?: CluePresentationState | null, retry
   return warmClueAssets(presentationMedia(state).map(media => media.image_url), retry);
 }
 
+/** All-or-nothing playback, with a bounded escape to the readable evidence screen. */
+export async function prepareCluePresentation(state: CluePresentationState, signal: AbortSignal): Promise<boolean> {
+  const config = state.presentation;
+  const clues = new Map((state.reference_clues ?? state.clues).map(clue => [clue.id, clue]));
+  const required = [...state.clues, ...(config?.shots ?? []).flatMap(shot => shot.clue_ids.map(id => clues.get(id)))];
+  if (!config || !required.length || required.some(clue => clue?.media?.status !== 'ready')
+    || (config.background && config.background.status !== 'ready') || signal.aborted) return false;
+
+  let expired = false;
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  let backoff: ReturnType<typeof setTimeout> | undefined;
+  let cancel!: () => void;
+  const stop = new Promise<false>(resolve => {
+    cancel = () => { expired = true; resolve(false); };
+    deadline = setTimeout(cancel, 15000);
+    signal.addEventListener('abort', cancel, { once: true });
+  });
+  try {
+    // Successful decoded images stay cached. Only failures cause another network request.
+    for (let attempt = 0; attempt < 3 && !expired; attempt++) {
+      if (attempt) await Promise.race([
+        new Promise<void>(resolve => { backoff = setTimeout(resolve, attempt === 1 ? 300 : 900); }), stop,
+      ]);
+      if (expired) return false;
+      const results = await Promise.race([warmCluePresentation(state, true), stop]);
+      if (results === false || expired) return false;
+      if (results.length > 0 && results.every(Boolean)) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(deadline); clearTimeout(backoff);
+    signal.removeEventListener('abort', cancel);
+  }
+}
+
 /** Opportunistic next-round work: one low-priority image per idle turn. */
 export function prefetchClueAssets(urls: string[]): () => void {
   if (typeof window === 'undefined' || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return () => {};

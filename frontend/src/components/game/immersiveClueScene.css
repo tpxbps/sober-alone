@@ -15,15 +15,26 @@
   overflow: hidden;
   background: #10161b;
   transform-origin: center;
-  will-change: transform, opacity;
   backface-visibility: hidden;
 }
+.cinema-card[data-active='true'] { will-change: transform, opacity; }
+.cinema-immersive[data-phase='gather'] .cinema-card { will-change: transform; }
 .cinema-card img {
   width: 100%; height: 100%;
   object-fit: cover; object-position: var(--focus);
   transform-origin: var(--focus);
-  will-change: transform;
 }
+.cinema-card[data-active='true'] img { will-change: transform; }
+.cinema-immersive[data-preset='warm-noir'] .cinema-card-wash {
+  background: linear-gradient(110deg, #4e21061a, transparent 50%, #49667b12), linear-gradient(0deg, #100c08bb, transparent 36%);
+}
+.cinema-immersive[data-preset='cold-occlusion'] .cinema-card-wash {
+  background: linear-gradient(105deg, #071a2140, transparent 55%), linear-gradient(0deg, #081117bb, transparent 34%);
+}
+.cinema-curtain { position: absolute; inset: 0 64% 0 -10%; z-index: 39; pointer-events: none;
+  background: linear-gradient(90deg, #070e13ee, #172b34cc 58%, #071017e8 86%, transparent);
+}
+.cinema-light-return { position: absolute; inset: 0; z-index: 41; background: #e4ebe4; pointer-events: none; }
 .cinema-card-wash {
   position: absolute; inset: 0;
   background: linear-gradient(100deg, #0a172138, transparent 40%, #a1b2c40a), linear-gradient(0deg, #080e16cc, transparent 36%, transparent 82%, #0a111f33);
