@@ -177,7 +177,7 @@ test('未检查与检查失败都能直接下一步', async ({ page }) => {
   await expect.poll(() => fixture.submissions.filter(s => s.action === 'confirm').length).toBe(2);
 });
 
-test('创意打字提示不写入输入值，聚焦停止且支持减少动态效果', async ({ page }) => {
+test('空白创意框聚焦后继续循环打字，输入后暂停，支持减少动态效果', async ({ page }) => {
   await page.route('**/api/v1/**', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ scripts: [], models: [], features: {} }) }));
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/?editor=resume');
@@ -186,10 +186,18 @@ test('创意打字提示不写入输入值，聚焦停止且支持减少动态�
   await expect(idea).toHaveAttribute('placeholder', /故事发生在某家互联网大厂/);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await idea.focus();
+  await expect(idea).toHaveAttribute('placeholder', /^海岛上/, { timeout: 12000 });
   const value = await idea.getAttribute('placeholder');
-  await page.waitForTimeout(160);
-  expect(await idea.getAttribute('placeholder')).toBe(value);
+  await page.waitForTimeout(150);
+  expect(await idea.getAttribute('placeholder')).not.toBe(value);
   await expect(idea).toHaveValue('');
+  await idea.fill('我的创意');
+  const paused = await idea.getAttribute('placeholder');
+  await page.waitForTimeout(500);
+  expect(await idea.getAttribute('placeholder')).toBe(paused);
+  await idea.fill('');
+  await page.waitForTimeout(150);
+  expect(await idea.getAttribute('placeholder')).not.toBe(paused);
 });
 
 

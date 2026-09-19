@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-for (const width of [1280, 390]) {
+for (const width of [1920, 1280, 390]) {
   test(`个人本提醒 ${width}：常驻预览、统一已读、刷新和新对局`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 844 })
     await page.emulateMedia({ reducedMotion: 'reduce' })
@@ -28,9 +28,10 @@ for (const width of [1280, 390]) {
     const input = (await page.getByRole('textbox').boundingBox())!
     if (width < 1024) expect(box.y).toBeGreaterThanOrEqual(input.y + input.height)
     else {
-      const continueButton = page.getByRole('button', { name: /继续发言/ })
-      const controls = await continueButton.boundingBox()
-      if (controls) expect(box.x).toBeGreaterThanOrEqual(controls.x + controls.width)
+      const controls = (await page.locator('[data-game-composer]').boundingBox())!
+      expect(box.y + box.height).toBeLessThanOrEqual(controls.y - 8)
+      expect(box.width).toBeGreaterThanOrEqual(320)
+      expect(box.width).toBeLessThanOrEqual(480)
     }
     await expect.poll(() => hint.evaluate(element => {
       let opacity = 1;
@@ -38,6 +39,9 @@ for (const width of [1280, 390]) {
       return opacity;
     })).toBe(1)
     await page.screenshot({ path: testInfo.outputPath(`hint-${width}.png`) })
+    await expect(hint).toHaveCSS('animation-name', 'none')
+    await page.emulateMedia({ reducedMotion: 'no-preference' })
+    await expect(hint).toHaveCSS('animation-name', 'script-hint-breathe')
     await hint.getByRole('button', { name: '阅读我的剧本' }).focus()
     await page.keyboard.press('Enter')
     await expect(page.getByRole('dialog', { name: '林岚的剧本' })).toBeVisible()

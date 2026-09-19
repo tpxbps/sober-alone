@@ -15,7 +15,7 @@ export function PersonalScriptHint({ name, summary, content, onOpen, className }
 }) {
   return (
     <aside data-personal-script-hint aria-label="个人剧本阅读提醒"
-      className={cn("relative rounded-xl border border-primary/40 bg-card/95 p-4 shadow-xl backdrop-blur-xl animate-in fade-in slide-in-from-bottom-2 duration-300 motion-reduce:animate-none", className)}>
+      className={cn("personal-script-hint relative rounded-xl border border-primary/40 bg-card/95 p-4 shadow-xl backdrop-blur-xl", className)}>
       <div className="flex items-center gap-2 text-primary">
         <BookOpen className="size-4 shrink-0" />
         <p className="font-serif text-sm font-semibold">{name ? `${name}的个人剧本` : "我的个人剧本"}</p>

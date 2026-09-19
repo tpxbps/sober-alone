@@ -36,3 +36,19 @@ def test_no_upscale_external_or_traversal_urls(tmp_path):
         "/images/missing.png",
     ]:
         assert image_variants(url, tmp_path) == []
+
+
+def test_legacy_static_images_use_explicit_root_and_keep_original_url(tmp_path, monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "STATIC_SCRIPT_IMAGE_DIR", str(tmp_path))
+    source = tmp_path / "story.png"
+    Image.new("RGB", (1600, 900)).save(source)
+    original = source.read_bytes()
+    variants = generate_variants(source, "cover", tmp_path, url_prefix="/asset/scripts/")
+    assert image_variants("/asset/scripts/story.png") == variants
+    assert all(v["url"].startswith("/asset/scripts/_variants/") for v in variants)
+    assert source.read_bytes() == original
+    assert image_variants("/asset/scripts/%2e%2e/outside.png") == []
+    monkeypatch.setattr(settings, "STATIC_SCRIPT_IMAGE_DIR", None)
+    assert image_variants("/asset/scripts/story.png") == []

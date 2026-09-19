@@ -46,6 +46,7 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
   } | null>(null);
   const mentionNonceRef = useRef(0);
   const { read: scriptOpened } = usePersonalScriptRead(sessionId);
+  const scriptHintRef = useRef<HTMLDivElement>(null);
 
 
   const {
@@ -178,6 +179,22 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
   const personalScriptHint = showScriptHint ? <PersonalScriptHint
     name={humanCharacter?.name} summary={humanCharacter?.character_script_summary}
     content={humanCharacterScript} onOpen={() => setScriptOpen(true)} /> : null;
+
+  useEffect(() => {
+    const hint = scriptHintRef.current;
+    const composer = document.querySelector('[data-game-composer]');
+    if (!showScriptHint || !hint || !composer) return;
+    // A wider hint may extend into the chat column. Keep it above every input
+    // control, including when the composer grows while the player is typing.
+    const position = () => {
+      hint.style.bottom = `${Math.max(96, window.innerHeight - composer.getBoundingClientRect().top + 16)}px`;
+    };
+    const observer = new ResizeObserver(position);
+    observer.observe(composer);
+    window.addEventListener('resize', position);
+    position();
+    return () => { observer.disconnect(); window.removeEventListener('resize', position); };
+  }, [showScriptHint]);
 
   // Show completion modal when game ends (removed - review stage has end button)
   useEffect(() => {
@@ -556,7 +573,7 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
         )}
       </AnimatePresence>
 
-      {personalScriptHint && <div className="hidden lg:block fixed bottom-24 right-6 z-40 w-52 xl:w-64 min-[1900px]:w-80">{personalScriptHint}</div>}
+      {personalScriptHint && <div ref={scriptHintRef} className="personal-script-hint-desktop hidden lg:block fixed bottom-44 right-6 z-40 w-[clamp(20rem,24vw,30rem)]">{personalScriptHint}</div>}
 
       {/* Player Script Tooltip */}
       <PlayerScriptTooltip

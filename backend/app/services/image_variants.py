@@ -29,19 +29,24 @@ def _manifest(path: Path) -> Path:
     return path.with_name(path.name + ".variants.json")
 
 
-def _source(url: str, root: Path) -> Path | None:
+def _source(url: str, root: Path, prefix: str = "/images/") -> Path | None:
     parsed = urlsplit(url)
-    if parsed.scheme or parsed.netloc or not parsed.path.startswith("/images/"):
+    if parsed.scheme or parsed.netloc or not parsed.path.startswith(prefix):
         return None
-    path = (root / unquote(parsed.path.removeprefix("/images/"))).resolve()
+    path = (root / unquote(parsed.path.removeprefix(prefix))).resolve()
     return path if path.is_relative_to(root.resolve()) and path.is_file() else None
 
 
 def image_variants(url: str | None, root: Path | None = None) -> list[dict]:
     """Only advertise completed derivatives matching the current original."""
+    prefix = "/asset/scripts/" if (url or "").startswith("/asset/scripts/") else "/images/"
+    if prefix == "/asset/scripts/" and root is None:
+        if not settings.STATIC_SCRIPT_IMAGE_DIR:
+            return []
+        root = Path(settings.STATIC_SCRIPT_IMAGE_DIR)
     root = Path(root or settings.image_dir).resolve()
     try:
-        source = _source(url or "", root)
+        source = _source(url or "", root, prefix)
         if source is None:
             return []
         manifest = json.loads(_manifest(source).read_text(encoding="utf-8"))
@@ -54,18 +59,24 @@ def image_variants(url: str | None, root: Path | None = None) -> list[dict]:
             for item in manifest["variants"]
             if isinstance(item.get("width"), int)
             and item["width"] > 0
-            and _source(item.get("url", ""), root) is not None
+            and _source(item.get("url", ""), root, prefix) is not None
         ]
     except (OSError, ValueError, KeyError, TypeError):
         return []
 
 
-def generate_variants(source: Path, kind: str, root: Path | None = None) -> list[dict]:
+def generate_variants(
+    source: Path, kind: str, root: Path | None = None, *, url_prefix: str = "/images/"
+) -> list[dict]:
     root = Path(root or settings.image_dir).resolve()
     source = source.resolve(strict=True)
-    if not source.is_relative_to(root) or kind not in WIDTHS:
+    if (
+        not source.is_relative_to(root)
+        or kind not in WIDTHS
+        or url_prefix not in {"/images/", "/asset/scripts/"}
+    ):
         raise ValueError("Image must be inside the configured image root")
-    url = "/images/" + source.relative_to(root).as_posix()
+    url = url_prefix + source.relative_to(root).as_posix()
     existing = image_variants(url, root)
     if existing:
         with Image.open(source) as original:
@@ -99,7 +110,7 @@ def generate_variants(source: Path, kind: str, root: Path | None = None) -> list
             with Image.open(target) as derivative:
                 variants.append(
                     {
-                        "url": "/images/" + target.relative_to(root).as_posix(),
+                        "url": url_prefix + target.relative_to(root).as_posix(),
                         "width": derivative.width,
                         "height": derivative.height,
                     }

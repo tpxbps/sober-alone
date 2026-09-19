@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = _sqlite_url(LOCAL_DATA_DIR / "game_data.db")
     DEBUG: bool = False
+    # Optional legacy /asset/scripts/ image root served by the web server.
+    STATIC_SCRIPT_IMAGE_DIR: str | None = None
 
     # PostgreSQL for Agent Checkpointer (生产环境使用)
     POSTGRES_URI: str | None = None
