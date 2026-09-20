@@ -22,7 +22,7 @@ export function ImmersiveClueScene({ presentation, clues, elapsed, duration }: {
   const mobile = useSyncExternalStore(subscribe, smallScreen, () => false);
   const { tracks, cues } = useMemo(() => {
     const map = new Map(clues.map(clue => [clue.id, clue]));
-    const entries: { id: string; media: ClueMedia; at: number; span: number;
+    const entries: { id: string; shotId: string; media: ClueMedia; at: number; span: number; exitAt: number;
       composition?: ClueShot['composition']; position: number; count: number }[] = [];
     const cues = presentation.shots.map((shot, shotIndex) => {
       const at = presentation.shots.slice(0, shotIndex).reduce((sum, cue) => sum + cue.duration_ms, 0);
@@ -30,9 +30,10 @@ export function ImmersiveClueScene({ presentation, clues, elapsed, duration }: {
       for (const [index, id] of shot.clue_ids.entries()) {
         const clue = map.get(id);
         if (clue?.media?.status === 'ready') entries.push({
-          id: shot.id + id, media: clue.media,
+          id: shot.id + id, shotId: shot.id, media: clue.media,
           at: at + index * (shot.composition === 'pair' ? 240 : slot),
           span: shot.composition === 'pair' ? shot.duration_ms - index * 240 : slot,
+          exitAt: at + (shot.composition === 'pair' ? shot.duration_ms * 0.76 : (index + 0.76) * slot),
           composition: shot.composition, position: index, count: shot.clue_ids.length,
         });
       }
@@ -59,7 +60,7 @@ export function ImmersiveClueScene({ presentation, clues, elapsed, duration }: {
       {tracks.map((track, index) => {
         const age = elapsed - track.at;
         const arrival = smooth(age / 1000);
-        const departure = smooth((age - track.span * 0.76) / 1550);
+        const departure = smooth((elapsed - track.exitAt) / 1550);
         const drift = clamp(age / (track.span + 1500));
         const side = index % 2 === 0 ? -1 : 1;
         const variant = index % 3;
@@ -67,17 +68,21 @@ export function ImmersiveClueScene({ presentation, clues, elapsed, duration }: {
         // Alternating wide, off-axis and close compositions; no repeated flying-card entrance.
         const paired = track.composition === 'pair';
         const pairPosition = track.position - (track.count - 1) / 2;
-        const heroX = paired ? (mobile ? side * 6 : pairPosition * (track.count > 2 ? 28 : 42))
+        const heroX = paired ? pairPosition * (mobile ? 8 : 92 / track.count)
           : track.composition === 'pan' ? mix(-12, 12, drift)
           : mobile ? side * 3 : variant === 1 ? side * 13 : side * 4;
-        const heroY = paired && mobile ? pairPosition * (track.count > 2 ? 15 : 23)
+        const heroY = paired ? (mobile ? pairPosition * 60 / track.count : 0)
           : mobile ? -5 : variant === 2 ? -4 : 0;
-        const x = mix(heroX + side * (1 - arrival) * 9, berth[0], departure);
-        const y = mix(heroY + (dossier ? 9 : 2) * (1 - arrival), berth[1], departure);
+        // A group enters from its outer edges and retires in place. Crossing paths
+        // made adjacent images cover one another just as their depth order changed.
+        const x = paired ? heroX + (mobile ? 0 : pairPosition * 4) * (1 - arrival)
+          : mix(heroX + side * (1 - arrival) * 9, berth[0], departure);
+        const y = paired ? heroY : mix(heroY + (dossier ? 9 : 2) * (1 - arrival), berth[1], departure);
         const gather = clueGatherLayout(index, tracks.length, mobile);
-        const heroScale = paired ? (track.count > 2 ? 0.43 : 0.59) : 1;
-        const scale = mix(mix(1.025, 0.985, drift) * heroScale, mobile ? 0.28 : 0.3, departure);
-        const angle = mix(dossier ? side * 2.5 * (1 - arrival) : 0, side * (4 + index % 3), departure);
+        const heroScale = paired ? (mobile ? 0.98 : 0.84) / track.count : 1;
+        const scale = mix(mix(1.025, 0.985, drift) * heroScale,
+          paired ? heroScale * 0.62 : mobile ? 0.28 : 0.3, departure);
+        const angle = paired ? 0 : mix(dossier ? side * 2.5 * (1 - arrival) : 0, side * (4 + index % 3), departure);
         const insetX = !paired && variant === 1 && !mobile ? 13 : 0;
         const insetY = !paired && variant === 2 && !mobile ? 8 : 0;
         const occluded = track.composition === 'occlusion';
@@ -87,9 +92,9 @@ export function ImmersiveClueScene({ presentation, clues, elapsed, duration }: {
         const focus = track.media.focus;
         const phoneFocus = track.media.mobile_focus ?? focus;
         const style = {
-          transform: `translate3d(calc(-50% + ${mix(x, gather.x, assemble)}vw), calc(-50% + ${mix(y, gather.y, assemble)}vh), ${mix(-90 * (1 - arrival), -220, departure) * (1 - assemble)}px) rotateX(${dossier ? (1 - arrival) * 9 * (1 - assemble) : 0}deg) rotateY(${side * (1 - arrival) * 6 * (1 - assemble)}deg) rotate(${mix(angle, gather.angle, assemble)}deg) scale(${mix(scale, gather.scale, assemble)})`,
+          transform: `translate3d(calc(-50% + ${mix(x, gather.x, assemble)}vw), calc(-50% + ${mix(y, gather.y, assemble)}vh), 0) rotateX(${!paired && dossier ? (1 - arrival) * 9 * (1 - assemble) : 0}deg) rotateY(${paired ? 0 : side * (1 - arrival) * 6 * (1 - assemble)}deg) rotate(${mix(angle, gather.angle, assemble)}deg) scale(${mix(scale, gather.scale, assemble)})`,
           opacity: mix(opacity, age >= 0 ? 1 : 0, assemble),
-          zIndex: age >= 0 && departure < 0.8 ? 20 + index : index + 1,
+          zIndex: index + 1,
           filter: `brightness(${mix(mix(0.78, 1, arrival), 0.82, departure)})`,
           clipPath: `inset(${(insetY + (dossier && !occluded ? reveal : 0)) * crop}% ${(insetX + (!dossier || occluded ? reveal : 0)) * crop}% ${insetY * crop}% ${insetX * crop}%)`,
           '--focus': `${focus[0] * 100}% ${focus[1] * 100}%`,
@@ -99,7 +104,7 @@ export function ImmersiveClueScene({ presentation, clues, elapsed, duration }: {
         const lens = {
           transform: `scale(${mix(mix(track.composition === 'detail' ? 1.42 : variant === 2 ? 1.3 : 1.14, 1.02, drift), 1, assemble)}) translate3d(${side * mix(2.8, -1.8, drift) * (1 - assemble)}%, ${mix(1.5, -1.5, drift) * (1 - assemble)}%, 0)`,
         };
-        return <div key={track.id} className="cinema-card" data-active={age >= 0 && departure < 0.8} style={style}>
+        return <div key={track.id} className="cinema-card" data-shot={track.shotId} data-composition={track.composition} data-active={age >= 0 && departure < 0.8} style={style}>
           <FilmImage media={track.media} style={lens} />
           <div className="cinema-card-wash" style={{ opacity: 1 - assemble * 0.75 }} />
           <div className="cinema-card-edge" />

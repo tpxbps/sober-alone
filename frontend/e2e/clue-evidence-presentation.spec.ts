@@ -352,6 +352,60 @@ test('临时坏图自动重试成功后才开场', async ({ page }) => {
   await expect(page.locator('.cinema-end')).toHaveCount(0);
 });
 
+for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+  for (const count of [2, 3, 4]) {
+    test(`多图镜头 ${count} 张进退场不相交、不跳层，${viewport.width}px`, async ({ page }, info) => {
+      await page.setViewportSize(viewport);
+      await images(page, false, 2);
+      const group = Array.from({ length: count }, (_, i) => ({ ...clues[0], id: `c${i + 1}` }));
+      await page.route(url => url.pathname.endsWith('/preview.json'), route => json(route, { clue_stages: [{
+        ...stage, items: group, presentation: { ...presentation, version: 2,
+          template: viewport.width < 700 ? 'dossier' : 'cinematic', shots: [
+            { ...presentation.shots[0], id: 'opening', duration_ms: 1500, clue_ids: [], title: '开场' },
+            { ...presentation.shots[0], id: 'pair', duration_ms: 6000, clue_ids: group.map(clue => clue.id), composition: 'pair', title: '多图' },
+            { ...presentation.shots[0], id: 'hold', duration_ms: 4000, clue_ids: [], title: '退场' },
+            { ...presentation.shots[0], id: 'gather', duration_ms: 3000, clue_ids: [], title: '汇聚' },
+          ],
+        },
+      }] }));
+      await page.goto('/clue-preview.html?src=/images/scripts/test/preview.json');
+      await page.getByRole('button', { name: '播放本轮演出' }).click();
+      await expect(page.locator('.cinema-copy h2')).toHaveText('多图');
+      const frames = await page.locator('.cinema-space').evaluate(async element => {
+        const cards = [...element.querySelectorAll<HTMLElement>('[data-shot="pair"]')];
+        const samples: { opacity: number; layer: string; left: number; right: number; top: number; bottom: number }[][] = [];
+        const start = performance.now();
+        await new Promise<void>(resolve => {
+          const sample = (now: number) => {
+            samples.push(cards.map(card => {
+              const style = getComputedStyle(card), box = card.getBoundingClientRect();
+              return { opacity: Number(style.opacity), layer: style.zIndex,
+                left: box.left, right: box.right, top: box.top, bottom: box.bottom };
+            }));
+            if (now - start >= 8000) resolve();
+            else requestAnimationFrame(sample);
+          };
+          requestAnimationFrame(sample);
+        });
+        return samples;
+      });
+      await info.attach('pair-frame-geometry', { body: JSON.stringify(frames), contentType: 'application/json' });
+      expect(frames.length).toBeGreaterThan(60);
+      for (let i = 0; i < count; i++) expect(new Set(frames.map(frame => frame[i].layer)).size).toBe(1);
+      for (const frame of frames) {
+        const visible = frame.filter(card => card.opacity > 0.05);
+        for (let i = 0; i < visible.length; i++) for (let j = i + 1; j < visible.length; j++) {
+          const a = visible[i], b = visible[j];
+          const overlapX = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+          const overlapY = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+          expect(Math.min(overlapX, overlapY)).toBeLessThanOrEqual(0);
+        }
+      }
+      await expect(page.locator('.cinema-space')).toHaveCSS('transform-style', 'flat');
+    });
+  }
+}
+
 for (const width of [720, 390]) {
   test(`关联引用与前后正文同行并自然跨行，${width}px`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 900 });

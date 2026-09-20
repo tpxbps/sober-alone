@@ -7,7 +7,8 @@
 .is-immersive .cinema-eyebrow { font-size: 9px; opacity: .7; }
 .is-immersive .cinema-controls button { background: #080d1333; border-color: #ffffff20; backdrop-filter: blur(12px); }
 .cinema-immersive { position: absolute; inset: 0; overflow: hidden; }
-.cinema-space { position: absolute; inset: 0; transform-style: preserve-3d; will-change: transform; }
+/* Keep a stable paint order: independent photo depths must not swap at crossings. */
+.cinema-space { position: absolute; inset: 0; transform-style: flat; will-change: transform; }
 .cinema-card {
   position: absolute;
   left: 50%; top: 45%;
