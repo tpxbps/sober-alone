@@ -6,7 +6,7 @@ import { Markdown } from '@/components/ui/Markdown';
 import { ClueImage } from './ClueImage';
 
 export function ClueDetails({ clues }: { clues: PublicClue[] }) {
-  return <div className="max-h-[65dvh] overflow-y-auto overscroll-contain scrollbar-thin divide-y divide-amber-200/15">
+  return <div className="min-h-0 overflow-y-auto overscroll-contain scrollbar-thin divide-y divide-amber-200/15">
     {clues.map((clue, index) => <section key={clue.id} className="py-4 first:pt-0 last:pb-0">
       <header className="mb-3">
         {clue.media?.status === 'ready' && <ClueImage media={clue.media}
@@ -48,7 +48,7 @@ export function ClueCitationHover({ clue, clues: group, children }: {
   return <HoverCard.Root open={open} openDelay={150} closeDelay={180} onOpenChange={setOpen}>
     <HoverCard.Trigger asChild>{trigger}</HoverCard.Trigger><HoverCard.Portal>
     <HoverCard.Content role="tooltip" side="top" collisionPadding={12} onPointerEnter={cancelClose} onPointerLeave={scheduleClose}
-      className="z-[90] w-[min(28rem,calc(100vw-2rem))] select-text rounded-xl border border-amber-300/20 bg-popover p-4 text-popover-foreground shadow-2xl">
+      className="z-[90] flex max-h-[min(65dvh,var(--radix-hover-card-content-available-height))] w-[min(28rem,calc(100vw-2rem))] flex-col overflow-hidden select-text rounded-xl border border-amber-300/20 bg-popover p-4 text-popover-foreground shadow-2xl">
       <ClueDetails clues={clues} /><HoverCard.Arrow className="fill-popover" />
     </HoverCard.Content></HoverCard.Portal></HoverCard.Root>;
 }

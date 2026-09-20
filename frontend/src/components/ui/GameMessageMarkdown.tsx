@@ -165,7 +165,7 @@ export function GameMessageMarkdown({
     return new Map(publicClues.filter(clue => allowed.has(clue.id.toLowerCase()))
       .map(clue => [clue.id.toLowerCase(), clue]));
   }, [publicClues, allowedKey]);
-  const citationTokens = useMemo(() => trustedClueTokens(children.replace(/@{2,}/g, "@"), new Set(clueMap.keys())), [children, clueMap]);
+  const citationTokens = useMemo(() => trustedClueTokens(children.replace(/@{2,}/g, "@"), new Set(clueMap.keys()), new Map([...clueMap].map(([id, clue]) => [id, clue.summary]))), [children, clueMap]);
   const { normalizedContent, citationPositions } = useMemo(() => {
     let content = '';
     const positions = new Map<number, number>();

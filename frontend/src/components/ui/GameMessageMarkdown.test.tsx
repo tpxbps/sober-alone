@@ -109,6 +109,22 @@ describe("attached clue evidence", () => {
     expect(markup).not.toContain('查看线索 门锁');
   });
 
+  it("recovers nested and split evidence groups without swallowing later valid citations", () => {
+    const markup = render('先看c01那条记录。[至于c02材料，需要对照[c01]进一步核实][c01][c02]。后面[c02]，[仍不足定案][c01,c02]。');
+    expect(markup.match(/data-clue-citation=/g)).toHaveLength(4);
+    expect(markup.match(/查看 2 条引用线索/g)).toHaveLength(2);
+    expect(markup).toContain('至于材料，需要对照门锁进一步核实');
+    expect(markup).not.toMatch(/c0[12]/);
+    expect(markup).toContain('后面');
+  });
+
+  it("resumes after a malformed opener and keeps Markdown around citations", () => {
+    const markup = render('**开头[没有闭合**\n\n后面[c01]，以及[需要核实][c02]。');
+    expect(markup.match(/data-clue-citation=/g)).toHaveLength(2);
+    expect(markup).toContain('<strong');
+    expect(markup).toContain('需要核实');
+  });
+
   it("does not hijack ordinary links with the generated fragment prefix", () => {
     const markup = render('[c01] [普通链接](#evidence-0) [别的链接](https://example.org)');
     expect(markup).toContain('查看线索 门锁');

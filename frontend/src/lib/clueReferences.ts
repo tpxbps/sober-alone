@@ -8,10 +8,11 @@ function idsIn(value: string): string[] | undefined {
   return ids.length && ids.every(id => ID.test(id)) ? [...new Set(ids)] : undefined;
 }
 function bracketEnd(text: string, start: number): number | undefined {
+  let depth = 1;
   for (let i = start + 1; i < text.length; i++) {
     if (text[i] === '\\') { i++; continue; }
-    if (text[i] === ']') return i + 1;
-    if (text[i] === '[') return undefined;
+    if (text[i] === ']' && --depth === 0) return i + 1;
+    if (text[i] === '[') depth++;
   }
 }
 export function tokenizeClues(content: string): ClueToken[] {
@@ -21,7 +22,7 @@ export function tokenizeClues(content: string): ClueToken[] {
   const flush = () => {
     if (!plain) return;
     let offset = 0;
-    const bare = new RegExp(`(?<![\\p{L}\\p{N}_\\[#/-])(${ID_SOURCE})(?![\\p{L}\\p{N}_\\]-])`, 'giu');
+    const bare = new RegExp(`(?<![a-z0-9_\\[#/\\\\-])(${ID_SOURCE})(?![a-z0-9_\\]-])`, 'gi');
     for (const m of plain.matchAll(bare)) {
       tokens.push({ raw: plain.slice(offset, m.index) }, { raw: m[0], ids: [m[1].toLowerCase()], bare: true });
       offset = m.index + m[0].length;
@@ -67,16 +68,27 @@ export function tokenizeClues(content: string): ClueToken[] {
           cursor = end + link[0].length; continue;
         }
         if (content[end] === '[' && !idsIn(label)) {
-          const groupEnd = bracketEnd(content, end);
-          const ids = groupEnd ? idsIn(content.slice(end + 1, groupEnd - 1)) : undefined;
-          if (ids && label.trim()) {
+          let groupEnd = end;
+          const ids: string[] = [];
+          while (content[groupEnd] === '[') {
+            const nextEnd = bracketEnd(content, groupEnd);
+            const groupIds = nextEnd ? idsIn(content.slice(groupEnd + 1, nextEnd - 1)) : undefined;
+            if (!groupIds) break;
+            ids.push(...groupIds.filter(id => !ids.includes(id)));
+            groupEnd = nextEnd!;
+          }
+          if (ids.length && label.trim()) {
             flush(); tokens.push({ raw: content.slice(cursor, groupEnd), ids, label }); cursor = groupEnd!; continue;
           }
         }
-        flush(); tokens.push({ raw: content.slice(cursor, end), ids: idsIn(label) });
+        flush();
+        if (!idsIn(label) && label.includes('[')) {
+          tokens.push({ raw: '[' }); cursor++; continue;
+        }
+        tokens.push({ raw: content.slice(cursor, end), ids: idsIn(label) });
         cursor = end; continue;
       }
-      flush(); tokens.push({ raw: rest }); break;
+      plain += '['; cursor++; continue;
     }
     plain += content[cursor++];
   }
@@ -84,14 +96,29 @@ export function tokenizeClues(content: string): ClueToken[] {
   return tokens;
 }
 
-export function trustedClueTokens(content: string, allowed: Set<string>): ClueToken[] {
+function labelParts(label: string, names: ReadonlyMap<string, string>): { label: string; ids: string[] } {
+  const parts: string[] = [], ids: string[] = [];
+  const pending = tokenizeClues(label).reverse();
+  while (pending.length) {
+    const token = pending.pop()!;
+    if (!token.ids) { parts.push(token.raw); continue; }
+    ids.push(...token.ids.filter(id => !ids.includes(id)));
+    if (token.label !== undefined) {
+      pending.push(...tokenizeClues(token.label).reverse());
+    } else if (!token.bare) parts.push(...token.ids.map(id => escapeClueLabel(names.get(id) ?? '')));
+  }
+  return { label: parts.join(''), ids };
+}
+
+export function trustedClueTokens(content: string, allowed: Set<string>, names: ReadonlyMap<string, string> = new Map()): ClueToken[] {
   const tokens = tokenizeClues(content);
-  const explicit = new Set(tokens.filter(t => !t.bare).flatMap(t => t.ids ?? []).filter(id => allowed.has(id)));
   return tokens.flatMap(token => {
-    if (!token.ids?.every(id => allowed.has(id))) return [{ raw: token.raw }];
-    if (token.bare && explicit.has(token.ids[0])) return [{ raw: '' }];
-    if (token.label === undefined && token.ids.length > 1) return token.ids.map(id => ({ raw: `[${id}]`, ids: [id] }));
-    return [token];
+    if (!token.ids) return [token];
+    const nested = token.label !== undefined ? labelParts(token.label, names) : undefined;
+    const ids = [...new Set([...token.ids, ...(nested?.ids ?? [])])];
+    if (!ids.every(id => allowed.has(id))) return [{ raw: token.raw }];
+    if (token.label === undefined && ids.length > 1) return ids.map(id => ({ raw: `[${id}]`, ids: [id] }));
+    return [{ ...token, ids, ...(nested ? { label: nested.label } : {}) }];
   });
 }
 export function escapeClueLabel(value: string) {

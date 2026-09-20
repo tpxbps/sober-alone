@@ -9,7 +9,7 @@ function json(route: Route, body: unknown) {
 }
 
 for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
-test(`让我想想在输入框上方暂停、继续与发送后恢复 ${viewport.width}`, async ({ page }) => {
+test(`紧凑开关暂停、继续与发送后恢复 ${viewport.width}`, async ({ page }) => {
   await page.setViewportSize(viewport)
   let aiSpeakRequests = 0
   let humanSpeakRequests = 0
@@ -110,19 +110,20 @@ test(`让我想想在输入框上方暂停、继续与发送后恢复 ${viewport
   })
 
   await page.goto('/?session=pause-session')
-  const pauseButton = page.getByRole('button', { name: '让我想想', exact: true })
+  const pauseButton = page.getByRole('switch', { name: '让我想想', exact: true })
   await expect(pauseButton).toBeVisible()
   const composer = page.getByRole('textbox', { name: '发言输入框' })
   const [buttonBox, composerBox] = await Promise.all([pauseButton.boundingBox(), composer.boundingBox()])
-  expect(buttonBox!.height).toBeGreaterThanOrEqual(44)
-  expect(buttonBox!.y + buttonBox!.height).toBeLessThan(composerBox!.y)
+  expect(buttonBox!.height).toBe(20)
+  expect(buttonBox!.y).toBeGreaterThan(composerBox!.y)
+  expect(buttonBox!.y + buttonBox!.height).toBeLessThan(composerBox!.y + 36)
   expect(buttonBox!.x).toBeGreaterThanOrEqual(0)
   expect(buttonBox!.x + buttonBox!.width).toBeLessThanOrEqual(viewport.width)
   await pauseButton.focus()
   await page.keyboard.press('Space')
-  const resumeButton = page.getByRole('button', { name: '继续讨论', exact: true })
-  await expect(resumeButton).toHaveAttribute('aria-pressed', 'true')
-  await expect(page.getByText('AI 已暂停，慢慢写')).toBeVisible()
+  const resumeButton = pauseButton
+  await expect(resumeButton).toHaveAttribute('aria-checked', 'true')
+  await expect(pauseButton).toBeChecked()
 
   const nextAiCard = page.getByRole('button', { name: '在输入框引用 姜芮' })
   await expect(nextAiCard.locator('.breathing')).toHaveCount(0)
@@ -131,16 +132,18 @@ test(`让我想想在输入框上方暂停、继续与发送后恢复 ${viewport
   expect(aiSpeakRequests).toBe(0)
   await resumeButton.click()
   await expect.poll(() => aiSpeakRequests).toBe(1)
-  await expect(pauseButton).toHaveAttribute('aria-pressed', 'false')
+  await expect(pauseButton).toHaveAttribute('aria-checked', 'false')
   await pauseButton.click()
-  await expect(page.getByText('当前回应结束后暂停')).toBeVisible()
+  await expect(pauseButton).toBeChecked()
+  const loadingBox = await page.getByText('姜芮 正在发言', { exact: true }).boundingBox()
+  expect(loadingBox!.y).toBeLessThan((await pauseButton.boundingBox())!.y)
   finishAiResponse()
-  await expect(page.getByText('AI 已暂停，慢慢写')).toBeVisible()
+  await expect(pauseButton).toBeChecked()
   await page.waitForTimeout(1700)
   expect(aiSpeakRequests).toBe(1)
   await composer.fill('我想先核对这段记录。')
   await composer.press('Control+Enter')
   await expect.poll(() => humanSpeakRequests).toBe(1)
-  await expect(pauseButton).toHaveAttribute('aria-pressed', 'false')
+  await expect(pauseButton).toHaveAttribute('aria-checked', 'false')
 })
 }

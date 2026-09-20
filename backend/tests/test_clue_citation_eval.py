@@ -30,3 +30,12 @@ def test_unknown_model_reference_is_a_failure_even_when_host_strips_it():
     checks, rendered = evaluate("[推理][c01,c99]")
     assert not checks["only_revealed"]
     assert rendered == "[推理][c01]"
+
+
+def test_repair_does_not_mask_raw_model_compliance_failures():
+    checks, rendered = evaluate("c01记录。[c02说明与[c01]][c01][c02]。后文[c02]")
+    assert not checks["no_bare_ids"]
+    assert not checks["no_nested_tags"]
+    assert not checks["single_evidence_suffix"]
+    assert checks["stream_matches"]
+    assert rendered == "[c01]记录。[说明与门锁][c01,c02]。后文[c02]"

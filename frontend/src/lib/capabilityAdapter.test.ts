@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { SystemCapabilities } from '../types/capabilities'
-import { configuredModels, ttsCapability } from './capabilityAdapter'
+import { configuredModels, modelDisplayName, ttsCapability } from './capabilityAdapter'
 
 const capabilities: SystemCapabilities = {
   mode: 'local-first-single-user-single-process',
@@ -34,6 +34,16 @@ const capabilities: SystemCapabilities = {
 }
 
 describe('capability adapters', () => {
+  it('uses identical picker and chat labels, including provider IDs and old aliases', () => {
+    const source = { ...capabilities, models: [
+      { ...capabilities.models[0], name: 'deepSeek-v4.1-flash' },
+      { ...capabilities.models[0], id: 'doubao-lite', model: 'doubao-seed-2-0-lite-260215', name: 'doubao-seed-2.0-lite' },
+    ] }
+    for (const option of configuredModels(source)) expect(modelDisplayName(option.id, source.models)).toBe(option.name)
+    expect(modelDisplayName('doubao-seed-2-0-lite-260215', source.models)).toBe('doubao-seed-2.0-lite')
+    expect(modelDisplayName('deepseek-v4-flash', source.models)).toBe('deepseek-v4.1-flash')
+    expect(modelDisplayName('unavailable', source.models)).toBe('')
+  })
   it('keeps frontier models first and prioritizes common models with lowercase labels', () => {
     const source = { ...capabilities, models: [
       { ...capabilities.models[0], id: 'ling-3.0-flash', name: 'Ling-3.0-flash' },

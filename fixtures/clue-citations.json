@@ -173,8 +173,8 @@
     },
     {
       "name": "prose",
-      "input": "C01芯片 abc01test [c01]",
-      "ai": "C01芯片 abc01test [c01]",
+      "input": "c01那条记录 abc01test C01A [c01]",
+      "ai": "[c01]那条记录 abc01test C01A [c01]",
       "refs": [
         "c01"
       ],
@@ -208,6 +208,120 @@
       "unknown": [
         "c99"
       ]
+    },
+    {
+      "name": "chinese_boundaries",
+      "input": "关于c01那条和c02的记录。",
+      "ai": "关于[c01]那条和[c02]的记录。",
+      "refs": [
+        "c01",
+        "c02"
+      ],
+      "humanRefs": [
+        "c01",
+        "c02"
+      ],
+      "unknown": []
+    },
+    {
+      "name": "adjacent_evidence_groups",
+      "input": "[两处有联系][c01][C02,c01]，再看[c01]。",
+      "ai": "[两处有联系][c01,c02]，再看[c01]。",
+      "refs": [
+        "c01",
+        "c02"
+      ],
+      "humanRefs": [
+        "c01",
+        "c02"
+      ],
+      "unknown": []
+    },
+    {
+      "name": "nested_evidence",
+      "input": "[这处c01记录与[c02]需要核对][c01][c02]。随后[c02]和[另一判断][c01]。",
+      "ai": "[这处记录与窗边材料需要核对][c01,c02]。随后[c02]和[另一判断][c01]。",
+      "refs": [
+        "c01",
+        "c02"
+      ],
+      "humanRefs": [
+        "c01",
+        "c02"
+      ],
+      "unknown": []
+    },
+    {
+      "name": "unclosed_before_good_tags",
+      "input": "[没有闭合的文字，后面[c01]和[判断][c02]。",
+      "ai": "[没有闭合的文字，后面[c01]和[判断][c02]。",
+      "refs": [
+        "c01",
+        "c02"
+      ],
+      "humanRefs": [
+        "c01",
+        "c02"
+      ],
+      "unknown": []
+    },
+    {
+      "name": "bracketed_inner_direct",
+      "input": "[旁注[c01]]，再看[c02]。",
+      "ai": "[旁注[c01]]，再看[c02]。",
+      "refs": [
+        "c01",
+        "c02"
+      ],
+      "humanRefs": [
+        "c01",
+        "c02"
+      ],
+      "unknown": []
+    },
+    {
+      "name": "nested_attached",
+      "input": "[前面[另一个判断][c02]仍需解释][c01]，之后[c02]",
+      "ai": "[前面另一个判断仍需解释][c01,c02]，之后[c02]",
+      "refs": [
+        "c01",
+        "c02"
+      ],
+      "humanRefs": [
+        "c01",
+        "c02"
+      ],
+      "unknown": []
+    },
+    {
+      "name": "bare_repeated_later",
+      "input": "c01记录需要解释。后来又提[c01]",
+      "ai": "[c01]记录需要解释。后来又提[c01]",
+      "refs": [
+        "c01"
+      ],
+      "humanRefs": [
+        "c01"
+      ],
+      "unknown": []
+    },
+    {
+      "name": "nested_future",
+      "input": "[材料[c99]与c02需核对][c01]",
+      "ai": "[材料与需核对][c01,c02]",
+      "refs": [
+        "c01",
+        "c02"
+      ],
+      "humanRefs": [],
+      "unknown": [
+        "c99"
+      ]
     }
-  ]
+  ],
+  "names": {
+    "c01": "门锁材料",
+    "c02": "窗边材料",
+    "clue-aaaaaaaaaaaa": "旧档案"
+  }
 }

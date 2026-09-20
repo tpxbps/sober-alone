@@ -9,7 +9,7 @@ from dataclasses import dataclass
 ID_SOURCE = r"(?:c[0-9]{2,4}|clue-[a-z0-9]{12})"
 ID = re.compile(rf"^{ID_SOURCE}$", re.I)
 SEPARATORS = re.compile(r"[,，、;；\s]+")
-BARE = re.compile(rf"(?<![\w\[#/-])({ID_SOURCE})(?![\w\]-])", re.I)
+BARE = re.compile(rf"(?<![a-z0-9_\[#/\\-])({ID_SOURCE})(?![a-z0-9_\]-])", re.I)
 LINK = re.compile(r"\((?:\\.|[^)\n])*\)")
 
 
@@ -29,14 +29,17 @@ def ids_in(value: str) -> list[str] | None:
 
 def bracket_end(text: str, start: int) -> int | None:
     cursor = start + 1
+    depth = 1
     while cursor < len(text):
         if text[cursor] == "\\":
             cursor += 2
             continue
         if text[cursor] == "]":
-            return cursor + 1
+            depth -= 1
+            if depth == 0:
+                return cursor + 1
         if text[cursor] == "[":
-            return None
+            depth += 1
         cursor += 1
     return None
 
@@ -118,8 +121,16 @@ def tokenize(content: str) -> list[Token]:
                     cursor = link.end()
                     continue
                 if content[end : end + 1] == "[" and not ids_in(label):
-                    group_end = bracket_end(content, end)
-                    ids = ids_in(content[end + 1 : group_end - 1]) if group_end else None
+                    group_end, ids = end, []
+                    while content[group_end : group_end + 1] == "[":
+                        next_end = bracket_end(content, group_end)
+                        group_ids = (
+                            ids_in(content[group_end + 1 : next_end - 1]) if next_end else None
+                        )
+                        if not group_ids:
+                            break
+                        ids.extend(i for i in group_ids if i not in ids)
+                        group_end = next_end
                     if ids and label.strip():
                         flush()
                         result.append(Token(content[cursor:group_end], ids, label))
@@ -131,41 +142,69 @@ def tokenize(content: str) -> list[Token]:
                     result.append(Token(content[cursor:end], direct_ids))
                     cursor = end
                     continue
+                # Recover explicit inner references without interpreting ordinary brackets.
+                if "[" in label:
+                    flush()
+                    result.append(Token("["))
+                    cursor += 1
+                    continue
                 # Unknown bracketed prose is opaque to naked-ID repair.
                 flush()
                 result.append(Token(content[cursor:end], protected=True))
                 cursor = end
                 continue
-            # Never repair a partially typed marker.
-            flush()
-            result.append(Token(rest, protected=True))
-            break
+            # One malformed opener must not poison the rest of the message.
+            # Keep it in plain text so an unfinished '[c01' is not a bare ID.
+            plain += "["
+            cursor += 1
+            continue
         plain += content[cursor]
         cursor += 1
     flush()
     return result
 
 
-def normalize(content: str, allowed_ids, *, strip_unknown: bool):
+def label_parts(label: str, names: dict[str, str]):
+    """Flatten nested citations; an evidence label must never contain another tag."""
+    parts, ids = [], []
+    pending = list(reversed(tokenize(label)))
+    while pending:
+        token = pending.pop()
+        if not token.ids:
+            parts.append(token.raw)
+            continue
+        ids.extend(i for i in token.ids if i not in ids)
+        if token.label is not None:
+            pending.extend(reversed(tokenize(token.label)))
+        elif not token.bare:
+            parts.extend(escape_label(names.get(i, "")) for i in token.ids)
+    return "".join(parts), ids
+
+
+def escape_label(value: str):
+    return value.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
+
+
+def normalize(content: str, allowed_ids, *, strip_unknown: bool, names=None):
     allowed = set(allowed_ids)
+    names = names or {}
     tokens = tokenize(content)
-    explicit = {i for t in tokens if t.ids and not t.bare for i in t.ids if i in allowed}
     refs, unknown, output = [], [], []
     for token in tokens:
         if not token.ids:
             output.append(token.raw)
             continue
-        invalid = [i for i in token.ids if i not in allowed]
+        label, nested = label_parts(token.label, names) if token.label is not None else (None, [])
+        all_ids = list(dict.fromkeys([*token.ids, *nested]))
+        invalid = [i for i in all_ids if i not in allowed]
         unknown.extend(i for i in invalid if i not in unknown)
         if invalid and not strip_unknown:
             output.append(token.raw)
             continue
-        ids = [i for i in token.ids if i in allowed]
-        if token.bare and ids and ids[0] in explicit:
-            continue
+        ids = [i for i in all_ids if i in allowed]
         refs.extend(i for i in ids if i not in refs)
         if token.label is not None:
-            output.append(f"[{token.label}][{','.join(ids)}]" if ids else token.label)
+            output.append(f"[{label}][{','.join(ids)}]" if ids else label)
         elif ids:
             output.append("".join(f"[{id}]" for id in ids))
         elif "#clue-ref-" in token.raw:
@@ -179,6 +218,7 @@ def normalize(content: str, allowed_ids, *, strip_unknown: bool):
 def speech_text(content: str, clues, allowed_ids) -> str:
     names = {item["id"].lower(): item["summary"] for item in clues}
     allowed = set(allowed_ids)
+    content = normalize(content, allowed, strip_unknown=True, names=names)[0]
     parts = []
     for token in tokenize(content):
         if token.ids:

@@ -91,8 +91,8 @@ async def test_actual_model_payload_is_stage_scoped_even_after_checkpoint_restor
         ("甲[门锁](#clue-ref-c99)乙", "甲门锁乙"),
         ("甲[门锁](#clue-ref-c07)乙", "甲[c07]乙"),
         (
-            "c99 says no; c07 says yes. abc01test C01芯片",
-            " says no; [c07] says yes. abc01test C01芯片",
+            "c99 says no; c07 says yes. abc01test C01A芯片",
+            " says no; [c07] says yes. abc01test C01A芯片",
         ),
         (
             "中文\n\n**强调** [普通链接](https://example.test) 尾声",

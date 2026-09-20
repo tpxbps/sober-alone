@@ -571,12 +571,17 @@ class GameService:
         result = await self.db.execute(
             select(GameRecord)
             .where(GameRecord.session_id == session_id)
-            .order_by(GameRecord.timestamp.asc())
+            .order_by(GameRecord.id.asc())
             .limit(limit)
         )
         records = result.scalars().all()
 
-        return [d for r in records if (d := r.to_display_dict()) is not None]
+        from app.game.citation_history import display_records
+
+        session = await self.db.get(GameSession, session_id)
+        if session is None:
+            return []
+        return display_records(records, session)
 
     async def abandon_session(self, session_id: str) -> dict[str, Any]:
         """放弃游戏会话（用户中途退出时调用，清理资源）"""

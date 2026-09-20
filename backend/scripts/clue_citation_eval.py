@@ -14,7 +14,7 @@ from pathlib import Path
 def check_output(raw, clues, streamed, *, require_direct=False, min_evidence=1, required_ids=()):
     import re
 
-    from app.game.citation_syntax import tokenize
+    from app.game.citation_syntax import bracket_end, tokenize
     from app.game.clues import parse_clue_citations
 
     normalized, refs, unknown = parse_clue_citations(raw, clues, strip_unknown=True)
@@ -26,6 +26,16 @@ def check_output(raw, clues, streamed, *, require_direct=False, min_evidence=1, 
         "attached": any(t.label and t.ids and len(t.ids) >= min_evidence for t in tokens),
         "well_formed_groups": not any(
             t.label is None and bare_group.fullmatch(t.raw) for t in tokens
+        ),
+        "no_bare_ids": not any(t.bare for t in tokens)
+        and not any(nested.bare for t in tokens if t.label for nested in tokenize(t.label)),
+        "no_nested_tags": not any(
+            nested.ids for t in tokens if t.label for nested in tokenize(t.label)
+        ),
+        "single_evidence_suffix": all(
+            re.fullmatch(r"\[[^\[\]]+\]", t.raw[bracket_end(t.raw, 0) :]) is not None
+            for t in tokens
+            if t.label
         ),
         "required_evidence": set(required_ids).issubset(refs),
         "only_revealed": not unknown,

@@ -263,17 +263,19 @@ def parse_clue_citations(
     ``refs`` is trusted metadata for visibility checks and querying. Canonical
     ``[c01]`` tags stay where the speaker placed them. Known code-wrapped tags,
     internal Markdown anchors and bare IDs are repaired to that canonical form.
-    If a canonical citation already exists, a duplicate bare ID is removed instead
-    of showing an unexplained machine identifier. Unknown/future IDs are removed for AI output when ``strip_unknown`` is true.
+    Nested labels and repeated evidence suffixes become a single citation group.
+    Unknown/future IDs are removed for AI output when ``strip_unknown`` is true.
     Human prose can retain untrusted tags without granting citation permission.
     """
 
     from app.game.citation_syntax import normalize
 
+    names = {str(item.get("id", "")).lower(): str(item.get("summary", "")) for item in allowed_clues}
     return normalize(
         content,
-        {str(item.get("id", "")).lower() for item in allowed_clues},
+        names,
         strip_unknown=strip_unknown,
+        names=names,
     )
 
 

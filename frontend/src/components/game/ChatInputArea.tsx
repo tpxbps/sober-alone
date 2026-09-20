@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, memo } from "react";
-import { Send, Loader2, ArrowRight, Plus, X, Pause, Play } from "lucide-react";
+import { Send, Loader2, ArrowRight, Plus, X, CircleHelp } from "lucide-react";
 import { speechClues } from "@/lib/clueScope";
+import { Switch } from "@/components/ui/switch";
 import { DynamicDot } from "@/components/ui/DynamicDot";
 import type { Character, PublicClue } from "@/types/game";
 import { GameMessageMarkdown } from "@/components/ui/GameMessageMarkdown";
@@ -176,32 +177,6 @@ export const ChatInputArea = memo(function ChatInputArea({
           </div>
         ) : stage === "free_discussion" || isHumanTurn ? (
           <form onSubmit={handleSubmit} className="space-y-3">
-            {stage === "free_discussion" && (
-              <div className={`flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border p-2 sm:px-3 ${
-                pauseAutoSpeak ? "border-primary/60 bg-primary/10" : "border-primary/30 bg-secondary/30"
-              }`}>
-                <button
-                  type="button"
-                  aria-pressed={pauseAutoSpeak}
-                  onClick={() => onPauseAutoSpeakChange(!pauseAutoSpeak)}
-                  className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                >
-                  {pauseAutoSpeak ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
-                  {pauseAutoSpeak ? "继续讨论" : "让我想想"}
-                </button>
-                <div className="min-w-0 flex-1 text-xs leading-relaxed" role="status">
-                  <p className={pauseAutoSpeak ? "text-primary" : "text-foreground/80"}>
-                    {pauseAutoSpeak
-                      ? (isStreaming || isProcessingReactions ? "当前回应结束后暂停" : "AI 已暂停，慢慢写")
-                      : "暂停 AI 接着发言"}
-                  </p>
-                  {pauseAutoSpeak && <p className="text-muted-foreground">发送后自动恢复讨论</p>}
-                </div>
-                {humanRemainingSpeechCount !== undefined && (
-                  <span className="text-xs text-muted-foreground">剩余发言次数: {humanRemainingSpeechCount}</span>
-                )}
-              </div>
-            )}
             {/* AI speaking status indicator */}
             {(isStreaming || isProcessingReactions) && (
               <div className="flex items-center justify-center gap-2 py-2 text-sm text-muted-foreground">
@@ -269,6 +244,23 @@ export const ChatInputArea = memo(function ChatInputArea({
               <div className="flex-1 relative flex">
                 <MentionComposer
                   ref={inputRef}
+                  toolbar={stage === "free_discussion" ? <div className="flex h-7 items-center gap-2 text-xs">
+                    <label className="inline-flex cursor-pointer items-center gap-2 py-1">
+                      <Switch compact aria-label="让我想想" aria-describedby="pause-speech-help"
+                        checked={pauseAutoSpeak} onCheckedChange={onPauseAutoSpeakChange} />
+                      <span className={pauseAutoSpeak ? 'text-primary' : 'text-muted-foreground'}>让我想想</span>
+                    </label>
+                    <span tabIndex={0} aria-label="暂停说明"
+                      className="group relative outline-none">
+                      <CircleHelp className="h-3.5 w-3.5 text-muted-foreground/60" />
+                      <span id="pause-speech-help" role="tooltip" className="pointer-events-none absolute bottom-full left-0 z-50 mb-2 hidden w-52 rounded-lg border border-border bg-popover p-2 text-xs leading-relaxed shadow-lg group-hover:block group-focus:block">
+                        开启后AI角色将暂时停止自主发言。当前回应会先完成，发送你的发言后自动恢复讨论。
+                      </span>
+                    </span>
+                    <span role="status" className="hidden text-[11px] text-primary/80 sm:inline">
+                      {pauseAutoSpeak && (isStreaming || isProcessingReactions ? "当前回应结束后暂停" : "AI 已暂停，慢慢写")}
+                    </span>
+                  </div> : undefined}
                   characters={characters}
                   clues={availableClues}
                   disabled={inputDisabled}
@@ -285,7 +277,7 @@ export const ChatInputArea = memo(function ChatInputArea({
                   }}
                 />
                 <span
-                  className={`absolute top-1.5 right-3 text-[10px] leading-none pointer-events-none select-none ${
+                  className={`absolute top-3 right-3 text-[10px] leading-none pointer-events-none select-none ${
                     input.length > 2700
                       ? "text-destructive"
                       : "text-muted-foreground/40"
@@ -330,9 +322,10 @@ export const ChatInputArea = memo(function ChatInputArea({
                 </button>
               </div>
             </div>
-            <p className="text-xs text-muted-foreground text-center hidden lg:block">
-              Enter 添加更多内容 · Ctrl+Enter 发送全部发言并完成
-            </p>
+            <div className="flex flex-wrap items-center justify-between gap-1 text-[11px] text-muted-foreground/70">
+              <span className="hidden lg:inline">Enter 添加内容 · Ctrl+Enter 完成发言</span>
+              {stage === "free_discussion" && humanRemainingSpeechCount !== undefined && <span className="ml-auto">剩余发言次数: {humanRemainingSpeechCount}</span>}
+            </div>
           </form>
         ) : /* Can advance stage — only when no current speaker and nothing processing */
         currentSpeakerId === null &&

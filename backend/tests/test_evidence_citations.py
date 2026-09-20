@@ -11,7 +11,8 @@ FIXTURE = json.loads(
     (Path(__file__).parents[2] / "fixtures/clue-citations.json").read_text(encoding="utf-8")
 )
 CLUES = [
-    {"id": id, "summary": "名称" + id, "content": "正文", "stage": 1} for id in FIXTURE["allowed"]
+    {"id": id, "summary": FIXTURE["names"][id], "content": "正文", "stage": 1}
+    for id in FIXTURE["allowed"]
 ]
 
 
@@ -19,6 +20,7 @@ CLUES = [
 def test_shared_protocol(case):
     ai, refs, unknown = parse_clue_citations(case["input"], CLUES, strip_unknown=True)
     assert (ai, refs, unknown) == (case["ai"], case["refs"], case["unknown"])
+    assert parse_clue_citations(ai, CLUES, strip_unknown=True)[0] == ai
     human, refs, unknown = parse_clue_citations(case["input"], CLUES, strip_unknown=False)
     assert refs == case["humanRefs"]
     if case["unknown"]:
@@ -47,7 +49,14 @@ def test_long_reason_does_not_activate_partial_or_unknown_group():
 
 
 def test_speech_and_incomplete_reference():
-    assert speech_text("[c01]：[推理文字][c01,c02]", CLUES, ["c01", "c02"]) == "名称c01：推理文字"
+    assert speech_text("[c01]：[推理文字][c01,c02]", CLUES, ["c01", "c02"]) == "门锁材料：推理文字"
     stream = CitationStreamFilter(CLUES)
     assert stream.feed("正文[推理][c01") == "正文"
     assert stream.finish() == "[推理][c01"
+
+
+def test_deep_brackets_do_not_exhaust_python_stack_or_swallow_following_tags():
+    text = "[" * 1050 + "[c01]" + "]" * 1050 + "。后续[c02]"
+    _, refs, unknown = parse_clue_citations(text, CLUES, strip_unknown=True)
+    assert refs == ["c01", "c02"]
+    assert unknown == []

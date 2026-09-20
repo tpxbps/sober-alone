@@ -1,4 +1,5 @@
 import {
+  type ReactNode,
   forwardRef,
   useEffect,
   useImperativeHandle,
@@ -19,6 +20,7 @@ export interface MentionComposerHandle {
 }
 
 interface MentionComposerProps {
+  toolbar?: ReactNode;
   characters: Character[];
   clues: PublicClue[];
   disabled?: boolean;
@@ -49,7 +51,7 @@ function serialize(root: HTMLElement): string {
 
 export const MentionComposer = forwardRef<MentionComposerHandle, MentionComposerProps>(
   function MentionComposer(
-    { characters, clues, disabled, maxLength = 3000, onChange, onCtrlEnter, onEnter },
+    { characters, clues, disabled, toolbar, maxLength = 3000, onChange, onCtrlEnter, onEnter },
     forwardedRef,
   ) {
     const editorRef = useRef<HTMLDivElement>(null);
@@ -343,8 +345,9 @@ export const MentionComposer = forwardRef<MentionComposerHandle, MentionComposer
               onEnter();
             }
           }}
-          className="min-h-[76px] w-full pl-3 pr-14 py-2 lg:pl-4 lg:py-3 rounded-xl bg-secondary/30 border border-border/50 focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50 text-sm whitespace-pre-wrap break-words empty:before:content-[attr(data-placeholder)] empty:before:text-muted-foreground/60 empty:before:pointer-events-none"
+          className={`${toolbar ? 'pt-9 lg:pt-9 min-h-[100px]' : 'min-h-[76px]'} w-full pl-3 pr-14 py-2 lg:pl-4 lg:py-3 rounded-xl bg-secondary/30 border border-border/50 focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50 text-sm whitespace-pre-wrap break-words empty:before:content-[attr(data-placeholder)] empty:before:text-muted-foreground/60 empty:before:pointer-events-none`}
         />
+        {toolbar && <div className="absolute left-3 top-1 right-14 lg:left-4">{toolbar}</div>}
         {lengthError && <p role="alert" className="mt-1 text-xs text-amber-300">发言不能超过 {maxLength} 字符；引用已完整保留。</p>}
         {!disabled && citation && <div role="dialog" aria-label="编辑线索引用"
           className="absolute bottom-full left-0 z-[60] mb-2 w-[min(26rem,calc(100vw-2rem))] rounded-xl border border-amber-300/25 bg-popover p-4 shadow-2xl"

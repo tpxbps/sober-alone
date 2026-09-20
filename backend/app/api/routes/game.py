@@ -403,11 +403,30 @@ async def stream_tts_audio(
 
             # 发送完整文本
             from app.db.models import GameSession
+            from app.game.citation_history import display_records
             from app.game.citation_syntax import speech_text
 
             game_session = await db.get(GameSession, session_id)
+            history = (
+                (
+                    await db.execute(
+                        select(GameRecord)
+                        .where(
+                            GameRecord.session_id == session_id,
+                            GameRecord.id <= record.id,
+                            (GameRecord.record_type == "system") | (GameRecord.id == record.id),
+                        )
+                        .order_by(GameRecord.id.asc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            repaired = next(
+                item for item in display_records(history, game_session) if item["id"] == record.id
+            )
             text = speech_text(
-                record.raw_content or "", game_session.revealed_clues or [], record.clue_refs or []
+                repaired["content"] or "", game_session.revealed_clues or [], repaired["clue_refs"]
             )
             if not text:
                 yield f"data: {json.dumps({'type': 'error', 'message': '文本内容为空'})}\n\n"

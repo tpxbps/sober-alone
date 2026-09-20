@@ -51,11 +51,14 @@ class CitationStreamFilter:
                 return None if wait else 1
             if end == len(text) and wait:
                 return None
-            if text[end : end + 1] == "[" and not ids_in(text[prefix + 1 : end - 1]):
-                group_end = bracket_end(text, end)
-                if group_end is None:
-                    return None if wait else end
-                end = group_end
+            if not ids_in(text[prefix + 1 : end - 1]):
+                while text[end : end + 1] == "[":
+                    group_end = bracket_end(text, end)
+                    if group_end is None:
+                        return None if wait else end
+                    if not ids_in(text[end + 1 : group_end - 1]):
+                        break
+                    end = group_end
             link_start = end + (1 if text[end : end + 1] == "\\" else 0)
             if link_start == len(text) and wait:
                 return None
@@ -70,7 +73,7 @@ class CitationStreamFilter:
                 return None
             return end
         if body[0].lower() == "c":
-            word = re.match(r"[\w-]+", body).group()
+            word = re.match(r"[a-zA-Z0-9_-]+", body).group()
             if len(word) == len(body) and wait and self._possible_id(word):
                 return None
             if re.fullmatch(CLUE_ID_SOURCE, word, re.IGNORECASE):
@@ -129,7 +132,10 @@ class CitationStreamFilter:
             previous = data[cursor - 1] if cursor else self.previous
             candidate = char in "[`\\" or (
                 char.lower() == "c"
-                and not (previous.isalnum() or (previous and previous in "_#/[\\-"))
+                and not (
+                    (previous.isascii() and previous.isalnum())
+                    or (previous and previous in "_#/[\\-")
+                )
             )
             if candidate:
                 size = self._end(data[cursor:], final)

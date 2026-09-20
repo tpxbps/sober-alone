@@ -17,6 +17,8 @@ import { SpeakerIcon, type SpeakerState } from "@/components/ui/SpeakerIcon";
 import { AudioSpeedButton } from "@/components/ui/AudioSpeedButton";
 import { audioPlayerManager } from "@/lib/audioPlayerManager";
 import { systemApi } from "@/lib/api";
+import { modelDisplayName } from "@/lib/capabilityAdapter";
+import type { SystemCapabilities } from "@/types/capabilities";
 import { useGameStore } from "@/stores/gameStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 
@@ -60,18 +62,6 @@ interface ChatAreaProps {
   onHumanSpeechCompleted: () => void;
 }
 
-// 格式化模型名称显示
-function getModelDisplayName(modelId: string | undefined | null): string {
-  if (!modelId) return "";
-  const names: Record<string, string> = {
-    "kimi-k3": "Kimi K3", "qwen3.8-max-0902": "Qwen3.8 Max",
-    "glm-5.3": "GLM-5.3", "deepseek-v4-pro-0813": "DeepSeek V4 Pro",
-  };
-  if (names[modelId]) return names[modelId];
-  return ["deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"].includes(modelId.toLowerCase())
-    ? "deepseek-v4.1-flash" : modelId;
-}
-
 export function ChatArea({
   records,
   characters,
@@ -111,10 +101,15 @@ export function ChatArea({
   const ttsEnabled = useSettingsStore((s) => s.ttsEnabled);
   const pendingHumanClues = useGameStore(s => s.pendingHumanClues);
   const [canSynthesizeSpeech, setCanSynthesizeSpeech] = useState(false);
+  const [models, setModels] = useState<SystemCapabilities['models']>([]);
+  const getModelDisplayName = (id: string | undefined | null) => modelDisplayName(id, models);
   useEffect(() => {
     let active = true;
     void systemApi.getCapabilities().then(capabilities => {
-      if (active) setCanSynthesizeSpeech(capabilities.features.streaming_tts.enabled);
+      if (active) {
+        setCanSynthesizeSpeech(capabilities.features.streaming_tts.enabled);
+        setModels(capabilities.models);
+      }
     }).catch(() => { /* Existing audio remains playable when capability lookup fails. */ });
     return () => { active = false; };
   }, []);
@@ -557,7 +552,7 @@ export function ChatArea({
                       {isHuman ? (
                         <span className="ml-1 text-accent">(你)</span>
                       ) : (
-                        agentLlmInfo[record.speaker_id || ""] && (
+                        getModelDisplayName(agentLlmInfo[record.speaker_id || ""]?.model) && (
                           <span className="ml-1 text-muted-foreground/70">
                             (
                             {getModelDisplayName(

@@ -75,7 +75,7 @@ def test_citation_parser_repairs_code_links_and_bare_ids_in_place():
     normalized, refs, unknown = parse_clue_citations(content, clues, strip_unknown=True)
 
     assert normalized == (
-        "明确记录广播持续九秒。[c02]\n[c04] 显示服务器停用。\n至于清单 [c06]，我仍需解释。"
+        "[c02] 明确记录广播持续九秒。[c02]\n[c04] 显示服务器停用。\n至于清单 [c06]，我仍需解释。"
     )
     assert refs == ["c02", "c04", "c06"]
     assert unknown == []
