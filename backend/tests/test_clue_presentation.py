@@ -99,7 +99,9 @@ def test_visual_directions_survive_editor_and_snapshot(preset, composition):
     assert content_fingerprint({"clue_stages": snapshot["clue_stages"]}) == before
 
 
-@pytest.mark.parametrize("field,value", [("visual_preset", "custom-script"), ("composition", "url(javascript:run())")])
+@pytest.mark.parametrize(
+    "field,value", [("visual_preset", "custom-script"), ("composition", "url(javascript:run())")]
+)
 def test_visual_directions_reject_untrusted_styles(field, value):
     data = stages()
     config = data[0]["presentation"]
