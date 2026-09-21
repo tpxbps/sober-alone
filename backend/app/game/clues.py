@@ -270,7 +270,9 @@ def parse_clue_citations(
 
     from app.game.citation_syntax import normalize
 
-    names = {str(item.get("id", "")).lower(): str(item.get("summary", "")) for item in allowed_clues}
+    names = {
+        str(item.get("id", "")).lower(): str(item.get("summary", "")) for item in allowed_clues
+    }
     return normalize(
         content,
         names,
