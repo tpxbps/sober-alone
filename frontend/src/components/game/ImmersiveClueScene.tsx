@@ -114,6 +114,13 @@ export function ImmersiveClueScene({ presentation, clues, elapsed, duration }: {
     <div className="cinema-optical-shade" aria-hidden="true" />
     {presentation.visual_preset === 'cold-occlusion' && <div className="cinema-curtain" aria-hidden="true"
       style={{ transform: `translateX(${mix(-7, -25, ease(elapsed / 4200))}%)`, opacity: 1 - assemble }} />}
+    {['candle-silk', 'afternoon-paper', 'orbital-steel'].includes(presentation.visual_preset ?? '') &&
+      <div className="cinema-atmosphere" aria-hidden="true" style={{
+        // The playhead also owns this light movement, so pause and backgrounding
+        // freeze the entire composition rather than leaving CSS animations running.
+        transform: `translate3d(${mix(-3, 3, progress)}%, 0, 0)`,
+        opacity: (1 - assemble) * ease(elapsed / 1600),
+      }} />}
     {light > 0 && <div className="cinema-light-return" aria-hidden="true" style={{ opacity: light * 0.18 }} />}
     <div className="cinema-film-grain" aria-hidden="true" />
     <div className="cinema-iris" aria-hidden="true" style={{ opacity: Math.max(0, 1 - elapsed / 1100) }} />

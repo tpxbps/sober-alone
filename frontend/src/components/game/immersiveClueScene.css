@@ -36,6 +36,30 @@
   background: linear-gradient(90deg, #070e13ee, #172b34cc 58%, #071017e8 86%, transparent);
 }
 .cinema-light-return { position: absolute; inset: 0; z-index: 41; background: #e4ebe4; pointer-events: none; }
+.cinema-atmosphere { position: absolute; inset: -5%; z-index: 39; pointer-events: none; }
+.cinema-immersive[data-preset='candle-silk'] .cinema-atmosphere {
+  background: linear-gradient(100deg, #15080c88, transparent 20%, transparent 83%, #28100966),
+    radial-gradient(ellipse at 8% 64%, #d29a361a, transparent 40%);
+}
+.cinema-immersive[data-preset='candle-silk'] .cinema-card-wash {
+  background: linear-gradient(110deg, #40150916, transparent 60%), linear-gradient(0deg, #170b10ad, transparent 35%);
+}
+.cinema-immersive[data-preset='candle-silk'] .cinema-copy h2 { color: #f4e6cc; letter-spacing: .18em; }
+.cinema-immersive[data-preset='afternoon-paper'] .cinema-atmosphere {
+  background: linear-gradient(116deg, transparent 15%, #fff2c817 21%, transparent 26%, transparent 40%, #fff2c812 47%, transparent 54%);
+}
+.cinema-immersive[data-preset='afternoon-paper'] .cinema-card-wash {
+  background: linear-gradient(100deg, #e4c4800b, transparent 60%), linear-gradient(0deg, #17211ca6, transparent 35%);
+}
+.cinema-immersive[data-preset='afternoon-paper'] .cinema-copy h2 { color: #f3eedc; letter-spacing: .09em; }
+.cinema-immersive[data-preset='orbital-steel'] .cinema-atmosphere {
+  background: linear-gradient(90deg, #030d1499, transparent 13%, transparent 87%, #030d1499),
+    linear-gradient(177deg, #69bbc10b, transparent 25%, transparent 70%, #25657012);
+}
+.cinema-immersive[data-preset='orbital-steel'] .cinema-card-wash {
+  background: linear-gradient(110deg, #0a324323, transparent 60%), linear-gradient(0deg, #061017bb, transparent 35%);
+}
+.cinema-immersive[data-preset='orbital-steel'] .cinema-copy h2 { color: #dceff0; letter-spacing: .12em; }
 .cinema-card-wash {
   position: absolute; inset: 0;
   background: linear-gradient(100deg, #0a172138, transparent 40%, #a1b2c40a), linear-gradient(0deg, #080e16cc, transparent 36%, transparent 82%, #0a111f33);

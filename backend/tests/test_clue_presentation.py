@@ -80,7 +80,9 @@ def test_continuous_presentation_survives_normalization_and_snapshot():
     assert snapshot["clue_stages"][0]["presentation"]["status"] == "ready"
 
 
-@pytest.mark.parametrize("preset", ["warm-noir", "cold-occlusion"])
+@pytest.mark.parametrize(
+    "preset", ["warm-noir", "cold-occlusion", "candle-silk", "afternoon-paper", "orbital-steel"]
+)
 @pytest.mark.parametrize("composition", ["pan", "detail", "pair", "occlusion", "light"])
 def test_visual_directions_survive_editor_and_snapshot(preset, composition):
     script, characters = completed_script()

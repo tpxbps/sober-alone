@@ -74,7 +74,10 @@ class Presentation(BaseModel):
     version: Literal[1, 2] = 1
     revision: str = Field(min_length=1, max_length=80)
     template: Literal["cinematic", "dossier"]
-    visual_preset: Literal["warm-noir", "cold-occlusion"] | None = None
+    visual_preset: (
+        Literal["warm-noir", "cold-occlusion", "candle-silk", "afternoon-paper", "orbital-steel"]
+        | None
+    ) = None
     title: str = Field(min_length=1, max_length=120)
     background: Media | None = None
     shots: list[Shot] = Field(min_length=1, max_length=20)
