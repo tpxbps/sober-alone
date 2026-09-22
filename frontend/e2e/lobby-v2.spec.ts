@@ -3,10 +3,10 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 const story = { script_id: "v2-a", title: "雾中来信", difficulty: 1, player_count: 4, estimated_duration: 30, overview: "一封迟到的信，四个未曾坦白的人。", tags: "悬疑", cover_image_url: "/lobby/theatre.webp", ai_review: { score: 78, model: "gpt-6-astra", dimensions: [{key:"logic",label:"逻辑完整性",weight:30,score:4}] } };
 const other = { ...story, script_id: "v2-b", title: "深海回声", difficulty: 3 };
 const people = [
-  { character_id: "human", name: "陆鸣", occupation: "广播主持人", profile: "留守旧电台的主持人。", avatar_url: "/lobby/dragon.png" },
+  { character_id: "human", name: "赵屿", occupation: "广播主持人", profile: "留守旧电台的主持人。", avatar_url: "/lobby/dragon.png" },
   { character_id: "a", name: "很长很长的姓名用来验证人物侧栏不会溢出", occupation: "担任多个不同职务并拥有特别长的完整职业描述", profile: "完整的角色简介。", avatar_url: "/lobby/dragon.png" },
-  { character_id: "b", name: "姜芮", occupation: "节目制作人", profile: "节目制作人。", avatar_url: "/lobby/dragon.png" },
-  { character_id: "c", name: "陈朔", occupation: "工程师", profile: "工程师。", avatar_url: "/lobby/dragon.png" },
+  { character_id: "b", name: "顾宁", occupation: "节目制作人", profile: "节目制作人。", avatar_url: "/lobby/dragon.png" },
+  { character_id: "c", name: "程宇", occupation: "工程师", profile: "工程师。", avatar_url: "/lobby/dragon.png" },
 ];
 const send = (route: Route, data: unknown) => route.fulfill({contentType:"application/json", body:JSON.stringify(data)});
 async function fixture(page: Page, options: { failCreate?: boolean; failInit?: boolean; deferCharacters?: boolean; deferHealth?: boolean; deferInit?: boolean } = {}) {
@@ -98,7 +98,7 @@ test("初始全量分组、键盘选本、返回原卡片与快速换本取消�
   await page.getByRole("button",{name:"打开剧本 深海回声"}).click();
   await expect(page.getByRole("button",{name:"扮演 新故事角色"})).toBeVisible();
   seen.release();
-  await expect(page.getByRole("button",{name:"扮演 陆鸣",exact:true})).toHaveCount(0);
+  await expect(page.getByRole("button",{name:"扮演 赵屿",exact:true})).toHaveCount(0);
   await page.getByRole("button",{name:"返回列表"}).click();
   await expect(page.locator("#script-list")).toBeFocused();
   await expect(page.locator(".lobby-card:focus-within")).toHaveCount(0);
@@ -110,7 +110,7 @@ for (const failure of ["create","init"] as const) {
     const seen = await fixture(page,{failCreate:failure==="create",failInit:failure==="init"});
     await page.getByRole("button",{name:"打开剧本 雾中来信"}).click();
     await expect(page.getByRole("button",{name:"走进故事"})).toBeDisabled();
-    await page.getByRole("button",{name:"扮演 陆鸣",exact:true}).click();
+    await page.getByRole("button",{name:"扮演 赵屿",exact:true}).click();
     await expect(page.getByRole("combobox")).toHaveCount(3);
     const model = page.getByRole("combobox").first();
     await model.click();
@@ -147,7 +147,7 @@ test("320—1440 像素的列表和原页选角不横向溢出", async ({page},i
     await expect(page.getByRole("button",{name:"打开剧本 雾中来信"})).toBeVisible();
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
     await page.getByRole("button",{name:"打开剧本 雾中来信"}).click();
-    await expect(page.getByRole("button",{name:"扮演 陆鸣",exact:true})).toBeVisible();
+    await expect(page.getByRole("button",{name:"扮演 赵屿",exact:true})).toBeVisible();
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
     await page.screenshot({path:info.outputPath("setup-"+width+".png"),fullPage:true});
     await page.getByRole("button",{name:"返回列表"}).click();
@@ -197,14 +197,14 @@ test.describe("动态显现",()=>{
     await expect(page.locator('.card-overview').first()).toHaveCSS('filter','none');
     await expect(page.locator('.card-cover-media[data-gpu="ready"]')).toHaveCount(0);
     await page.getByRole('button',{name:'打开剧本 雾中来信'}).click();
-    await expect(page.getByRole('button',{name:'扮演 陆鸣',exact:true})).toBeVisible();
+    await expect(page.getByRole('button',{name:'扮演 赵屿',exact:true})).toBeVisible();
   });
 });
 
 test("测速晚到保留自动及手动模型配置",async({page})=>{
   const seen=await fixture(page,{deferHealth:true});
   await page.getByRole("button",{name:"打开剧本 雾中来信"}).click();
-  await page.getByRole("button",{name:"扮演 陆鸣",exact:true}).click();
+  await page.getByRole("button",{name:"扮演 赵屿",exact:true}).click();
   const model=page.getByRole("combobox").first();
   await model.click();
   await page.getByRole("option",{name:"deepseek-flash",exact:true}).click();
@@ -223,7 +223,7 @@ test("测速晚到保留自动及手动模型配置",async({page})=>{
 test("初始资料慢请求期间保持准备遮罩，数据完成才切换",async({page})=>{
   const seen=await fixture(page,{deferInit:true});
   await page.getByRole("button",{name:"打开剧本 雾中来信"}).click();
-  await page.getByRole("button",{name:"扮演 陆鸣",exact:true}).click();
+  await page.getByRole("button",{name:"扮演 赵屿",exact:true}).click();
   await page.getByRole("button",{name:"走进故事"}).click();
   await expect(page.locator(".game-entry-overlay")).toBeVisible();
   await page.waitForTimeout(950);
@@ -259,7 +259,7 @@ test("设置与游戏弹层保持焦点、Escape 关闭并恢复入口，开关�
   await expect(dialog).toHaveCount(0);
   await expect(settings).toBeFocused();
   await page.getByRole("button",{name:"打开剧本 雾中来信"}).click();
-  await page.getByRole("button",{name:"扮演 陆鸣",exact:true}).click();
+  await page.getByRole("button",{name:"扮演 赵屿",exact:true}).click();
   await page.getByRole("button",{name:"走进故事"}).click();
   await expect(page.locator(".scene-game")).toBeVisible();
   await page.getByRole("button",{name:"雾中来信",exact:true}).click();
@@ -283,7 +283,7 @@ test.describe("入局遮罩连续性",()=>{
   test("准备时键盘无法进入后台操作，交接光晕覆盖已准备好的游戏",async({page})=>{
     const seen=await fixture(page,{deferInit:true});
     await page.getByRole("button",{name:"打开剧本 雾中来信"}).click();
-    await page.getByRole("button",{name:"扮演 陆鸣",exact:true}).click();
+    await page.getByRole("button",{name:"扮演 赵屿",exact:true}).click();
     await page.getByRole("button",{name:"走进故事"}).click();
     await expect(page.locator(".game-entry-overlay.preparing")).toBeVisible();
     await page.keyboard.press("Tab");
@@ -323,7 +323,7 @@ test("详情评分细则与模型异常提示保持可读，键盘返回恢复�
   await score.hover();
   await expect(page.locator("[data-rating-explanation]")).toContainText("逻辑完整性");
   await page.mouse.move(1,1);
-  await page.getByRole("button",{name:"扮演 陆鸣",exact:true}).click();
+  await page.getByRole("button",{name:"扮演 赵屿",exact:true}).click();
   await page.getByRole("combobox").first().click();
   await expect(page.getByRole("option",{name:"deepseek-flash",exact:true})).toHaveText("deepseek-flash");
   await expect(page.getByRole("option",{name:"hy3",exact:true})).toContainText("响应较慢");
@@ -344,7 +344,7 @@ test.describe("持续加载光晕",()=>{
   test("慢初始化期间循环呼吸，完成后只创建一次并撤去遮罩",async({page},info)=>{
     const seen=await fixture(page,{deferInit:true});
     await page.getByRole("button",{name:"打开剧本 雾中来信"}).click();
-    await page.getByRole("button",{name:"扮演 陆鸣",exact:true}).click();
+    await page.getByRole("button",{name:"扮演 赵屿",exact:true}).click();
     await page.getByRole("button",{name:"走进故事"}).click();
     await expect(page.locator(".game-entry-overlay.preparing")).toBeVisible();
     const overlay=page.locator(".game-entry-overlay");

@@ -17,7 +17,7 @@ describe('adaptGameState', () => {
       script: {
         script_id: 'script',
         resource_namespace: 'script__revision',
-        title: '零点来电',
+        title: '示例案件',
         estimated_duration: 25,
         is_ai_generated: true,
       },

@@ -180,6 +180,8 @@ class VotingService:
 
             # 带 per-agent 超时（90s），防止单个 agent 无限挂起
             async def _run_vote():
+                from app.game.clues import public_round_overviews
+
                 async for _ in agent.speak(
                     {
                         "session_id": flow_controller.session.session_id,
@@ -190,6 +192,13 @@ class VotingService:
                         ),
                         "current_stage": "vote",
                         "current_round": flow_controller.session.current_round,
+                        "public_clues": flow_controller.session.revealed_clues or [],
+                        "public_round_overviews": public_round_overviews(
+                            getattr(flow_controller, "clue_stages", []),
+                            "vote",
+                            flow_controller.session.current_round,
+                            game_process=getattr(flow_controller, "game_process", None),
+                        ),
                         "db_session": session,
                         "character_name_map": {
                             c["character_id"]: c.get("name", "") for c in flow_controller.characters

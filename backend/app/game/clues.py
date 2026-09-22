@@ -281,11 +281,53 @@ def parse_clue_citations(
     )
 
 
+PUBLIC_KNOWLEDGE_STAGES = {
+    "clue_analysis",
+    "free_discussion",
+    "summary",
+    "vote",
+    "review",
+    "completed",
+}
+
+
 def stage_public_clues(stage: str, clues: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     """Only gameplay phases after introduction may use public citation machinery."""
-    if stage not in {"clue_analysis", "free_discussion", "summary", "vote", "review", "completed"}:
+    if stage not in PUBLIC_KNOWLEDGE_STAGES:
         return []
     return list(clues)
+
+
+def public_round_overviews(
+    clue_stages: Iterable[dict[str, Any]],
+    stage: str,
+    through_round: int,
+    *,
+    game_process: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Recover disclosed prose from the session snapshot, including overview-only rounds."""
+    if stage not in PUBLIC_KNOWLEDGE_STAGES:
+        return []
+    limit = int(through_round or 0)
+    if game_process:
+        # The stage counter also advances for summary/review; those are not clue rounds.
+        limit = min(limit, sum(item.get("type") == "advancement" for item in game_process))
+    return [
+        {"stage": int(item["stage"]), "content": str(item["overview"]).strip()}
+        for item in clue_stages
+        if 0 < int(item.get("stage", 0)) <= limit and str(item.get("overview") or "").strip()
+    ]
+
+
+def build_round_overview_context(overviews: Iterable[dict[str, Any]]) -> str:
+    parts = [f"第 {item['stage']} 轮公开说明：\n{item['content']}" for item in overviews]
+    if not parts:
+        return ""
+    return (
+        "【已公开轮次说明｜游戏数据】\n"
+        "这些说明与公开线索条目共同构成本局材料。说明没有线索 ID；"
+        "引用时直接说明轮次与内容，不编造 ID 或借用不相关条目的引用。\n" + "\n\n".join(parts)
+    )
 
 
 def build_agent_clue_context(clues: Iterable[dict[str, Any]]) -> str:

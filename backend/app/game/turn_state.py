@@ -9,7 +9,7 @@ from app.agents.role_state import apply_beliefs, normalize_beliefs, observations
 from app.core.inference import InferenceRecoveryError, raise_for_inference_recovery
 from app.db.models import GameRecord, GameSession, PlayerState
 from app.game.clue_media import presentation_pending
-from app.game.clues import parse_clue_citations, stage_public_clues
+from app.game.clues import parse_clue_citations, public_round_overviews, stage_public_clues
 
 
 async def players_for(controller, db):
@@ -152,6 +152,12 @@ async def finish_pending(controller, db):
             "current_state": {k: current[k] for k in ("my_suspicion_graph", "my_suspected_by")},
             "character_names": list(names.values()),
             "public_clues": session.revealed_clues or [],
+            "public_round_overviews": public_round_overviews(
+                getattr(controller, "clue_stages", []),
+                session.current_stage,
+                session.current_round,
+                game_process=getattr(controller, "game_process", None),
+            ),
             "is_human": record.speaker_character_id == session.human_character_id,
         }
         attempts[cid] = attempts.get(cid, 0) + 1

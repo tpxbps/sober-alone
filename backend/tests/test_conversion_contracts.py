@@ -36,8 +36,8 @@ def test_conversion_merge_preserves_round_task_shape_and_limits():
             full_truth="真相",
         ),
         num_rounds=2,
-        script_title="零点来电",
-        outline="广播站旧址的最后一夜。",
+        script_title="示例案件",
+        outline="山庄停电后的调查。",
         script_id="script-test",
     )
 

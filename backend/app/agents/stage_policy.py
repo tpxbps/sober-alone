@@ -3,7 +3,12 @@
 from langchain.agents.middleware import AgentMiddleware
 from langchain.messages import SystemMessage
 
-from app.game.clues import build_agent_clue_context, parse_clue_citations, stage_public_clues
+from app.game.clues import (
+    build_agent_clue_context,
+    build_round_overview_context,
+    parse_clue_citations,
+    stage_public_clues,
+)
 
 
 def available_tool_names(state):
@@ -22,6 +27,11 @@ def stage_instructions(state):
     stage = state.get("current_stage", "")
     clues = stage_public_clues(stage, state.get("public_clues", []))
     parts = []
+    overview_context = build_round_overview_context(
+        stage_public_clues(stage, state.get("public_round_overviews", []))
+    )
+    if overview_context:
+        parts.append(overview_context)
     if clues:
         example = clues[0]["id"]
         evidence_ids = ",".join(clue["id"] for clue in clues[:2])
@@ -30,7 +40,7 @@ def stage_instructions(state):
 直接引用（点名）：[{example}]。这个标签会显示线索名称。例：我想再核实一下[{example}]。
 关联引用（附证据）：[推理原文][{evidence_ids}]。第一组括号圈定被证据支持的原话，第二组括号给出依据 ID。
 当你用线索支持一个事实或推理句，而不是点名线索名称时，必须使用关联引用，把该句完整地包在第一组方括号里。多个依据只在第二组括号内用英文逗号分隔。
-只要本次发言包含基于公开线索的判断，至少把其中一个核心判断写成关联引用；仅在句首或句末点名几条线索不算完成这项要求。即使玩家只是让你回应观点、没有要求引用，或者旧消息都只用了直接标签，也遵守这条规则。
+只要本次发言包含基于带 ID 线索条目的判断，至少把其中一个核心判断写成关联引用；仅在句首或句末点名几条线索不算完成这项要求。仅依据无 ID 的轮次说明时，直接说明来源，不强行关联其他条目。即使玩家只是让你回应观点、没有要求引用，或者旧消息都只用了直接标签，也遵守这条规则。
 
 完整发言格式示例：
 我想再核实一下[{example}]。[这些记录之间的联系，还需要更多解释][{evidence_ids}]。

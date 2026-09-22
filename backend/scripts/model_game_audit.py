@@ -23,18 +23,36 @@ async def run(args):
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy import select
 
+    from app import seed
     from app.agents.agent_player import AgentPlayer
     from app.db.base import Base
     from app.db.models import GameRecord, PlayerState
     from app.db.session import AsyncSessionLocal, engine
-    from app.seed import CHARACTERS, SAMPLE_SCRIPT_ID, seed_sample_if_empty
     from app.services.checkpoint_runtime import set_game_checkpointer
     from app.services.game_service import GameService, ensure_flow_controller, get_flow_controller
 
+    if args.script_file:
+        seed.SAMPLE_DATA = json.loads(Path(args.script_file).read_text(encoding="utf-8"))
+        seed.SAMPLE_SCRIPT_ID = seed.SAMPLE_DATA["script_id"]
+        seed.CHARACTERS = seed.SAMPLE_DATA["characters"]
+    characters = seed.CHARACTERS
+    human = next((c for c in characters if c["name"] == args.human_character), characters[0])
+    if args.human_character and human["name"] != args.human_character:
+        raise ValueError("Unknown human character")
+    ai_characters = [c for c in characters if c["character_id"] != human["character_id"]]
+    if len(args.models) != len(ai_characters):
+        raise ValueError("Supply exactly one model for each AI character")
+    human_lines = (
+        json.loads(Path(args.human_lines).read_text(encoding="utf-8")) if args.human_lines else {}
+    )
+    vote_target = args.vote_target or characters[0]["name"]
+    if vote_target not in {c["name"] for c in characters}:
+        raise ValueError("Unknown vote target")
     result = {
         "models": args.models,
         "speech": [],
         "reaction": [],
+        "model_errors": [],
         "transitions": [],
         "status": "running",
     }
@@ -48,17 +66,32 @@ async def run(args):
     if args.resume:
         result = json.loads((workspace / "result.json").read_text(encoding="utf-8"))
         result["resumed"] = result.get("resumed", 0) + 1
+        result.setdefault("model_errors", [])
     original_react = AgentPlayer.react_to_speech
 
-    async def audited_react(self, speaker_name, content):
+    class ModelErrorCapture(logging.Handler):
+        def emit(self, record):
+            if record.levelno >= logging.WARNING:
+                result["model_errors"].append(record.getMessage())
+
+    agent_logger = logging.getLogger("app.agents.agent_player")
+    agent_logger.setLevel(logging.WARNING)
+    agent_logger.addHandler(ModelErrorCapture())
+
+    async def audited_react(self, speaker_name, content, **kwargs):
         started = time.perf_counter()
-        response = await original_react(self, speaker_name, content)
+        response = await original_react(self, speaker_name, content, **kwargs)
         item = {
             "model": self.llm_model,
             "elapsed_seconds": round(time.perf_counter() - started, 3),
             "perspective_chars": len(response.main_perspective),
             "nonempty": bool(
                 response.main_perspective or response.my_suspicion_graph or response.my_suspected_by
+            ),
+            "valid": (
+                self._human_reaction_structured is not None
+                if kwargs.get("reaction_context", {}).get("is_human")
+                else self._reaction_structured is not None
             ),
         }
         result["reaction"].append(item)
@@ -69,23 +102,23 @@ async def run(args):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     async with AsyncSessionLocal() as db:
-        await seed_sample_if_empty(db)
+        await seed.seed_sample_if_empty(db)
     async with AsyncSqliteSaver.from_conn_string(
         str(workspace / "checkpoints.sqlite")
     ) as checkpointer:
         set_game_checkpointer(checkpointer)
         async with AsyncSessionLocal() as db:
             service = GameService(db)
-            human_id = CHARACTERS[0]["character_id"]
+            human_id = human["character_id"]
             assigned = {
                 char["character_id"]: {"model": model}
-                for char, model in zip(CHARACTERS[1:], args.models, strict=True)
+                for char, model in zip(ai_characters, args.models, strict=True)
             }
             if args.resume:
                 sid = result["session_id"]
                 flow = await ensure_flow_controller(sid, db)
             else:
-                created = await service.create_game(SAMPLE_SCRIPT_ID, human_id, assigned)
+                created = await service.create_game(seed.SAMPLE_SCRIPT_ID, human_id, assigned)
                 if not created.get("success"):
                     raise RuntimeError("create failed")
                 sid = created["session_id"]
@@ -111,8 +144,8 @@ async def run(args):
                     vote = await service.submit_vote(
                         sid,
                         human_id,
-                        CHARACTERS[0]["name"],
-                        "广播拼接、现场录音与衣物纤维形成证据链。",
+                        vote_target,
+                        "依据已公开材料与讨论作出判断。",
                     )
                     if not vote.get("success"):
                         raise RuntimeError("human vote failed")
@@ -159,8 +192,9 @@ async def run(args):
                         if result["ended"]
                         and result["review_persisted"]
                         and result["fallback_records"] == 0
+                        and not result.get("model_errors")
                         and all(s["chars"] > 0 for s in result["speech"])
-                        and all(r["nonempty"] for r in result["reaction"])
+                        and all(r["valid"] for r in result["reaction"])
                         and all(not v["abstained"] for v in result["votes"])
                         else "failed"
                     )
@@ -194,14 +228,11 @@ async def run(args):
                 events = []
                 if speaker == human_id:
                     text = (
-                        "我是姜芮，负责零点特辑。请大家先说明今晚的时间线，暂时不要凭猜测指认。"
+                        f"我是{human['name']}。请大家介绍自己和今晚的经历。"
                         if stage == "intro"
-                        else (
-                            "21:55是自动播出，不能直接证明梁序还活着。请核对设备柜和21:39至21:46的记录。"
-                            if round_number < 2
-                            else "请结合21:44的心率记录、制作机缓存、现场录音与深蓝纤维核对完整证据链。"
-                        )
+                        else "请核对已公开的材料与各自时间线，说明判断的依据和仍有疑问的地方。"
                     )
+                    text = human_lines.get(f"{stage}:{round_number}", human_lines.get(stage, text))
                     stream = service.process_human_speech_stream(sid, text)
                 else:
                     stream = service.process_ai_speech_stream(sid, speaker)
@@ -238,9 +269,17 @@ async def run(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--models", nargs=3, required=True)
+    parser.add_argument("--models", nargs="+", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument(
+        "--script-file", help="Authorized text-only script JSON; defaults to embedded data"
+    )
+    parser.add_argument("--human-character")
+    parser.add_argument(
+        "--human-lines", help="JSON mapping stage or stage:round to the simulated human speech"
+    )
+    parser.add_argument("--vote-target")
     args = parser.parse_args()
     logging.basicConfig(level=logging.ERROR)
     try:

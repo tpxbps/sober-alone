@@ -15,8 +15,8 @@ test('斜杠选择公开线索并在发言气泡展示可访问引用', async ({
   let releaseReactions!: () => void
   const reactionsPending = new Promise<void>(resolve => { releaseReactions = resolve })
   const characters = [
-    { character_id: 'human', name: '陆鸣', character_script: '个人剧本', is_human: true },
-    { character_id: 'ai-1', name: '姜芮', is_human: false },
+    { character_id: 'human', name: '赵屿', character_script: '个人剧本', is_human: true },
+    { character_id: 'ai-1', name: '顾宁', is_human: false },
   ]
   const publicClues = [
     {
@@ -84,7 +84,7 @@ test('斜杠选择公开线索并在发言气泡展示可访问引用', async ({
           session_id: 'clue-session',
           stage: 'free_discussion',
           speaker_id: 'human',
-          speaker_name: '陆鸣',
+          speaker_name: '赵屿',
           content: '设备日志在关键时刻被清空。[c02] 这比口头证词更可靠。',
           clue_refs: ['c02'],
           record_type: 'speech',

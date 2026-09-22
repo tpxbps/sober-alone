@@ -2,10 +2,10 @@ import { stressSelection } from "./selectionStress"
 import { expect, test, type Route } from '@playwright/test'
 
 const script = {
-  script_id: 'sample-midnight-call-v1',
-  title: '零点来电',
+  script_id: 'sample-case-v1',
+  title: '示例案件',
   description: '原创纯文本简单本，4 人、2 轮递进线索，预计 25 分钟。',
-  overview: '广播站旧址的最后一夜，四名工作人员拆穿一段伪造的存活广播。',
+  overview: '山庄停电后，四名来访者核对彼此的时间线。',
   tags: '原创样例,AI生成',
   difficulty: 1,
   player_count: 4,
@@ -17,16 +17,16 @@ const script = {
 const characters = [
   {
     character_id: 'human',
-    name: '陆鸣',
+    name: '赵屿',
     avatar_url: '/duxing_icon.png',
     portrait_url: '/duxing_icon.png?original-portrait',
     profile: '广播主持人',
     character_script: '你的个人剧本',
-    character_script_summary: '**你是谁**：你是广播主持人陆鸣。',
+    character_script_summary: '**你是谁**：你是广播主持人赵屿。',
   },
-  { character_id: 'ai-1', name: '姜芮', profile: '节目制作人' },
-  { character_id: 'ai-2', name: '陈朔', profile: '音频工程师' },
-  { character_id: 'ai-3', name: '许棠', profile: '实习编辑' },
+  { character_id: 'ai-1', name: '顾宁', profile: '节目制作人' },
+  { character_id: 'ai-2', name: '程宇', profile: '音频工程师' },
+  { character_id: 'ai-3', name: '林岚', profile: '实习编辑' },
 ]
 
 function json(route: Route, body: unknown) {
@@ -145,7 +145,7 @@ test('大厅 → 选角 → 发言 → 推进 → 投票 → 复盘', async ({ p
           session_id: 'e2e-session',
           stage: 'intro',
           speaker_id: 'human',
-          speaker_name: '陆鸣',
+          speaker_name: '赵屿',
           content: '我先说明停电时间。',
           record_type: 'speech',
           created_at: new Date().toISOString(),
@@ -213,16 +213,16 @@ test('大厅 → 选角 → 发言 → 推进 → 投票 → 复盘', async ({ p
 
   await page.goto('/')
   await expect(page.getByText('剧本大厅')).toBeVisible()
-  await page.getByText('零点来电').first().click()
-  await page.getByRole('button', { name: '扮演 陆鸣', exact: true }).hover()
-  await expect(page.getByRole('tooltip', { name: '陆鸣的人物预览' })).toHaveCount(0)
-  await expect(page.getByRole('region', { name: '剧本详情 零点来电' })).toBeVisible()
-  await page.getByRole('button', { name: '扮演 陆鸣', exact: true }).click()
+  await page.getByText('示例案件').first().click()
+  await page.getByRole('button', { name: '扮演 赵屿', exact: true }).hover()
+  await expect(page.getByRole('tooltip', { name: '赵屿的人物预览' })).toHaveCount(0)
+  await expect(page.getByRole('region', { name: '剧本详情 示例案件' })).toBeVisible()
+  await page.getByRole('button', { name: '扮演 赵屿', exact: true }).click()
   await page.getByRole('button', { name: '走进故事' }).click()
 
-  const quickMentionCard = page.getByRole('button', { name: '在输入框引用 姜芮' })
+  const quickMentionCard = page.getByRole('button', { name: '在输入框引用 顾宁' })
   await expect(quickMentionCard).toHaveCSS('cursor', 'pointer')
-  const ownCharacterCard = page.getByRole('button', { name: '陆鸣（你）' })
+  const ownCharacterCard = page.getByRole('button', { name: '赵屿（你）' })
   await ownCharacterCard.hover()
   const ownTooltip = page.getByRole('tooltip').filter({ hasText: '广播主持人' })
   await expect(ownTooltip).toBeVisible()
@@ -244,8 +244,8 @@ test('大厅 → 选角 → 发言 → 推进 → 投票 → 复盘', async ({ p
   await page.keyboard.press('Escape')
   expect(await page.evaluate(() => getComputedStyle(document.body).userSelect)).not.toBe('none')
   await page.setViewportSize({ width: 390, height: 844 })
-  await page.getByRole('button', { name: '查看陆鸣的人物形象', exact: true }).click()
-  const mobileGamePreview = page.getByRole('tooltip', { name: '陆鸣的人物预览' })
+  await page.getByRole('button', { name: '查看赵屿的人物形象', exact: true }).click()
+  const mobileGamePreview = page.getByRole('tooltip', { name: '赵屿的人物预览' })
   await expect(mobileGamePreview.getByRole('img')).toHaveCSS('object-fit', 'contain')
   await expect(mobileGamePreview.getByText('广播主持人', { exact: true })).toBeVisible()
   await expect.poll(async () => {
@@ -256,11 +256,11 @@ test('大厅 → 选角 → 发言 → 推进 → 投票 → 复盘', async ({ p
   await page.keyboard.press('Escape')
   await page.setViewportSize({ width: 1280, height: 720 })
   await page.getByRole('button', { name: '查看我的剧本' }).last().click({ force: true })
-  const scriptHeading = page.getByRole('heading', { name: '陆鸣的剧本' })
+  const scriptHeading = page.getByRole('heading', { name: '赵屿的剧本' })
   await expect(scriptHeading).toBeVisible()
   await page.getByRole('button', { name: '快速了解' }).click()
   const overview = page.getByRole('region', { name: '角色速览' })
-  await expect(overview).toContainText('你是广播主持人陆鸣')
+  await expect(overview).toContainText('你是广播主持人赵屿')
   await expect(overview.getByText('你是谁', { exact: true })).toHaveCSS('font-weight', '700')
   await expect.poll(async () => (await overview.boundingBox())!.height).toBeGreaterThan(30)
   expect((await overview.boundingBox())!.height).toBeLessThan(100)
@@ -276,9 +276,9 @@ test('大厅 → 选角 → 发言 → 推进 → 投票 → 复盘', async ({ p
   await composer.fill('@')
   await expect(page.getByRole('listbox', { name: '可引用角色' })).toBeVisible()
   await composer.press('ArrowDown')
-  await expect(page.getByRole('option', { name: '@陈朔' })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('option', { name: '@程宇' })).toHaveAttribute('aria-selected', 'true')
   await composer.press('Enter')
-  await expect(composer).toContainText('@陈朔')
+  await expect(composer).toContainText('@程宇')
 
   await composer.fill('我先说明停电时间。')
   const historyReloaded = page.waitForResponse((response) => {
@@ -297,7 +297,7 @@ test('大厅 → 选角 → 发言 → 推进 → 投票 → 复盘', async ({ p
   await page.getByRole('button', { name: '进入下一阶段' }).click()
 
   await expect(page.getByText('请投票指认真凶')).toBeVisible()
-  await page.getByRole('button', { name: /姜芮/ }).click()
+  await page.getByRole('button', { name: /顾宁/ }).click()
   await page.getByRole('button', { name: '确认投票' }).click()
 
   await expect(page.getByRole('heading', { name: '复盘揭晓' })).toBeVisible()
@@ -329,7 +329,7 @@ test('个人速览在桌面与窄屏按内容伸展，长文本不挤掉正文�
       success: true, session_id: 'brief-layout', status: 'playing', current_stage: 'intro', current_round: 0,
       human_character_id: 'human', current_speaker_id: 'human', speech_queue: ['human'],
       script, characters: [human], votes: {}, agent_llm_info: {},
-      player_states: [{ character_id: 'human', character_name: '陆鸣', is_human: true, remaining_speech_count: 1 }],
+      player_states: [{ character_id: 'human', character_name: '赵屿', is_human: true, remaining_speech_count: 1 }],
     })
     if (path.endsWith('/records')) return json(route, { success: true, records: [] })
     if (path.endsWith('/system/capabilities')) return json(route, { models: [], features: {

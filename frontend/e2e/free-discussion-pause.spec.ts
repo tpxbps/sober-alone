@@ -19,7 +19,7 @@ test(`紧凑开关暂停、继续与发送后恢复 ${viewport.width}`, async ({
   const characters = [
     {
       character_id: 'human',
-      name: '陆鸣',
+      name: '赵屿',
       occupation: '主持人',
       profile: '广播主持人',
       character_script: '你的个人剧本',
@@ -27,7 +27,7 @@ test(`紧凑开关暂停、继续与发送后恢复 ${viewport.width}`, async ({
     },
     {
       character_id: 'ai-1',
-      name: '姜芮',
+      name: '顾宁',
       occupation: '节目制作人',
       profile: '节目制作人',
       is_human: false,
@@ -125,7 +125,7 @@ test(`紧凑开关暂停、继续与发送后恢复 ${viewport.width}`, async ({
   await expect(resumeButton).toHaveAttribute('aria-checked', 'true')
   await expect(pauseButton).toBeChecked()
 
-  const nextAiCard = page.getByRole('button', { name: '在输入框引用 姜芮' })
+  const nextAiCard = page.getByRole('button', { name: '在输入框引用 顾宁' })
   await expect(nextAiCard.locator('.breathing')).toHaveCount(0)
 
   await page.waitForTimeout(1700)
@@ -135,7 +135,7 @@ test(`紧凑开关暂停、继续与发送后恢复 ${viewport.width}`, async ({
   await expect(pauseButton).toHaveAttribute('aria-checked', 'false')
   await pauseButton.click()
   await expect(pauseButton).toBeChecked()
-  const loadingBox = await page.getByText('姜芮 正在发言', { exact: true }).boundingBox()
+  const loadingBox = await page.getByText('顾宁 正在发言', { exact: true }).boundingBox()
   expect(loadingBox!.y).toBeLessThan((await pauseButton.boundingBox())!.y)
   finishAiResponse()
   await expect(pauseButton).toBeChecked()

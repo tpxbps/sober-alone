@@ -70,22 +70,22 @@ def test_reaction_tool_schema_uses_explicit_arrays_and_normalizes_to_game_maps()
 
     reaction = SpeechReactionPayload.model_validate(
         {
-            "suspicion_changes": [{"target": "许棠", "score": 1.0, "reason": "时间线矛盾"}],
+            "suspicion_changes": [{"target": "林岚", "score": 1.0, "reason": "时间线矛盾"}],
             "suspected_by_changes": [
                 {
-                    "suspecter": "陆鸣",
+                    "suspecter": "赵屿",
                     "score": "0.4",
                     "reason": "质疑我的证词",
                     "need_response": True,
                 }
             ],
-            "main_perspective": "陆鸣指出许棠的时间线矛盾。",
+            "main_perspective": "赵屿指出林岚的时间线矛盾。",
         }
     ).to_reaction()
 
-    assert reaction.my_suspicion_graph["许棠"].score == 1.0
-    assert reaction.my_suspected_by["陆鸣"].score == 0.4
-    assert reaction.my_suspected_by["陆鸣"].need_response is True
+    assert reaction.my_suspicion_graph["林岚"].score == 1.0
+    assert reaction.my_suspected_by["赵屿"].score == 0.4
+    assert reaction.my_suspected_by["赵屿"].need_response is True
 
 
 @pytest.mark.asyncio
@@ -164,8 +164,8 @@ async def test_agent_manager_disables_rag_when_script_collection_is_missing(monk
     manager = AgentManager("session", "sample")
     await manager.initialize_agents(
         [
-            {"character_id": "human", "name": "陆鸣"},
-            {"character_id": "ai", "name": "姜芮", "character_script": "秘密"},
+            {"character_id": "human", "name": "赵屿"},
+            {"character_id": "ai", "name": "顾宁", "character_script": "秘密"},
         ],
         human_character_id="human",
     )
@@ -186,23 +186,23 @@ async def test_reaction_schema_failure_gets_one_targeted_repair_attempt():
             if self.calls == 1:
                 raise OutputParserException("invalid tool arguments")
             return SpeechReactionPayload(
-                suspicion_changes=[{"target": "许棠", "score": 0.6, "reason": "时间线不一致"}],
-                main_perspective="陆鸣质疑许棠的时间线。",
+                suspicion_changes=[{"target": "林岚", "score": 0.6, "reason": "时间线不一致"}],
+                main_perspective="赵屿质疑林岚的时间线。",
             )
 
     structured = StructuredReaction()
     player = object.__new__(AgentPlayer)
-    player.character_name = "陈朔"
+    player.character_name = "程宇"
     player.character_id = "ai"
     player.reaction_llm_model = "mimo-v2.5"
     player._reaction_structured = structured
     player._reaction_system_prompt = "系统提示"
 
-    result = await player.react_to_speech("陆鸣", "我怀疑许棠隐瞒了时间线。")
+    result = await player.react_to_speech("赵屿", "我怀疑林岚隐瞒了时间线。")
 
     assert structured.calls == 2
     assert "格式纠正" in structured.prompts[1]
-    assert result.my_suspicion_graph["许棠"].score == 0.6
+    assert result.my_suspicion_graph["林岚"].score == 0.6
 
 
 @pytest.mark.asyncio
@@ -299,7 +299,7 @@ async def test_visible_speech_remains_incremental_even_when_tool_order_is_imperf
     player.session_id = "session"
     player.script_id = "script"
     player.character_id = "ai"
-    player.character_name = "姜芮"
+    player.character_name = "顾宁"
     player._build_knowledge_context = no_knowledge
 
     stream = player.speak({}, "free_discussion")

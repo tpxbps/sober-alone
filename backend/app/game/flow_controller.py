@@ -20,7 +20,9 @@ from app.db.models import (
 from app.game.clue_media import public_presentation, upcoming_presentation_assets
 from app.game.clues import (
     build_agent_clue_context,
+    build_round_overview_context,
     normalize_clue_stages,
+    public_round_overviews,
     render_clue_markdown,
     stage_public_clues,
 )
@@ -1040,6 +1042,12 @@ class GameFlowController:
             "db_session": db_session,
             "character_name_map": character_name_map,
             "character_names": character_names,  # 用于校验角色名称
+            "public_round_overviews": public_round_overviews(
+                self.clue_stages,
+                self.session.current_stage,
+                self.session.current_round,
+                game_process=self.game_process,
+            ),
             "public_clues": stage_public_clues(
                 self.session.current_stage, self.session.revealed_clues or []
             ),
@@ -1136,9 +1144,17 @@ class GameFlowController:
               此方法仅负责获取当前阶段的 system_notice（动态系统消息）
         """
         context_parts = [
+            build_round_overview_context(
+                public_round_overviews(
+                    self.clue_stages,
+                    self.session.current_stage,
+                    self.session.current_round,
+                    game_process=self.game_process,
+                )
+            ),
             build_agent_clue_context(
                 stage_public_clues(self.session.current_stage, self.session.revealed_clues or [])
-            )
+            ),
         ]
 
         # 获取当前阶段的配置

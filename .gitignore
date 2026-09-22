@@ -34,10 +34,12 @@ build/
 
 # Local runtime data (databases, checkpoints, generated media and vectors)
 backend/.local-data/
+/.local-data/
 
 # Test and browser artifacts
 test-results/
 playwright-report/
+.playwright-cli/
 blob-report/
 /results.sarif
 /output/
@@ -46,3 +48,6 @@ blob-report/
 /PLAN.md
 /docs/
 /design-qa.md
+/CLUE_CITATION_EVALUATION.md
+/CLUE_MEDIA.md
+/backend/MODEL_COMPATIBILITY.md

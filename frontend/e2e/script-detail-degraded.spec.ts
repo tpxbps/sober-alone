@@ -1,10 +1,10 @@
 import { expect, test, type Route } from '@playwright/test'
 
 const script = {
-  script_id: 'sample-midnight-call-v1',
-  title: '零点来电',
+  script_id: 'sample-case-v1',
+  title: '示例案件',
   description: '纯文本剧本',
-  overview: '广播站旧址的最后一夜。',
+  overview: '山庄停电后的调查。',
   tags: '原创样例',
   difficulty: 1,
   player_count: 2,
@@ -14,8 +14,8 @@ const script = {
 }
 
 const characters = [
-  { character_id: 'human', name: '陆鸣', profile: '广播主持人' },
-  { character_id: 'ai-1', name: '姜芮', profile: '节目制作人' },
+  { character_id: 'human', name: '赵屿', profile: '广播主持人' },
+  { character_id: 'ai-1', name: '顾宁', profile: '节目制作人' },
 ]
 
 function json(route: Route, body: unknown) {
@@ -68,8 +68,8 @@ test('未配置主模型时选角安全降级且不会产生页面异常', async
   })
 
   await page.goto('/')
-  await page.getByText('零点来电').first().click()
-  await page.getByText('陆鸣', { exact: true }).click()
+  await page.getByText('示例案件').first().click()
+  await page.getByText('赵屿', { exact: true }).click()
 
   await expect(page.getByText(/暂不可分配 AI 模型/)).toBeVisible()
   await expect(page.getByRole('button', { name: '走进故事' })).toBeDisabled()
@@ -150,8 +150,8 @@ test('模型服务偏慢时只提示体验风险且仍可选择并开始游戏',
   })
 
   await page.goto('/')
-  await page.getByText('零点来电').first().click()
-  await page.getByText('陆鸣', { exact: true }).click()
+  await page.getByText('示例案件').first().click()
+  await page.getByText('赵屿', { exact: true }).click()
   await page.getByRole('combobox').click()
   const slowOption = page.getByRole('option', { name: 'hy3' })
   await expect(slowOption).toBeVisible()

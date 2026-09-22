@@ -284,7 +284,7 @@ class AgentPlayer:
 要求：
 1. 主动回应他人的质疑，有针对性
 2. 可以质疑其他玩家的发言，但要有理有据
-3. 保持角色立场，不要暴露关键秘密
+3. 保持角色立场，针对具体问题逐项解释或交换必要信息，自行权衡秘密与信任
 4. 只选一个最值得回应或推进的重点展开；其他次要观点简单提及即可
 5. 禁止逐个点名点评所有玩家，尽量用精简的 2-4 个短段落完成发言
 6. 如需回忆个人剧本，先完成检索工具调用，再输出一段完整的 Markdown 发言
@@ -405,7 +405,7 @@ submit_final_vote(suspect_name="角色全名", reasoning="1-2句投票理由")
                     parts.append("【其他玩家发言要点】\n" + "\n".join(perspective_lines))
 
             if parts:
-                return "【你的心理状态记录】\n" + "\n\n".join(parts)
+                return "【你的心理状态记录｜可修正的主观判断】\n" + "\n\n".join(parts)
             else:
                 return ""
 
@@ -474,6 +474,9 @@ submit_final_vote(suspect_name="角色全名", reasoning="1-2句投票理由")
             "character_name_map": game_state.get("character_name_map", {}),
             "character_names": game_state.get("character_names", []),
             "public_clues": stage_public_clues(stage, game_state.get("public_clues", [])),
+            "public_round_overviews": stage_public_clues(
+                stage, game_state.get("public_round_overviews", [])
+            ),
             "personal_script": getattr(self, "personal_script", ""),
         }
 
@@ -568,6 +571,7 @@ submit_final_vote(suspect_name="角色全名", reasoning="1-2句投票理由")
                 content,
                 current_state=reaction_context.get("current_state"),
                 public_clues=reaction_context.get("public_clues"),
+                public_round_overviews=reaction_context.get("public_round_overviews"),
                 character_names=reaction_context.get("character_names"),
                 is_human=is_human,
             )

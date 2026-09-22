@@ -56,7 +56,7 @@ uv run python -m app.cli init
 uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-`init` 会创建或升级本地数据库，并在空库中导入《零点来电》。拉取包含数据库变更的更新后，请重新执行该命令。
+`init` 会创建或升级本地数据库，并仅向空库导入初始剧本。拉取包含数据库变更的更新后，请重新执行该命令。
 
 ### 2. 启动前端
 
@@ -66,7 +66,7 @@ pnpm install --frozen-lockfile
 pnpm dev --host 127.0.0.1
 ```
 
-访问 `http://127.0.0.1:5173`，选择《零点来电》和一个角色开始游戏。
+访问 `http://127.0.0.1:5173`，选择剧本和角色开始游戏。
 
 ## 可选能力
 
@@ -83,7 +83,7 @@ pnpm dev --host 127.0.0.1
 
 代码结构、核心流程、数据边界和阅读顺序统一记录在 [PROJECT.md](PROJECT.md)。
 
-双模式线索引用、图片资源导入和阶段演出的配置与本地预览见 [CLUE_MEDIA.md](CLUE_MEDIA.md)。
+线索引用、可选媒体和开发验证约定见 [PROJECT.md](PROJECT.md)。
 
 ## 技术栈
 

@@ -1,92 +1,72 @@
-# 独醒项目上下文
+# 项目约定
 
-本文档集中记录理解和继续开发独醒所需的上下文。README 只负责帮助第一次进入仓库的人快速判断项目价值并运行起来。
+独醒面向本地单用户、单进程运行。README 负责安装使用，本文件集中保留架构、接口与开发约定。
 
-## 1. 产品定位
+## 核心链路
 
-独醒是一款本地优先的 AI-Native 剧本杀应用。它不是传统剧本阅读器：每个非真人角色由独立 Agent 驱动，依据自己的个人剧本、已知线索、对他人的怀疑和当前阶段进行发言；真人玩家参与同一套阶段机，最终共同完成投票与复盘。
+游戏：大厅 → 选择角色 → 自我介绍 → 每轮线索分析与自由讨论 → 总结 → 投票 → 复盘。
+创作：创意 → 大纲 → 初稿 → 评审与人工确认 → 终稿 → 转换 → 校验与保存 → 可选资产。
 
-项目同时包含剧本创作工作流，允许用户从一句创意出发，逐步生成大纲、初稿、评审稿、终稿和可运行的结构化游戏数据。关键阶段保留人工确认、回退、历史检查点和分叉能力。
+- `backend/app/game/flow_controller.py` 管理阶段与发言队列，`services/game_service.py` 提供 API 外观。
+- `agents/agent_player.py` 编排独立角色的发言、工具、心理状态与反应。角色只接收自己的个人稿、已发生的讨论及当前公开材料。
+- 对局保存不可变剧本快照。轮次概述与线索条目共同进入发言、反应、总结和投票；恢复对局从快照和阶段重建，不读取后续材料或终局真相。
+- `script_editor/` 使用 LangGraph 编排创作；后台 operation 持久化并支持刷新恢复、检查点与分叉。重启可认领未完成任务，不承诺跨进程协调。
+- `frontend/src/stores/` 协调界面状态；`lib/` 管理 API、SSE 与适配。发言完整结束后落库、分析反应并对账；异步结果写入前检查 session / operation identity。
+- 业务数据使用 SQLAlchemy / Alembic；检查点另存 SQLite。运行数据、向量及生成媒体位于忽略的 `backend/.local-data/`。内存回收不删除历史对局。
+- `app/seed.py` 仅向空库导入 `app/data/sample.json`，重复初始化不覆盖已有剧本或对局。
 
-当前边界是 `local-first / single-user / single-process`。运行数据只保存在本机，不提供账号、多人在线房间或公网服务能力。
-剧本创作操作与游戏 Agent 的 LangGraph 检查点写入本地 SQLite；长任务由后台 operation 执行，前端刷新后按 `operation_id` 恢复轮询。服务重启会重新认领未完成操作，但仍不承诺跨机器或多进程协调。
+## 推理与能力边界
 
-## 2. 核心体验
+默认游戏原则集中在 `agents/agent_prompts.py`，发言与反应共用。根据本局机制建立行为与死亡的因果关系，区分来源与推测，及时修正判断；角色保持秘密、交换信息和策略取舍须遵守知情边界。特殊规则由剧本明确设定，通用提示不硬编码某个案件答案。
 
-### 游戏链路
+模型注册在 `core/model_registry.py`，参数与结构化反应绑定在 `agents/game_model_paths.py`。保留旧对局的模型恢复映射。`/api/v1/system/capabilities` 返回配置能力，`/api/v1/system/model-health` 检查首字及反应耗时；健康结果影响自动分配，不代替行为评测。
 
-```text
-剧本大厅 → 选择角色 → 自我介绍 → [线索分析 → 自由讨论] × N → 总结发言 → 投票 → 真相复盘
+默认直连供应商。可在私有环境设置 `INFERENCE_BACKEND=tokendance` 与 `TOKENDANCE_API_KEY` 使用网关。需要凭据隔离的宿主设置 `TOKENDANCE_REQUIRE_SCOPE=true`，在整个异步任务与流式响应中提供 `InferenceScope`；凭据在派发时解析，不进入检查点或模型缓存。恢复错误必须停止当前操作，不能切换付费来源。`DISABLED_LLM_MODELS` 可暂停指定模型。
+
+创作默认使用 DeepSeek，`SCRIPT_EDITOR_INFERENCE_BACKEND=inherit` 跟随当前来源；显式 `deepseek_official` 仅调整创作文本路由。没有向量配置时不注册 RAG，直接注入本人的完整稿；缺少图片或语音配置时仍可纯文本运行。网关向量与旧直连向量不兼容，切换前用 `app.services.tokendance_migration` 检查、构建独立索引并保留原索引。
+
+## 线索引用与可选媒体
+
+`[c01]` 点名线索，`[推理文字][c01,c02]` 关联证据；旧 ID 与历史语法保留兼容。权限以该条消息落库时的 `clue_refs` 为准，后来公开的线索不激活旧引用。无 ID 的轮次概述自然说明来源，不伪造 ID。共享协议夹具由前后端测试共同消费。
+
+媒体类型见 `game/clue_media.py`。图片使用本地 `/images/` 路径；资源 `source_hash` 绑定正文，正文改变后须重新审核。演出等待期间禁止发言和推进；`POST /api/v1/game/{session_id}/clue-presentation/ack` 携带当前 `presentation_id` 幂等确认。媒体失败可进入完整文字摘要。下一轮预加载只发布图片 URL，不发布未公开正文；图片仍可通过开发者工具查看。
+
+资源包 manifest 包含版本、剧本 ID、正文指纹、完整 `clue_stages` 与 `files: [{path, sha256}]`。在 backend 目录用以下命令校验、备份后导入；不会改写正文与旧对局。旧资源须保留供历史快照使用。
+
+```bash
+uv run python -m scripts.clue_media validate --source .local-data/source.json --package .local-data/package
+uv run python -m scripts.clue_media import --source .local-data/source.json --package .local-data/package --images-root .local-data/images --database .local-data/game_data.db
 ```
 
-`GameFlowController` 维护阶段和发言队列；`GameService` 是 API 层使用的稳定外观；角色 Agent 只接收自己的个人剧本，并随着游戏记录更新上下文。公开线索以 `ClueStage → ClueItem` 形式保存，阶段消息使用固定 Markdown 模板，真人和 AI 通过稳定 `[clue-id]` 引用。发言通过 SSE 返回，完整结束后才落库并执行角色反应分析和服务端状态对账。
+启动前后端后访问 `/clue-preview.html` 可只读预览本地 JSON，不创建对局或调用模型。
 
-### 创作链路
+## 开发与验证
 
-```text
-创意 → 大纲 → 初稿 → AI 评审 → 终稿 → 游戏数据转换 → 安全检查 → 保存 → 可选资产
+保持 REST/SSE 事件、阶段和 LangGraph state key 兼容。新增内部字段应兼容旧检查点；不得共享其他角色私有经历。修复推理质量应先排查信息链路，再改提示词。
+
+```bash
+uv run --project backend ruff check backend/app backend/migrations backend/tests backend/scripts scripts
+uv run --project backend ruff format --check backend/app backend/migrations backend/tests backend/scripts scripts
+uv run --project backend pytest -q backend/tests --disable-socket --allow-hosts=127.0.0.1,localhost
+pnpm --dir frontend lint
+pnpm --dir frontend test
+pnpm --dir frontend build
+pnpm --dir frontend test:e2e
 ```
 
-工作流由 LangGraph 编排。文本剧本保存成功即视为核心流程完成；图片、向量和语音都是能力驱动的可选任务，缺少 Key 时使用 `skipped + reason`，不会伪装成成功。
+CI 不访问外部模型。迁移验收在隔离库连续执行两次 `python -m app.cli init`。浏览器路由夹具验证前端流程，真实模型与完整游戏另行验收，不混淆两种结论。
 
-## 3. 技术结构
+可复现付费工具位于 `backend/scripts/`：`clue_citation_eval` 检验引用协议，`gameplay_eval` 采集带人工语义判分标准的合成场景，`model_game_audit` 验证完整生命周期，`model_health_diagnostic` 检查请求耗时。通过各自 `--help` 查看参数。私有材料需获授权；原始结果只写忽略目录，真实调用须限制预算，不因失败自动更换模型或付费来源。
 
-```text
-frontend/src/
-  components/       游戏与创作 UI
-  screens/          页面级协调器
-  stores/           Zustand 状态与业务动作
-  lib/              API、SSE runner、状态适配器
+## 公开树约定
 
-backend/app/
-  api/routes/       FastAPI 路由
-  agents/           角色 Agent、提示词与反应分析
-  game/             阶段机与发言队列
-  services/         游戏 façade、语音、投票与运行时仓储
-  script_editor/    LangGraph 创作节点、服务与进度状态
-  db/               SQLAlchemy 模型、会话与就绪检查
-  seed.py           内置纯文本样例
+仅保留工程实现、测试与其必需夹具、依赖锁、迁移、CI、产品资源及许可证。说明仅允许 README、PROJECT、LICENSE 与明确列出的第三方许可证。过程总结、上下文记忆、截图录屏、账单、私有剧本、运维资料和生成资源放入本地忽略目录。新增第三方许可证须在检查器中明确登记，不扩展任意文档豁免。
 
-backend/migrations/ Alembic 业务表迁移
-backend/tests/      后端关键特征与回归测试
-frontend/e2e/       主游戏浏览器流程
+在本仓库安装钩子（不修改全局配置）：
+
+```bash
+git config --local core.hooksPath .githooks
+python scripts/check_public_tree.py --staged
 ```
 
-主要数据表为 `scripts`、`characters`、`game_sessions`、`player_states`、`game_records`、`editor_workflows` 和 `editor_operations`。对局创建时保存不可变剧本快照和已公开线索；数据库、LangGraph SQLite 检查点、向量和运行时媒体统一写入被 Git 忽略的 `backend/.local-data/`。空闲 72 小时只回收 Agent、controller 与锁等内存对象，不删除对局或检查点。
-
-## 4. 模型与能力边界
-
-- DeepSeek 是最低运行依赖，负责主游戏 Agent 和文本创作。
-- 没有 StepFun 时，摘要回退到当前主模型。
-- 没有智谱 Embedding 时，不注册 RAG 工具，只向角色注入其自己的完整剧本。
-- 图片、静态 TTS、流式 TTS 和额外角色模型按配置动态启用；模型枚举由后端统一注册。
-- `/api/v1/system/capabilities` 发布配置能力，`/api/v1/system/model-health` 并行探测发言首字和结构化反应完整耗时；两者都不返回 Key。健康提示只影响自动模型分配和风险提示，不禁止用户手动选择。
-
-提示词、角色剧本、玩家发言和待生成资产会发送给用户主动启用的云模型供应商，并可能产生费用。不要把敏感信息或无权处理的内容输入第三方模型。
-
-## 5. 内置样例《零点来电》
-
-样例是四人、两轮线索、约 25 分钟的原创纯文本简单本。结构重点是：
-
-- 封闭广播站场景和明确案发时间窗；
-- 四名角色分别拥有独立动机、秘密和可验证时间线；
-- 第一轮公开关系与行为疑点，第二轮用死亡时间、音频拼接、门禁和物证完成收束；
-- 凶手通过预录广播伪造死者存活时间，所有红鲱鱼都在最终复盘中得到解释；
-- 不依赖图片、语音或向量数据，适合验证核心 Agent 游戏链路。
-
-## 6. 推荐阅读顺序
-
-1. `backend/app/seed.py`：先理解一局游戏需要的数据形态。
-2. `backend/app/game/flow_controller.py`：理解阶段推进和发言顺序。
-3. `backend/app/services/game_service.py`：理解 API 与领域流程的衔接。
-4. `backend/app/agents/agent_player.py`：理解角色上下文、工具和流式发言。
-5. `frontend/src/stores/gameStore.ts`：理解前端状态、取消与服务端对账。
-6. `backend/app/script_editor/graph.py` 与 `frontend/src/components/script-editor/ContentPanel.tsx`：理解创作工作流。
-
-## 7. 开发约束
-
-- 保持 REST/SSE 事件、LangGraph state key 和阶段语义稳定。
-- 新能力必须有缺失配置时的明确降级路径。
-- 角色之间不得共享个人剧本或越权查询其他角色知识。
-- 异步结果写入前必须校验当前 session 和 operation identity，避免旧会话污染新会话。
-- 优先改善游戏体验、剧本质量、Agent 推理稳定性和创作可控性；不在项目内扩展部署平台或运维模板。
+`pre-commit` 检查暂存树，`pre-push` 检查每个待推送提交及最终树，CI 再次检查。检查器直接读取 Git 对象，强制添加的忽略文件也会被拦截；它报告路径与整改方式，不自动删除文件。密钥扫描同时由 CI 的 Gitleaks 完整历史检查补充。本轮治理规则不要求重写已有历史。

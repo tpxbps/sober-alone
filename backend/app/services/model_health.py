@@ -47,14 +47,14 @@ FAILURE_CACHE_TTL_SECONDS = 30.0
 MODEL_PROBE_CONCURRENCY = 4
 TRANSIENT_PROBE_ATTEMPTS = 2
 
-_REACTION_PROBE_ROLE = """你是旧广播站的档案管理员林岚。你谨慎、重视时间线，
+_REACTION_PROBE_ROLE = """你是研究站的值班记录员林岚。你谨慎、重视时间线，
 只根据已公开发言和自己的经历更新判断。"""
-_REACTION_PROBE_SCRIPT = """21:35 你检查过设备柜，R-07 录音笔当时仍在；
+_REACTION_PROBE_SCRIPT = """21:35 你检查过设备柜，K-12 记录仪当时仍在；
 21:48 你再次经过时，设备柜门虚掩，但你没有看清是谁动过它。"""
-_REACTION_PROBE_SPEAKER = "陆鸣"
-_REACTION_PROBE_SPEECH = """我在21:26离开导播间，21:39回来时服务器已经停用。
-陈朔说自己只做例行维护，却解释不了七分钟日志空白；而且R-07录音笔随后失踪。
-林岚，你21:35见过录音笔，能否确认陈朔当时是否靠近设备柜？我认为他最可疑。"""
+_REACTION_PROBE_SPEAKER = "赵屿"
+_REACTION_PROBE_SPEECH = """我在21:26离开工作间，21:39回来时服务器已经停用。
+程宇说自己只做例行维护，却解释不了七分钟日志空白；而且K-12记录仪随后失踪。
+林岚，你21:35见过记录仪，能否确认程宇当时是否靠近设备柜？我认为他最可疑。"""
 
 HealthDimension = Literal["speech", "reaction"]
 
@@ -103,8 +103,8 @@ async def _measure_first_token(spec: ModelSpec) -> int:
         "character_name": "林岚",
         "current_stage": "intro",
         "current_round": 0,
-        "character_name_map": {"linlan": "林岚", "luming": "陆鸣"},
-        "character_names": ["林岚", "陆鸣"],
+        "character_name_map": {"linlan": "林岚", "zhaoyu": "赵屿"},
+        "character_names": ["林岚", "赵屿"],
         "public_clues": [],
     }
     started_at = time.perf_counter()
