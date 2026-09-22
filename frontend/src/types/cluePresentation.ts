@@ -24,7 +24,7 @@ export interface CluePresentation {
   version: 1 | 2;
   revision: string;
   template: 'cinematic' | 'dossier';
-  visual_preset?: 'warm-noir' | 'cold-occlusion';
+  visual_preset?: 'warm-noir' | 'cold-occlusion' | 'candle-silk' | 'afternoon-paper' | 'orbital-steel';
   title: string;
   background?: ClueMedia;
   shots: ClueShot[];
