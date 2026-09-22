@@ -41,7 +41,11 @@ from app.agents.reaction import (
     build_reaction_system_prompt,
 )
 from app.core.config import settings
-from app.core.inference import InferenceRecoveryError, raise_for_inference_recovery
+from app.core.inference import (
+    InferenceRecoveryError,
+    raise_for_inference_recovery,
+    retryable_gateway_error,
+)
 from app.core.llm_factory import create_summary_llm
 from app.game.clues import stage_public_clues
 
@@ -576,9 +580,10 @@ submit_final_vote(suspect_name="角色全名", reasoning="1-2句投票理由")
                 is_human=is_human,
             )
 
+            repair_schema = False
             for attempt in range(2):
                 prompt = analysis_prompt
-                if attempt == 1:
+                if repair_schema:
                     prompt += """
 
 【格式纠正】上次返回格式不符合要求。suspicion_changes 和
@@ -625,8 +630,10 @@ target 和 suspecter 只能是合法的其他角色，禁止填自己的名字�
                                 attempt + 1,
                             )
                         return reaction
+                    raise ValueError("Missing structured reaction")
                 except (ValidationError, OutputParserException, ValueError) as exc:
                     if attempt == 0:
+                        repair_schema = True
                         continue
                     logger.warning(
                         "Reaction schema repair failed character=%s model=%s error=%s",
@@ -638,6 +645,12 @@ target 和 suspecter 只能是合法的其他角色，禁止填自己的名字�
                     raise
                 except Exception as exc:
                     raise_for_inference_recovery(exc)
+                    if (
+                        attempt == 0
+                        and settings.INFERENCE_BACKEND == "tokendance"
+                        and retryable_gateway_error(exc)
+                    ):
+                        continue
                     logger.warning(
                         "Reaction analysis failed character=%s model=%s error=%s "
                         "status=%s request_id=%s",

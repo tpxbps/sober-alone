@@ -206,6 +206,75 @@ async def test_reaction_schema_failure_gets_one_targeted_repair_attempt():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["connection", "timeout", "empty"])
+async def test_reaction_recovers_once_without_confusing_transport_and_schema(monkeypatch, failure):
+    import httpx
+    from openai import APIConnectionError, APITimeoutError
+
+    monkeypatch.setattr(settings, "INFERENCE_BACKEND", "tokendance")
+    calls = []
+
+    class Structured:
+        async def ainvoke(self, messages):
+            calls.append(messages[-1].content)
+            if len(calls) == 1:
+                request = httpx.Request("POST", "https://example.invalid")
+                if failure == "connection":
+                    raise APIConnectionError(request=request)
+                if failure == "timeout":
+                    raise APITimeoutError(request=request)
+                return None
+            return SpeechReactionPayload(main_perspective="一条有效的新发言记录")
+
+    player = object.__new__(AgentPlayer)
+    player.character_name = "甲"
+    player.character_id = "ai"
+    player.reaction_llm_model = "deepseek-flash"
+    player._reaction_structured = Structured()
+    player._reaction_system_prompt = "系统提示"
+    reaction = await player.react_to_speech("乙", "现场还有一个时间点需要核实。")
+    assert len(calls) == 2
+    assert ("格式纠正" in calls[1]) == (failure == "empty")
+    assert reaction.main_perspective == "一条有效的新发言记录"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure,expected_calls", [("connection", 2), ("account", 1)])
+async def test_reaction_recovery_is_bounded_and_does_not_retry_account_errors(
+    monkeypatch, failure, expected_calls, caplog
+):
+    import httpx
+    from openai import APIConnectionError
+
+    from app.core.inference import InferenceRecoveryError
+
+    monkeypatch.setattr(settings, "INFERENCE_BACKEND", "tokendance")
+    calls = []
+
+    class Structured:
+        async def ainvoke(self, messages):
+            calls.append(messages)
+            if failure == "account":
+                raise InferenceRecoveryError("api_key_quota")
+            raise APIConnectionError(request=httpx.Request("POST", "https://example.invalid"))
+
+    player = object.__new__(AgentPlayer)
+    player.character_name = "甲"
+    player.character_id = "ai"
+    player.reaction_llm_model = "deepseek-flash"
+    player._reaction_structured = Structured()
+    player._reaction_system_prompt = "系统提示"
+    if failure == "account":
+        with pytest.raises(InferenceRecoveryError):
+            await player.react_to_speech("乙", "现场还有一个时间点需要核实。")
+    else:
+        result = await player.react_to_speech("乙", "现场还有一个时间点需要核实。")
+        assert result.main_perspective == ""
+        assert "Reaction analysis failed" in caplog.text
+    assert len(calls) == expected_calls
+
+
+@pytest.mark.asyncio
 async def test_clue_recall_reads_only_server_side_revealed_clues(monkeypatch):
     module = importlib.import_module("app.agents.tools.recall_clues")
 
