@@ -271,9 +271,39 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
     currentRound,
   ]);
 
+  const speechGeneration = useGameStore(state => state.speechGeneration);
+  const speechConnectionError = useGameStore(state => state.speechConnectionError);
+  useEffect(() => {
+    const active = ['generating', 'streaming', 'retrying'].includes(speechGeneration?.status || '');
+    if (isStreaming || (!active && !speechConnectionError)) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try {
+        const state = await gameApi.getGameState(sessionId);
+        const history = await gameApi.getGameHistory(sessionId);
+        if (cancelled) return;
+        useGameStore.getState().updateFromAPI(state);
+        useGameStore.setState({ records: history.records });
+        if (['completed', 'skipped'].includes(state.speech_generation?.status || '')) {
+          useGameStore.setState({ speechConnectionError: '' });
+          return;
+        }
+        if (state.speech_generation?.status === 'failed') return;
+      } catch {
+        if (!cancelled) useGameStore.setState({ speechConnectionError: '连接暂时中断，正在查询发言状态。' });
+      }
+      if (!cancelled) timer = setTimeout(poll, 3000);
+    };
+    timer = setTimeout(poll, 1500);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [sessionId, isStreaming, speechGeneration?.status, speechConnectionError]);
+
   // Auto-trigger AI speech when it's AI's turn (and hasn't spoken yet)
   useEffect(() => {
     if (
+      !speechConnectionError &&
+      !['failed', 'generating', 'streaming', 'retrying'].includes(speechGeneration?.status || '') &&
       cluePresentation?.status !== "pending" &&
       !isAdvancingStage &&
       !isStreaming &&
@@ -312,6 +342,8 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
       return () => clearTimeout(timer);
     }
   }, [
+    speechGeneration,
+    speechConnectionError,
     cluePresentation,
     isAdvancingStage,
     currentSpeakerId,

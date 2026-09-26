@@ -301,6 +301,7 @@ test('大厅 → 选角 → 发言 → 推进 → 投票 → 复盘', async ({ p
   await page.getByRole('button', { name: '确认投票' }).click()
 
   await expect(page.getByRole('heading', { name: '复盘揭晓' })).toBeVisible()
+  await expect(page.getByRole('region', { name: '剧本体验评价' }).getByRole('status')).toHaveCount(0)
   await page.getByRole('button', { name: '推荐', exact: true }).click()
   await expect(page.getByRole('button', { name: '推荐', exact: true })).toHaveAttribute('aria-pressed', 'true')
   await page.getByRole('button', { name: '留下体验意见（可选）' }).click()
@@ -317,6 +318,12 @@ test('大厅 → 选角 → 发言 → 推进 → 投票 → 复盘', async ({ p
   await expect(page.getByRole('button', { name: '停止播放语音' })).toBeVisible()
   await page.getByRole('button', { name: '停止播放语音' }).click()
   await expect(page.getByRole('button', { name: '播放语音' })).toBeVisible()
+  await page.getByRole('button', { name: '关闭剧本评价' }).focus()
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('region', { name: '剧本体验评价' })).toHaveCount(0)
+  expect(feedbackWrites).toBe(3)
+  await page.reload()
+  await expect(page.getByRole('region', { name: '剧本体验评价' })).toHaveCount(0)
 })
 
 test('个人速览在桌面与窄屏按内容伸展，长文本不挤掉正文且不显示 AI 指令', async ({ page }, testInfo) => {

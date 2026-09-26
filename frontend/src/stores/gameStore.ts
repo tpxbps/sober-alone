@@ -10,7 +10,7 @@ import type {
   GameStage,
   StageTransition,
 } from '@/types/game';
-import { gameApi, speechApi, voteApi } from '@/lib/api';
+import api, { gameApi, speechApi, voteApi } from '@/lib/api';
 import { adaptGameState } from '@/lib/gameStateAdapter';
 import { speechClues, citedIds } from '@/lib/clueScope';
 import { OperationRegistry } from '@/lib/operationRegistry';
@@ -33,7 +33,9 @@ interface GameActions {
 
   // Speech
   humanSpeak: (content: string) => Promise<void>;
-  triggerAISpeak: (characterId: string) => Promise<void>;
+  triggerAISpeak: (characterId: string, retryGenerationId?: string) => Promise<void>;
+  retryAISpeech: () => Promise<void>;
+  skipAISpeech: () => Promise<void>;
 
   // Voting
   submitVote: (suspectId: string, suspectName: string, reasoning?: string) => Promise<void>;
@@ -49,6 +51,7 @@ interface GameActions {
     player_states: PlayerState[];
     current_speaker_id?: string;
     turn_processing?: boolean;
+    speech_generation?: GameState['speechGeneration'];
     clue_presentation?: GameState['cluePresentation'];
     clue_asset_preload?: string[];
     next_speaker_id?: string;
@@ -66,6 +69,8 @@ interface GameActions {
 }
 
 const initialState: GameState = {
+  speechGeneration: null,
+  speechConnectionError: '',
   // Session info
   sessionId: null,
   scriptId: '',
@@ -264,36 +269,54 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
     }
   },
 
-  triggerAISpeak: async (characterId: string) => {
+  triggerAISpeak: async (characterId: string, retryGenerationId?: string) => {
     if (get().cluePresentation?.status === 'pending') return;
     const { sessionId } = get();
-    if (!sessionId) return;
+    if (!sessionId || get().isStreaming) return;
+    if (!retryGenerationId && (get().speechGeneration?.status === 'failed' || get().speechConnectionError)) return;
 
     // Register AbortController for this SSE stream
     const operationKey = `ai-speak-${characterId}`;
     const controller = operations.start(operationKey);
 
-    set({ isStreaming: true, streamingContent: '', streamingSpeakerId: characterId, thinkingTip: '', streamingClues: speechClues(get().stage, get().publicClues) });
+    const started = performance.now();
+    let displayed = false;
+    let finished = false;
+    let rafId: number | null = null;
+    set({ speechConnectionError: '', isStreaming: true, streamingContent: '', streamingSpeakerId: characterId, thinkingTip: '', streamingClues: speechClues(get().stage, get().publicClues) });
 
     try {
-      const response = await speechApi.aiSpeakStream(sessionId, characterId, controller.signal);
-      const stream = speechApi.processSSEStream(response, controller.signal);
+      const response = await speechApi.aiSpeakStream(sessionId, characterId, controller.signal, retryGenerationId || get().speechGeneration?.generation_id, Boolean(retryGenerationId));
+      const stream = speechApi.processSSEStream(response, controller.signal, 15000);
 
       let fullContent = '';
       // RAF buffer: batch token updates to at most once per animation frame
-      let rafId: number | null = null;
       let lastFlushedContent = '';
       const flushContent = () => {
         rafId = null;
         if (fullContent !== lastFlushedContent) {
           lastFlushedContent = fullContent;
+          if (!operations.isCurrent(operationKey, controller) || !appliesToSession(get, sessionId)) return;
           set({ streamingContent: fullContent, thinkingTip: '' });
+          const generation = get().speechGeneration;
+          if (!displayed && fullContent.trim() && generation) {
+            displayed = true;
+            void api.post(`/game/${sessionId}/speech/displayed`, {
+              generation_id: generation.generation_id, attempt_id: generation.attempt_id,
+              elapsed_ms: performance.now() - started,
+            }).catch(() => {});
+          }
         }
       };
 
       await runSpeechStream(
         stream,
         {
+          speech_status: (message) => {
+            if (!operations.isCurrent(operationKey, controller) || !appliesToSession(get, sessionId) || !message.generation) return;
+            set({ speechGeneration: message.generation, thinkingTip: message.generation.status === 'retrying' ? '响应超时，正在重试…' : '' });
+            if (message.generation.status === 'failed') finished = true;
+          },
           token: (message) => {
             if (!operations.isCurrent(operationKey, controller) || !appliesToSession(get, sessionId)) return;
             fullContent += message.text || '';
@@ -345,6 +368,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
             });
           },
           done: async (message) => {
+            finished = true;
             if (rafId !== null) {
               cancelAnimationFrame(rafId);
               rafId = null;
@@ -439,6 +463,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
             if (!operations.isCurrent(operationKey, controller) || !appliesToSession(get, sessionId)) return;
             set({
               records: historyResponse.records,
+              speechGeneration: state.speech_generation ?? null,
               currentSpeakerId: nextSpeakerId || state.current_speaker_id || null,
               speechQueue: state.speech_queue,
               playerStates: state.player_states,
@@ -450,11 +475,12 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
             });
           },
           error: (message) => {
-            console.warn('Stream error (continuing):', message.message || message);
+            throw new Error(message.message || '发言未完成，请重试。');
           },
         },
         controller.signal,
       );
+      if (!finished) throw new Error('连接暂时中断，请重试。');
       // Clean up any remaining RAF
       if (rafId !== null) {
         cancelAnimationFrame(rafId);
@@ -463,14 +489,46 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
     } catch (error: unknown) {
       // Silently ignore abort errors (session was reset/changed)
       if (error instanceof DOMException && error.name === 'AbortError') return;
+      set({ speechConnectionError: '连接暂时中断，请重试。', isStreaming: false });
+      try {
+        const state = await gameApi.getGameState(sessionId);
+        const history = await gameApi.getGameHistory(sessionId);
+        if (appliesToSession(get, sessionId)) set({ ...adaptGameState(state), records: history.records || get().records });
+      } catch { /* Keep recovery controls and the draft available. */ }
       console.error('Failed to trigger AI speak:', error);
     } finally {
+      if (rafId !== null) cancelAnimationFrame(rafId);
       operations.finish(operationKey, controller);
       // Only update state if this controller wasn't aborted (i.e. still the active session)
       if (!controller.signal.aborted && appliesToSession(get, sessionId)) {
         set({ isStreaming: false, streamingContent: '', streamingSpeakerId: null, isProcessingReactions: false, thinkingTip: '' });
       }
     }
+  },
+
+  retryAISpeech: async () => {
+    const { sessionId } = get();
+    if (!sessionId) return;
+    const state = await gameApi.getGameState(sessionId);
+    const history = await gameApi.getGameHistory(sessionId);
+    if (!appliesToSession(get, sessionId)) return;
+    set({ ...adaptGameState(state), records: history.records || get().records });
+    const generation = state.speech_generation;
+    if (generation?.status === 'failed') {
+      await get().triggerAISpeak(generation.character_id, generation.generation_id);
+    } else if (generation && ['generating', 'streaming', 'retrying'].includes(generation.status)) {
+      throw new Error('旧请求尚在取消，请稍后重试');
+    } else {
+      set({ speechConnectionError: '' });
+    }
+  },
+
+  skipAISpeech: async () => {
+    const { sessionId, speechGeneration } = get();
+    if (!sessionId || !speechGeneration) return;
+    const { data } = await api.post(`/game/${sessionId}/speech/skip`, { generation_id: speechGeneration.generation_id });
+    const history = await gameApi.getGameHistory(sessionId);
+    if (appliesToSession(get, sessionId)) set({ ...adaptGameState(data), records: history.records || get().records, speechConnectionError: '' });
   },
 
   submitVote: async (suspectId: string, suspectName: string, reasoning?: string) => {
@@ -548,6 +606,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
       isProcessingReactions: Boolean(data.turn_processing),
       sessionId: data.session_id,
       status: data.status as GameState['status'],
+      speechGeneration: data.speech_generation ?? null,
       stage: data.current_stage,
       currentRound: data.current_round,
       playerStates: data.player_states,

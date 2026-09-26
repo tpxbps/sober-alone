@@ -256,6 +256,8 @@ class GameFlowController:
         db_session=None,
         skip_reactions: bool = False,
         consume_human_context: bool = False,
+        speech_attempt=None,
+        skipped: bool = False,
     ) -> dict[str, Any]:
         """
         处理玩家发言
@@ -280,6 +282,8 @@ class GameFlowController:
             db_session=db_session,
             skip_reactions=skip_reactions,
             consume_human_context=consume_human_context,
+            speech_attempt=speech_attempt,
+            skipped=skipped,
         )
 
     async def broadcast_reactions_stream(self, speaker_id: str, content: str) -> dict[str, Any]:
@@ -1033,6 +1037,7 @@ class GameFlowController:
         character_names = list(character_name_map.values())
 
         game_state = {
+            "agent_thread_id": (self.session.player_threads or {}).get(character_id),
             "session_id": self.session.session_id,
             "script_id": self.session.script_id,
             "character_id": character_id,
@@ -1062,7 +1067,13 @@ class GameFlowController:
         game_state["observations_managed"] = True
         if not hasattr(self, "_pending_observation_ids"):
             self._pending_observation_ids = {}
-        self._pending_observation_ids[character_id] = entry_ids
+        from app.agents.speech_attempt import current_speech_attempt
+
+        attempt = current_speech_attempt()
+        if attempt:
+            attempt.observation_ids = entry_ids
+        else:
+            self._pending_observation_ids[character_id] = entry_ids
 
         return game_state
 
@@ -1197,6 +1208,7 @@ class GameFlowController:
             "speech_queue": self.session.speech_queue or [],
             "human_character_id": self.session.human_character_id,
             "turn_processing": bool(self.session.pending_speech),
+            "speech_generation": self.session.speech_generation,
             "clue_presentation": public_presentation(self.session, self.clue_stages),
             "clue_asset_preload": upcoming_presentation_assets(self.session, self.clue_stages),
             "has_all_spoken": len(self.session.speech_queue or []) == 0,

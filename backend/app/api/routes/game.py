@@ -3,6 +3,7 @@ Game API routes
 游戏相关API端点
 """
 
+from contextlib import aclosing
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -32,6 +33,16 @@ class LLMConfig(BaseModel):
         description="LLM提供商 (stepfun/deepseek/alibaba/bytedance)，为空时使用默认提供商",
     )
     model: str | None = Field(None, description="模型名称，为空时使用默认值")
+
+
+class SpeechGenerationRequest(BaseModel):
+    generation_id: str | None = Field(None, max_length=36)
+
+
+class SpeechDisplayedRequest(BaseModel):
+    generation_id: str = Field(max_length=36)
+    attempt_id: str = Field(max_length=36)
+    elapsed_ms: float = Field(ge=0, le=300000, allow_inf_nan=False)
 
 
 class GameCreateRequest(BaseModel):
@@ -160,13 +171,18 @@ async def player_speech(
         ):
             yield chunk
 
-    return StreamingResponse(generate(), media_type="text/event-stream")
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/{session_id}/ai-speech/{character_id}")
 async def ai_speech(
     session_id: str,
     character_id: str,
+    request: SpeechGenerationRequest | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -188,10 +204,81 @@ async def ai_speech(
     game_service = GameService(db)
 
     async def generate():
-        async for chunk in game_service.process_ai_speech_stream(session_id, character_id):
-            yield chunk
+        async with aclosing(
+            game_service.process_ai_speech_stream(
+                session_id,
+                character_id,
+                expected_generation_id=request.generation_id if request else None,
+            )
+        ) as stream:
+            async for chunk in stream:
+                yield chunk
 
-    return StreamingResponse(generate(), media_type="text/event-stream")
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post("/{session_id}/speech/retry")
+async def retry_speech(
+    session_id: str, request: SpeechGenerationRequest, db: AsyncSession = Depends(get_db)
+):
+    from app.db.models import GameSession
+
+    session = await db.get(GameSession, session_id)
+    generation = (session.speech_generation or {}) if session else {}
+    if not request.generation_id or generation.get("generation_id") != request.generation_id:
+        raise HTTPException(409, "该发言请求已过期")
+    service = GameService(db)
+    return StreamingResponse(
+        service.process_ai_speech_stream(
+            session_id, generation["character_id"], retry_generation_id=request.generation_id
+        ),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post("/{session_id}/speech/skip")
+async def skip_speech(
+    session_id: str, request: SpeechGenerationRequest, db: AsyncSession = Depends(get_db)
+):
+    service = GameService(db)
+    result = await service.speech_service.skip_ai(session_id, request.generation_id or "")
+    if not result.get("success"):
+        raise HTTPException(409, result.get("error", "该发言请求已过期"))
+    return await service.get_game_state(session_id)
+
+
+@router.post("/{session_id}/speech/displayed", status_code=204)
+async def speech_displayed(
+    session_id: str, request: SpeechDisplayedRequest, db: AsyncSession = Depends(get_db)
+):
+    import logging
+
+    from app.db.models import GameSession
+
+    session = await db.get(GameSession, session_id)
+    generation = (session.speech_generation or {}) if session else {}
+    if (
+        generation.get("generation_id") == request.generation_id
+        and generation.get("attempt_id") == request.attempt_id
+    ):
+        from app.services.speech_telemetry import report_speech_metric
+
+        report_speech_metric(
+            "first_display", session_id, generation, client_first_display_ms=request.elapsed_ms
+        )
+        logging.getLogger(__name__).info(
+            "Role first display session=%s generation=%s attempt=%s elapsed_ms=%s",
+            session_id,
+            request.generation_id,
+            request.attempt_id,
+            request.elapsed_ms,
+        )
+    return Response(status_code=204)
 
 
 @router.post("/{session_id}/advance")
@@ -452,7 +539,11 @@ async def stream_tts_audio(
         finally:
             await tts.close()
 
-    return StreamingResponse(generate(), media_type="text/event-stream")
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # ============== Script API ==============

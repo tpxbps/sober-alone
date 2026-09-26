@@ -35,3 +35,22 @@ async def test_only_content_addressed_clue_images_are_cached_immutably(tmp_path,
             assert "immutable" not in (await client.get(f"/scripts/s/clues/{path}")).headers.get(
                 "cache-control", ""
             )
+
+
+@pytest.mark.asyncio
+async def test_hashed_avatar_variant_is_immutable_but_original_is_not(tmp_path):
+    folder = tmp_path / "scripts/s/_variants/portrait-1234567890abcdef1234-v1"
+    folder.mkdir(parents=True)
+    (folder / "avatar-96.webp").write_bytes(b"avatar")
+    (tmp_path / "portrait.png").write_bytes(b"original")
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=ImageStaticFiles(directory=tmp_path)),
+        base_url="http://test",
+    ) as client:
+        derived = await client.get(
+            "/scripts/s/_variants/portrait-1234567890abcdef1234-v1/avatar-96.webp"
+        )
+        assert "immutable" in derived.headers["cache-control"]
+        assert "immutable" not in (await client.get("/portrait.png")).headers.get(
+            "cache-control", ""
+        )

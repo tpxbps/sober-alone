@@ -117,6 +117,14 @@ async def submit_final_vote(suspect_name: str, reasoning: str, runtime: ToolRunt
                 print("投票失败：游戏会话不存在。")
                 return "投票失败：游戏会话不存在。"
 
+            from app.game.clues import parse_clue_citations, stage_public_clues
+
+            reasoning, refs, _ = parse_clue_citations(
+                reasoning,
+                stage_public_clues("vote", game_session.revealed_clues or []),
+                strip_unknown=True,
+            )
+
             # 更新玩家投票状态
             player_state.has_voted = True
             player_state.voted_for = suspect_id
@@ -129,6 +137,7 @@ async def submit_final_vote(suspect_name: str, reasoning: str, runtime: ToolRunt
                 "suspect_id": suspect_id,
                 "suspect_name": suspect_name,
                 "reasoning": reasoning,
+                "clue_refs": refs,
             }
             game_session.votes = votes
 
@@ -141,6 +150,7 @@ async def submit_final_vote(suspect_name: str, reasoning: str, runtime: ToolRunt
                 speaker_character_id=character_id,
                 speaker_name=voter_name,
                 raw_content=f"投票给「{suspect_name}」，理由：{reasoning}",
+                clue_refs=refs,
                 timestamp=datetime.now(),
             )
             db_session.add(record)

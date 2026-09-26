@@ -103,3 +103,36 @@ def test_legacy_game_without_announcements_retains_only_saved_permission():
         clue_refs=["c01"],
     )
     assert display_records([record], session)[0]["clue_refs"] == ["c01"]
+
+
+def test_vote_and_summary_repair_preserve_vote_time_scope():
+    session = SimpleNamespace(
+        human_character_id="human",
+        revealed_clues=[
+            {"id": "c01", "summary": "门锁"},
+            {"id": "c02", "summary": "后来的线索"},
+        ],
+    )
+    records = [
+        GameRecord(record_type="system", stage="clue_analysis", clue_refs=["c01"]),
+        GameRecord(
+            record_type="vote",
+            stage="vote",
+            speaker_character_id="a",
+            raw_content="[门锁未撬][c01]，但[c02]未知",
+            clue_refs=[],
+        ),
+        GameRecord(record_type="system", stage="clue_analysis", clue_refs=["c02"]),
+        GameRecord(
+            record_type="system",
+            stage="review",
+            extra_data="vote_summary",
+            raw_content="投票：[c01]，不得补入[c02]",
+            clue_refs=[],
+        ),
+    ]
+    result = display_records(records, session)
+    assert result[1]["clue_refs"] == ["c01"]
+    assert result[3]["clue_refs"] == ["c01"]
+    assert "c02" not in result[3]["content"]
+    assert records[1].clue_refs == []

@@ -12,6 +12,7 @@ AgentPlayer - AI角色扮演智能体核心类
 7. 使用 structured output 进行反应分析
 """
 
+import asyncio
 import logging
 import time
 from collections.abc import AsyncIterator
@@ -33,6 +34,7 @@ from app.agents.game_model_paths import (
     visible_role_speech_text,
 )
 from app.agents.reaction import (
+    REACTION_MODEL_TIMEOUT_SECONDS,
     REACTION_SLOW_LOG_SECONDS,
     HumanSpeechReactionPayload,
     SpeechReaction,
@@ -486,20 +488,42 @@ submit_final_vote(suspect_name="角色全名", reasoning="1-2句投票理由")
 
         # 设置 db_session 到 contextvars (用于工具访问，不会被序列化)
         db_session = game_state.get("db_session")
-        set_db_session(db_session)
 
         # 配置记忆持久化的 thread_id
-        config = {"configurable": {"thread_id": self.thread_id}}
+        from app.agents.speech_attempt import current_speech_attempt
+
+        attempt = current_speech_attempt()
+        base_thread = game_state.get("agent_thread_id") or self.thread_id
+        self.thread_id = base_thread
+        config = {"configurable": {"thread_id": base_thread}}
+        if attempt:
+            attempt.previous_thread_id = base_thread
+            attempt.checkpointer = self._checkpointer
+            # A failed attempt never writes the accepted character's history.
+            previous = await self._agent.aget_state(config)
+            values = previous.values or {}
+            input_state = {
+                **values,
+                **input_state,
+                "messages": [*values.get("messages", []), *input_state["messages"]],
+            }
+            attempt.thread_id = f"{self.session_id}_{self.character_id}_{attempt.attempt_id}"
+            config = {"configurable": {"thread_id": attempt.thread_id}}
 
         # 使用 messages + custom stream mode
         # messages: 返回LLM的文本token
         # custom: 工具内部通过 get_stream_writer 发送的友好提示
         try:
+            set_db_session(db_session)
             async for chunk in self._agent.astream(
                 input_state, config, stream_mode=["messages", "custom"]
             ):
                 # chunk 格式: (stream_mode, data)
                 stream_mode, data = chunk
+                if attempt:
+                    attempt.check()
+                    if stream_mode == "messages" and attempt.first_event_ms is None:
+                        attempt.first_event_ms = (time.monotonic() - attempt.started) * 1000
 
                 if stream_mode == "messages":
                     # 处理LLM消息流
@@ -518,6 +542,8 @@ submit_final_vote(suspect_name="角色全名", reasoning="1-2句投票理由")
             raise
         except Exception as e:
             raise_for_inference_recovery(e)
+            if attempt:
+                raise
             print(f"Error in stream: {e}")
             yield StreamError(message=str(e))
         finally:
@@ -593,18 +619,19 @@ target 和 suspecter 只能是合法的其他角色，禁止填自己的名字�
                 if is_human:
                     prompt = prompt.replace("main_perspective 必须是字符串，", "")
                 try:
-                    result = await structured.ainvoke(
-                        [
-                            SystemMessage(
-                                content=build_reaction_system_prompt(
-                                    self.system_prompt, self.personal_script, is_human=True
-                                )
-                                if is_human
-                                else self._reaction_system_prompt
-                            ),
-                            HumanMessage(content=prompt),
-                        ]
-                    )
+                    async with asyncio.timeout(REACTION_MODEL_TIMEOUT_SECONDS):
+                        result = await structured.ainvoke(
+                            [
+                                SystemMessage(
+                                    content=build_reaction_system_prompt(
+                                        self.system_prompt, self.personal_script, is_human=True
+                                    )
+                                    if is_human
+                                    else self._reaction_system_prompt
+                                ),
+                                HumanMessage(content=prompt),
+                            ]
+                        )
                     reaction = None
                     if result and isinstance(result, schema):
                         reaction = result.to_reaction()
@@ -645,10 +672,8 @@ target 和 suspecter 只能是合法的其他角色，禁止填自己的名字�
                     raise
                 except Exception as exc:
                     raise_for_inference_recovery(exc)
-                    if (
-                        attempt == 0
-                        and settings.INFERENCE_BACKEND == "tokendance"
-                        and retryable_gateway_error(exc)
+                    if attempt == 0 and (
+                        isinstance(exc, TimeoutError) or retryable_gateway_error(exc)
                     ):
                         continue
                     logger.warning(

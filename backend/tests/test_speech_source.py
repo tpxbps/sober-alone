@@ -37,7 +37,7 @@ class ScriptedModel(BaseChatModel):
             raise httpx.ReadError("synthetic transport failure before first token")
         if self.summary:
             yield ChatGenerationChunk(message=AIMessageChunk(content="摘要秘密"))
-        elif not isinstance(messages[-1], ToolMessage):
+        elif not any(isinstance(message, ToolMessage) for message in messages[-2:]):
             yield ChatGenerationChunk(
                 message=AIMessageChunk(
                     content="",
@@ -88,6 +88,15 @@ async def test_real_graph_summary_tool_progress_and_checkpoint_keep_role_text(mo
             checkpointer=saver,
             middleware=[],
         )
+        if retry and attempt == 0:
+            with pytest.raises(httpx.ReadError):
+                async for _ in agent.astream(
+                    state,
+                    {"configurable": {"thread_id": "failed-isolated-attempt"}},
+                    stream_mode=["messages", "custom"],
+                ):
+                    pass
+            assert len(role.calls) == 1  # no hidden middleware retry
         events = [
             event
             async for event in agent.astream(

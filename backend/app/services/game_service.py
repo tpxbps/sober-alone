@@ -274,6 +274,9 @@ class GameService:
             return {"success": False, "error": "游戏会话不存在"}
 
         # 获取玩家状态
+        from app.services.speech_generation import active_generations, public_generation
+
+        generation = public_generation(game_session)
         player_states = await self._get_player_states(session_id)
 
         # 获取剧本数据以获取角色信息
@@ -287,7 +290,9 @@ class GameService:
 
         # 获取流程控制器
         flow_controller = await ensure_flow_controller(
-            session_id, self.db, resume_pending=resume_pending
+            session_id,
+            self.db,
+            resume_pending=resume_pending and session_id not in active_generations,
         )
 
         if flow_controller:
@@ -298,6 +303,7 @@ class GameService:
             state["script"] = script_info
             state["characters"] = presented_characters
             state["success"] = True
+            state["speech_generation"] = generation
             # 确保字段名与前端一致
             if "current_speaker" in state:
                 state["current_speaker_id"] = state.pop("current_speaker")
@@ -308,9 +314,11 @@ class GameService:
             await self.db.commit()
             return state
 
+        await self.db.commit()
         return {
             "success": True,
             "session_id": game_session.session_id,
+            "speech_generation": generation,
             "status": game_session.status,
             "current_stage": game_session.current_stage,
             "current_round": game_session.current_round,
@@ -362,6 +370,8 @@ class GameService:
 
         current = await self.db.get(GameSession, session_id)
         flow_controller.session = current
+        if (current.speech_generation or {}).get("status") == "failed":
+            return {"success": False, "error": "请先重试或跳过未完成的发言"}
         if presentation_pending(current):
             return {"success": False, "error": "请先查看线索并确认继续推理"}
         if current.pending_speech:
@@ -403,10 +413,15 @@ class GameService:
         async for event in self.speech_service.stream_human(session_id, content):
             yield event
 
-    async def process_ai_speech_stream(self, session_id: str, character_id: str):
+    async def process_ai_speech_stream(self, session_id: str, character_id: str, **kwargs):
         """Preserve the historical AI-speech streaming facade."""
-        async for event in self.speech_service.stream_ai(session_id, character_id):
-            yield event
+        from contextlib import aclosing
+
+        async with aclosing(
+            self.speech_service.stream_ai(session_id, character_id, **kwargs)
+        ) as stream:
+            async for event in stream:
+                yield event
 
     async def advance_stage(self, session_id: str) -> dict[str, Any]:
         from app.services.game_speech import session_lock
@@ -415,6 +430,9 @@ class GameService:
         if lock.locked():
             return {"success": False, "error": "玩家正在思考，请稍后推进流程"}
         async with lock:
+            session = await self.db.get(GameSession, session_id)
+            if session and (session.speech_generation or {}).get("status") == "failed":
+                return {"success": False, "error": "请先重试或跳过未完成的发言"}
             return await self._advance_stage_locked(session_id)
 
     async def acknowledge_clue_presentation(self, session_id: str, presentation_id: str):

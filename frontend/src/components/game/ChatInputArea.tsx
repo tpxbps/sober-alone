@@ -1,3 +1,4 @@
+import { useGameStore } from "@/stores/gameStore";
 import { useState, useEffect, useRef, useCallback, memo } from "react";
 import { Send, Loader2, ArrowRight, Plus, X, CircleHelp } from "lucide-react";
 import { speechClues } from "@/lib/clueScope";
@@ -59,6 +60,7 @@ export const ChatInputArea = memo(function ChatInputArea({
   onPauseAutoSpeakChange,
   onHumanSpeechCompleted,
 }: ChatInputAreaProps) {
+  const recoveryRequired = useGameStore(state => state.speechGeneration?.status === 'failed' || !!state.speechConnectionError);
   const [input, setInput] = useState("");
   const [draftClues, setDraftClues] = useState<PublicClue[] | null>(null);
   const availableClues = draftClues ?? speechClues(stage, publicClues);
@@ -91,6 +93,7 @@ export const ChatInputArea = memo(function ChatInputArea({
 
   // Handle end speech - submit all pending lines
   const handleEndSpeech = useCallback(() => {
+    if (recoveryRequired) return;
     const allLines = [...pendingLines];
     if (input.trim()) {
       allLines.push(input.trim());
@@ -115,6 +118,7 @@ export const ChatInputArea = memo(function ChatInputArea({
     setPendingLines([]);
     clearInput();
   }, [
+    recoveryRequired,
     input,
     pendingLines,
     stage,
@@ -144,7 +148,7 @@ export const ChatInputArea = memo(function ChatInputArea({
             </p>
             <button
               onClick={onEndGame}
-              disabled={isAdvancingStage}
+              disabled={isAdvancingStage || recoveryRequired}
               className="px-8 py-3 rounded-xl bg-primary text-primary-foreground font-medium
                        hover:bg-primary/90 transition-colors flex items-center gap-2 mx-auto
                        disabled:opacity-50 disabled:cursor-not-allowed"
@@ -230,7 +234,7 @@ export const ChatInputArea = memo(function ChatInputArea({
                 <button
                   type="button"
                   onClick={onAdvanceStage}
-                  disabled={isAdvancingStage}
+                  disabled={isAdvancingStage || recoveryRequired}
                   className="px-6 py-2.5 rounded-xl bg-primary text-primary-foreground font-medium
                            hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed
                            transition-colors flex items-center gap-2"
@@ -254,11 +258,11 @@ export const ChatInputArea = memo(function ChatInputArea({
                       className="group relative outline-none">
                       <CircleHelp className="h-3.5 w-3.5 text-muted-foreground/60" />
                       <span id="pause-speech-help" role="tooltip" className="pointer-events-none absolute bottom-full left-0 z-50 mb-2 hidden w-52 rounded-lg border border-border bg-popover p-2 text-xs leading-relaxed shadow-lg group-hover:block group-focus:block">
-                        开启后AI角色将暂时停止自主发言。当前回应会先完成，发送你的发言后自动恢复讨论。
+                        开启后AI角色将暂时停止自主发言。
                       </span>
                     </span>
                     <span role="status" className="hidden text-[11px] text-primary/80 sm:inline">
-                      {pauseAutoSpeak && (isStreaming || isProcessingReactions ? "当前回应结束后暂停" : "AI 已暂停，慢慢写")}
+                      {pauseAutoSpeak && !isStreaming && !isProcessingReactions && "AI 已暂停"}
                     </span>
                   </div> : undefined}
                   characters={characters}
@@ -290,7 +294,7 @@ export const ChatInputArea = memo(function ChatInputArea({
                 <button
                   type="submit"
                   disabled={
-                    !!pendingHumanSpeech ||
+                    recoveryRequired || !!pendingHumanSpeech ||
                     !input.trim() ||
                     isStreaming ||
                     isProcessingReactions
@@ -305,9 +309,10 @@ export const ChatInputArea = memo(function ChatInputArea({
                 </button>
                 <button
                   type="button"
+                  aria-label="完成发言"
                   onClick={handleEndSpeech}
                   disabled={
-                    !!pendingHumanSpeech ||
+                    recoveryRequired || !!pendingHumanSpeech ||
                     (pendingLines.length === 0 && !input.trim()) ||
                     (stage === "free_discussion" &&
                       humanRemainingSpeechCount !== undefined &&
@@ -335,7 +340,7 @@ export const ChatInputArea = memo(function ChatInputArea({
           <div className="flex justify-center">
             <button
               onClick={onAdvanceStage}
-              disabled={isAdvancingStage}
+              disabled={isAdvancingStage || recoveryRequired}
               className="px-8 py-4 rounded-xl bg-primary text-primary-foreground font-medium
                          hover:bg-primary/90 transition-colors flex items-center gap-2 glow
                          disabled:opacity-50 disabled:cursor-not-allowed"

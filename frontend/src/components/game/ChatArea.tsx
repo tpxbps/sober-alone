@@ -8,10 +8,10 @@ import type {
   AgentLlmInfo,
   PublicClue,
 } from "@/types/game";
-import { Markdown } from "@/components/ui/Markdown";
 import { GameMessageMarkdown } from "@/components/ui/GameMessageMarkdown";
 import { StreamingBubble } from "@/components/game/StreamingBubble";
 import { GameFeedback } from "./GameFeedback";
+import { SpeechRecovery } from "./SpeechRecovery";
 import { ChatInputArea } from "@/components/game/ChatInputArea";
 import { SpeakerIcon, type SpeakerState } from "@/components/ui/SpeakerIcon";
 import { AudioSpeedButton } from "@/components/ui/AudioSpeedButton";
@@ -482,9 +482,9 @@ export function ChatArea({
                           </span>
                         </div>
                       )}
-                      <Markdown className="text-sm text-foreground/90 leading-relaxed">
+                      <GameMessageMarkdown characters={characters} publicClues={publicClues} allowedCitationIds={record.clue_refs ?? []} className="text-sm text-foreground/90 leading-relaxed">
                         {record.content}
-                      </Markdown>
+                      </GameMessageMarkdown>
                     </div>
                   </motion.div>
                 );
@@ -587,7 +587,7 @@ export function ChatArea({
           </AnimatePresence>
 
           {/* Streaming message - isolated component subscribes to store directly */}
-          <StreamingBubble />
+          <StreamingBubble models={models} />
 
           {/* Pending human message - shown when queued during AI speech */}
           {pendingHumanSpeech && (
@@ -643,6 +643,7 @@ export function ChatArea({
       </div>
 
       {/* Input Area */}
+      <SpeechRecovery />
       {stage === "review" && records.some((record) => record.stage === "review" && !record.speaker_id) && (
         <div className="px-4 pt-3 max-h-[45vh] overflow-y-auto"><GameFeedback /></div>
       )}

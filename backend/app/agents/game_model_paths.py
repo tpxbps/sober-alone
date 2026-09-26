@@ -11,7 +11,6 @@ from app.agents.stage_policy import StagePolicyMiddleware
 from app.agents.state import GameAgentState
 from app.agents.tools import get_tools
 from app.core.config import settings
-from app.core.inference import model_retry_middleware, tool_retry_middleware
 from app.core.llm_factory import create_llm
 from app.core.model_registry import get_model_spec
 
@@ -34,7 +33,8 @@ def create_game_model(
         timeout=timeout
         if timeout is not None
         else (90 if purpose == "speech" else REACTION_MODEL_TIMEOUT_SECONDS),
-        max_retries=max_retries if max_retries is not None else (2 if purpose == "speech" else 1),
+        # Gameplay supervisors own the entire attempt budget, including retries.
+        max_retries=max_retries if max_retries is not None else 0,
         disable_thinking=not qwen_speech,
     )
     if qwen_speech:
@@ -75,8 +75,6 @@ def build_role_agent(
                 trigger=("tokens", SUMMARY_TRIGGER_TOKENS),
                 keep=("messages", 20),
             ),
-            model_retry_middleware(),
-            tool_retry_middleware(),
             *middleware,
             StagePolicyMiddleware(),
         ],

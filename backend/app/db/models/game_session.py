@@ -90,6 +90,7 @@ class GameSession(Base):
 
     # 投票结果: {"voter_id": {"suspect_id": xxx, "reasoning": xxx}}
     votes: Mapped[dict] = mapped_column(JSON, default=dict)
+    speech_generation: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # 最终投票结果
     final_suspect_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
@@ -134,6 +135,7 @@ class GameSession(Base):
             "human_character_id": self.human_character_id,
             "speech_queue": self.speech_queue,
             "turn_processing": bool(self.pending_speech),
+            "speech_generation": self.speech_generation,
             "current_speaker": self.current_speaker,
             "round_speakers": self.round_speakers,
             "revealed_clues": self.revealed_clues,

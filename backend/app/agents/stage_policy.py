@@ -1,7 +1,7 @@
 """Per-invocation knowledge and tool boundaries, including restored agents."""
 
 from langchain.agents.middleware import AgentMiddleware
-from langchain.messages import SystemMessage
+from langchain.messages import HumanMessage, SystemMessage
 
 from app.game.clues import (
     build_agent_clue_context,
@@ -36,22 +36,18 @@ def stage_instructions(state):
         example = clues[0]["id"]
         evidence_ids = ",".join(clue["id"] for clue in clues[:2])
         parts.append(build_agent_clue_context(clues))
-        parts.append(f"""【发言中的两种引用语法】
-直接引用（点名）：[{example}]。这个标签会显示线索名称。例：我想再核实一下[{example}]。
-关联引用（附证据）：[推理原文][{evidence_ids}]。第一组括号圈定被证据支持的原话，第二组括号给出依据 ID。
-当你用线索支持一个事实或推理句，而不是点名线索名称时，必须使用关联引用，把该句完整地包在第一组方括号里。多个依据只在第二组括号内用英文逗号分隔。
-只要本次发言包含基于带 ID 线索条目的判断，至少把其中一个核心判断写成关联引用；仅在句首或句末点名几条线索不算完成这项要求。仅依据无 ID 的轮次说明时，直接说明来源，不强行关联其他条目。即使玩家只是让你回应观点、没有要求引用，或者旧消息都只用了直接标签，也遵守这条规则。
-
-完整发言格式示例：
-我想再核实一下[{example}]。[这些记录之间的联系，还需要更多解释][{evidence_ids}]。
-
-关联引用的第一个字符是左方括号 [，它位于推理文字的第一个字之前。先写 [，再写完整推理，再写 ][，再写依据 ID，最后写 ]。
-示例只演示格式；请用本次实际推理与确实支持它的已公开 ID 替换。不要凭空增加引用，不要在引用外包反引号，不要另写参考文献列表。机器 ID 不是线索名称。记忆不清时先调用 recall_public_clues 核对。
-引用必须保持单层，严格遵守以下三条：
-1. ID 只能出现在直接标签或关联引用的第二组括号中，正文和推理原文中绝不写裸 ID。点名请写“[{example}]那条记录”，不能写“{example}那条记录”。
-2. 第一组括号里只写自然语言推理，绝不能再嵌入线索标签或另一组关联引用。想同时点名和解释时，先在括号外写直接标签，再另写关联引用。
-3. 一段推理后只能紧接一组依据，所有 ID 合并在这一组内用英文逗号分隔；不要写成“[推理][第一个ID][第二个ID]”。连续直接标签只用于单独点名多条材料。
-输出前静默检查：没有裸 ID，没有嵌套方括号，每段推理只有一组依据，所有 ID 都属于当前已公开列表。不要把检查过程写出来。未知 ID 即使出现在历史中，也不能在道歉、反驳或解释时照抄；直接说“那条未公开的线索”。
+        fact = str(clues[0].get("content") or clues[0].get("summary") or "").split("\n")[0]
+        fact = fact.split("。")[0][:100].replace("[", "（").replace("]", "）")
+        parts.append(f"""【本次最终发言的引用格式｜工具调用后仍须遵守】
+有证据的事实或推理句写成 [完整原话][ID]；多项依据写成 [完整原话][ID,ID]。
+只要本次发言包含基于带 ID 线索条目的判断，至少把其中一个核心判断写成关联引用。
+仅点名一条材料时才用 [{example}]；不要把句末几个直接标签当作关联引用。
+例如，直接点名：我想核实一下[{example}]。
+例如，根据当前已公开材料附证据：[{fact}][{example}]。
+多依据格式为 [你自己的完整推理][{evidence_ids}]，只有这些材料确实支持该句时才能合并使用。
+先输出左方括号 [，再写完整原话，再输出 ][ID]；不要先写完原话才想起补标签。
+旧消息的格式不是模板。第一组括号只放自然语言，不嵌套标签、不写裸 ID；第二组只放已公开 ID，用英文逗号分隔，且仅有一组。
+不要用反引号包裹引用，不写参考文献列表，不输出格式检查过程。无 ID 的轮次说明直接说明来源，不编造证据引用。
 """)
     if stage == "clue_analysis":
         parts.append("可调用 update_role_reaction 更新心理反应，完成工具调用后再发言。")
@@ -62,6 +58,9 @@ def stage_instructions(state):
 
 class StagePolicyMiddleware(AgentMiddleware):
     def prepare(self, request):
+        from app.agents.speech_attempt import current_speech_attempt
+
+        current_speech_attempt()  # Reject late model calls from cancelled attempts.
         allowed = available_tool_names(request.state)
         instructions = stage_instructions(request.state)
         clues = stage_public_clues(
@@ -85,9 +84,22 @@ class StagePolicyMiddleware(AgentMiddleware):
             return message.model_copy(update={"content": content})
 
         base = clean(request.system_message.text) if request.system_message else ""
+        messages = [clean_message(message) for message in request.messages]
+        if clues:
+            # This is invocation-local guidance, not a new turn in saved memory.
+            # Place it after tool results too, where the final response is decided.
+            messages.append(
+                HumanMessage(
+                    content=(
+                        "本轮最终发言：先给出一句有公开证据支持的事实或推理，"
+                        "用 [这句完整原话][对应ID] 写出来，再继续讨论。"
+                        "只引用确实支持该句的已公开材料；没有依据时直接说明，不编造引用。"
+                    )
+                )
+            )
         return request.override(
             tools=[tool for tool in request.tools if tool.name in allowed],
-            messages=[clean_message(message) for message in request.messages],
+            messages=messages,
             system_message=SystemMessage(
                 content=base + ("\n\n" + instructions if instructions else "")
             ),

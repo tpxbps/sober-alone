@@ -125,7 +125,8 @@ export interface GameSessionState {
 
 // Streaming message types
 export interface StreamingMessage {
-  type: 'token' | 'complete' | 'done' | 'error' | 'progress' | 'tool_call' | 'tool_result' | 'thinking' | 'thinking_end' | 'speech_done' | 'reactions_done' | 'audio_delta' | 'audio_done';
+  type: 'token' | 'complete' | 'done' | 'error' | 'progress' | 'tool_call' | 'tool_result' | 'thinking' | 'thinking_end' | 'speech_done' | 'reactions_done' | 'audio_delta' | 'audio_done' | 'heartbeat' | 'speech_status';
+  generation?: SpeechGeneration;
   character_id?: string;
   character_name?: string;
   content?: string;
@@ -136,6 +137,20 @@ export interface StreamingMessage {
   stage_complete?: boolean;
   audio?: string;    // base64 encoded audio data (for audio_delta)
   duration?: number; // audio duration in seconds (for audio_delta)
+}
+
+export interface SpeechGeneration {
+  generation_id: string;
+  attempt_id: string;
+  character_id: string;
+  stage: GameStage;
+  round: number;
+  status: 'generating' | 'streaming' | 'retrying' | 'failed' | 'completed' | 'skipped';
+  attempt: number;
+  started_at: string;
+  deadline_at: string;
+  reason?: string | null;
+  partial_content?: string;
 }
 
 // AI model option
@@ -181,6 +196,7 @@ export interface StageTransition {
 
 // Game state response
 export interface GameStateResponse {
+  speech_generation?: SpeechGeneration | null;
   turn_processing?: boolean;
   success: boolean;
   session_id: string;
@@ -214,6 +230,7 @@ export interface GameStateResponse {
     occupation?: string;
     profile?: string;
     avatar_url?: string;
+    avatar_variants?: ImageVariant[];
     portrait_url?: string;
     is_human?: boolean;
     character_script?: string;
@@ -238,6 +255,8 @@ export interface AgentLlmInfo {
 
 // Frontend game store state
 export interface GameState {
+  speechGeneration: SpeechGeneration | null;
+  speechConnectionError: string;
   // Session info
   sessionId: string | null;
   scriptId: string;

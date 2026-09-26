@@ -3,7 +3,7 @@
 import asyncio
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.agents.role_state import apply_beliefs, normalize_beliefs, observations, put_observation
 from app.core.inference import InferenceRecoveryError, raise_for_inference_recovery
@@ -35,12 +35,27 @@ async def process_turn(
     db_session=None,
     skip_reactions=False,
     consume_human_context=False,
+    speech_attempt=None,
+    skipped=False,
 ):
     db = db_session
     if db is None:
         return {"success": False, "error": "数据库连接不可用"}
     session = await db.get(GameSession, controller.session.session_id)
     controller.session = session
+    if speech_attempt:
+        speech_attempt.check()
+        generation = session.speech_generation or {}
+        if (
+            generation.get("generation_id") != speech_attempt.generation_id
+            or generation.get("attempt_id") != speech_attempt.attempt_id
+            or generation.get("status")
+            not in ({"failed"} if skipped else {"generating", "streaming"})
+            or session.current_speaker != character_id
+            or generation.get("stage") != session.current_stage
+            or generation.get("round") != session.current_round
+        ):
+            return {"success": False, "error": "该发言请求已过期"}
     if presentation_pending(session):
         return {"success": False, "error": "请先查看线索并确认继续推理"}
     if session.pending_speech:
@@ -57,9 +72,34 @@ async def process_turn(
         return {"success": False, "error": "发言不能为空"}
     players = await players_for(controller, db)
     names = role_names(controller)
+    if speech_attempt:
+        speech_attempt.check()
+        # Claim against the database, not the ORM identity map. This fences a
+        # late completion even when another request replaced its attempt.
+        claim = await db.execute(
+            update(GameSession)
+            .where(
+                GameSession.session_id == session.session_id,
+                GameSession.current_speaker == character_id,
+                GameSession.current_stage == generation.get("stage"),
+                GameSession.current_round == generation.get("round"),
+                GameSession.speech_generation["generation_id"].as_string()
+                == speech_attempt.generation_id,
+                GameSession.speech_generation["attempt_id"].as_string()
+                == speech_attempt.attempt_id,
+                GameSession.speech_generation["status"]
+                .as_string()
+                .in_({"failed"} if skipped else {"generating", "streaming"}),
+            )
+            .values(speech_generation={**generation, "status": "committing"})
+            .execution_options(synchronize_session=False)
+        )
+        if claim.rowcount != 1:
+            await db.rollback()
+            return {"success": False, "error": "该发言请求已过期"}
     record = GameRecord(
         session_id=session.session_id,
-        record_type="speech",
+        record_type="system" if skipped else "speech",
         stage=session.current_stage,
         round_num=session.current_round,
         speaker_character_id=character_id,
@@ -70,15 +110,22 @@ async def process_turn(
     )
     db.add(record)
     await db.flush()
-    injected = getattr(controller, "_pending_observation_ids", {}).get(character_id, set())
+    injected = (
+        speech_attempt.observation_ids
+        if speech_attempt
+        else getattr(controller, "_pending_observation_ids", {}).get(character_id, set())
+    )
     for player in players:
         normalize_beliefs(player, names)
         if player.character_id == character_id:
+            if speech_attempt and not skipped:
+                for reaction_update in speech_attempt.role_updates:
+                    apply_beliefs(player, reaction_update, names)
             player.wait_rounds = 0
             player.has_spoken_this_round = True
-            player.total_speeches = (player.total_speeches or 0) + 1
+            player.total_speeches = (player.total_speeches or 0) + (0 if skipped else 1)
             player.speeches_this_round = (player.speeches_this_round or 0) + 1
-            player.total_words = (player.total_words or 0) + len(text)
+            player.total_words = (player.total_words or 0) + (0 if skipped else len(text))
             player.last_speech_at = datetime.now()
             if session.current_stage == "free_discussion":
                 player.remaining_speech_count = max(0, (player.remaining_speech_count or 0) - 1)
@@ -117,6 +164,18 @@ async def process_turn(
         "attempts": {},
     }
     session.current_speaker = None
+    if speech_attempt:
+        session.speech_generation = {
+            **session.speech_generation,
+            "status": "skipped" if skipped else "completed",
+            "record_id": record.id,
+            "partial_content": "",
+        }
+        if not skipped and speech_attempt.thread_id:
+            session.player_threads = {
+                **(session.player_threads or {}),
+                character_id: speech_attempt.thread_id,
+            }
     # This commit includes the speech, counters, consume cursor and durable pending work.
     await db.commit()
     controller.scheduler.record_speech(character_id)

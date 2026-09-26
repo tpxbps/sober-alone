@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import func, select
@@ -51,6 +52,10 @@ async def test_checkpoint_cleanup_uses_snapshot_character_ids_without_live_manag
         async def adelete_thread(self, thread_id):
             self.deleted.append(thread_id)
 
+        async def alist(self, _config):
+            for thread in ("session_ai-one_orphan", "other_ai-one"):
+                yield SimpleNamespace(config={"configurable": {"thread_id": thread}})
+
     checkpointer = Checkpointer()
     set_game_checkpointer(checkpointer)
     try:
@@ -60,6 +65,7 @@ async def test_checkpoint_cleanup_uses_snapshot_character_ids_without_live_manag
 
     assert checkpointer.deleted == [
         "session_ai-one",
+        "session_ai-one_orphan",
         "session_ai-two",
         "session_human",
     ]

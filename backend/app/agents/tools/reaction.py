@@ -34,6 +34,21 @@ async def update_role_reaction(
                 "suspected_by_changes": suspected_by_changes or [],
             }
         )
+        from app.agents.speech_attempt import current_speech_attempt
+
+        attempt = current_speech_attempt()
+        if attempt:
+            from copy import deepcopy
+            from types import SimpleNamespace
+
+            # Validate names and self-targets now; defer all database writes.
+            staged = SimpleNamespace(
+                character_id=state["character_id"], suspicion_reasons={}, suspected_by={}
+            )
+            reaction = update.to_reaction()
+            apply_beliefs(staged, reaction, state.get("character_name_map", {}))
+            attempt.role_updates.append(deepcopy(reaction))
+            return "【本次发言的心理状态更新】" + reaction.model_dump_json()
         player = await db.scalar(
             select(PlayerState).where(
                 PlayerState.session_id == state["session_id"],

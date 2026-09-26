@@ -112,6 +112,7 @@ async def test_finalization_persists_one_selected_branch_and_retries_are_idempot
         )
         await db.commit()
         session = SimpleNamespace(
+            revealed_clues=[],
             current_stage="vote",
             current_round=1,
             status="voting",

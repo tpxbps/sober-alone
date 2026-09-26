@@ -21,7 +21,12 @@ describe('adaptGameState', () => {
         estimated_duration: 25,
         is_ai_generated: true,
       },
-      characters: [{ character_id: 'human', name: '林岚', is_human: true }],
+      characters: [{ character_id: 'human', name: '林岚', is_human: true,
+        avatar_url: '/original.png', avatar_variants: [
+          { url: '/portrait.webp', width: 768, height: 768 },
+          { url: '/avatar.webp', width: 96, height: 96 },
+        ],
+      }],
     }
 
     const patch = adaptGameState(response)
@@ -32,5 +37,8 @@ describe('adaptGameState', () => {
     expect(patch.humanCharacterId).toBe('human')
     expect(patch.characters[0].gender).toBe('未知')
     expect(response.characters[0]).not.toHaveProperty('gender')
+    expect(patch.characters[0].avatar_url).toBe('/avatar.webp')
+    expect(patch.characters[0].portrait_url).toBe('/portrait.webp')
+    expect(response.characters[0].avatar_url).toBe('/original.png')
   })
 })

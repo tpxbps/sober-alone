@@ -125,6 +125,15 @@ class VotingService:
                 }
                 game_session.votes = votes
 
+            from app.game.clues import parse_clue_citations, stage_public_clues
+
+            _, refs, _ = parse_clue_citations(
+                reasoning,
+                stage_public_clues("vote", game_session.revealed_clues or [])
+                if game_session
+                else [],
+                strip_unknown=False,
+            )
             # 记录投票行为
             vote_content = f"投票给「{suspect_name}」"
             if reasoning:
@@ -141,6 +150,7 @@ class VotingService:
                 speaker_character_id=human_character_id,
                 speaker_name=voter_name,
                 raw_content=vote_content,
+                clue_refs=refs,
                 timestamp=datetime.now(),
             )
             self.db.add(record)
@@ -452,12 +462,21 @@ class VotingService:
         # 4. 构建复盘消息
         review_message = self.build_review_message(vote_results, flow_controller.script_data)
 
+        from app.game.clues import parse_clue_citations, stage_public_clues
+
+        review_message, review_refs, _ = parse_clue_citations(
+            review_message,
+            stage_public_clues("vote", flow_controller.session.revealed_clues or []),
+            strip_unknown=False,
+        )
         # 将复盘消息持久化到数据库，确保刷新后仍可显示
         review_record = GameRecord(
             session_id=session_id,
             record_type="system",
             stage="review",
             raw_content=review_message,
+            clue_refs=review_refs,
+            extra_data="vote_summary",
             timestamp=datetime.now(),
         )
         self.db.add(review_record)

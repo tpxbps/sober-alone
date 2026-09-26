@@ -157,7 +157,7 @@ export const gameApi = {
   getGameState: async (sessionId: string): Promise<GameStateResponse> => {
     const response = await api.get(`/game/${sessionId}/state`);
     void warmCluePresentation(response.data.clue_presentation);
-    return { ...response.data, characters: (response.data.characters || []).map(characterImages) };
+    return response.data;
   },
 
   // Advance to next stage
@@ -208,32 +208,50 @@ export const speechApi = {
   },
 
   // AI speech stream (SSE)
-  aiSpeakStream: async (sessionId: string, characterId: string, signal?: AbortSignal): Promise<Response> => {
+  aiSpeakStream: async (sessionId: string, characterId: string, signal?: AbortSignal, generationId?: string, retry = false): Promise<Response> => {
+    const headerController = new AbortController();
+    const timer = setTimeout(() => headerController.abort(new Error('连接暂时中断，请重试。')), 15000);
+    try {
     const response = await fetch(
-      `${API_BASE_URL}/game/${sessionId}/ai-speech/${characterId}`,
+      `${API_BASE_URL}/game/${sessionId}/${retry ? "speech/retry" : `ai-speech/${characterId}`}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        signal,
+        body: JSON.stringify({ generation_id: generationId }),
+        signal: signal ? AbortSignal.any([signal, headerController.signal]) : headerController.signal,
       }
     );
     return response;
+    } finally { clearTimeout(timer); }
   },
 
   // Process SSE stream
   processSSEStream: async function* (
     response: Response,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    idleMs = 0,
   ): AsyncGenerator<StreamingMessage> {
+    if (!response.ok) throw new Error(`发言请求失败 (${response.status})`);
     const reader = response.body?.getReader();
     if (!reader) throw new Error('Response body is not readable');
 
     const decoder = new TextDecoder();
     let buffer = '';
-
+    let lastEvent = Date.now();
+    try {
     while (true) {
       if (signal?.aborted) break;
-      const { done, value } = await reader.read();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let packet: ReadableStreamReadResult<Uint8Array>;
+      try {
+        packet = idleMs ? await Promise.race([
+          reader.read(),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error('连接暂时中断，请重试。')), Math.max(0, idleMs - (Date.now() - lastEvent)));
+          }),
+        ]) : await reader.read();
+      } finally { if (timer) clearTimeout(timer); }
+      const { done, value } = packet;
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
@@ -244,12 +262,17 @@ export const speechApi = {
         if (line.startsWith('data: ')) {
           try {
             const data = JSON.parse(line.slice(6));
+            lastEvent = Date.now();
             yield data;
           } catch {
             // Skip invalid JSON
           }
         }
       }
+    }
+    } finally {
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
     }
   },
 };

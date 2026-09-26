@@ -157,7 +157,9 @@ export function CharacterPanel({
               {/* Status Icons */}
               <div className="flex items-center gap-1.5 shrink-0">
                 {/* Has spoken indicator */}
-                {playerState?.has_spoken_this_round ? (
+                {(stage === "free_discussion"
+                  ? (playerState?.remaining_speech_count ?? 1) <= 0
+                  : playerState?.has_spoken_this_round) ? (
                   <MicOff className="w-4 h-4 text-muted-foreground" />
                 ) : (
                   <Mic className="w-4 h-4 text-primary/50" />

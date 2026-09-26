@@ -23,9 +23,17 @@ async def delete_game_checkpoints(
     checkpointer = get_game_checkpointer()
     if checkpointer is None:
         return
+    # Include isolated attempts, including orphaned attempts after a process restart.
+    isolated = set()
+    async for item in checkpointer.alist(None):
+        thread = item.config.get("configurable", {}).get("thread_id", "")
+        if thread.startswith(f"{session_id}_"):
+            isolated.add(thread)
     # Each AI has a distinct thread id; SQLite deletion is prefix-unaware.
     # The per-character ids are removed by callers that still have the manager.
-    thread_ids = {f"{session_id}_{character_id}" for character_id in (character_ids or [])}
+    thread_ids = isolated | {
+        f"{session_id}_{character_id}" for character_id in (character_ids or [])
+    }
     manager = None
     try:
         from app.agents.agent_manager import peek_agent_manager

@@ -1,5 +1,4 @@
 import json
-from types import SimpleNamespace
 
 import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -7,12 +6,17 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import Field
+from sqlalchemy import select
+from test_state_reliability import game as base_game
 
 from app.agents.agent_prompts import build_role_system_prompt
 from app.agents.game_model_paths import build_role_agent
+from app.db.models import GameRecord
 from app.game.citation_stream import CitationStreamFilter
 from app.game.clues import parse_clue_citations
 from app.services.game_speech import GameSpeechService
+
+game = base_game
 
 CLUES = [{"id": "c07", "summary": "门锁", "content": "门锁没有撬动痕迹", "stage": 1}]
 
@@ -76,8 +80,9 @@ async def test_actual_model_payload_is_stage_scoped_even_after_checkpoint_restor
     messages, tools = model.calls[-1]
     combined = "\n".join(str(message.content) for message in messages)
     assert "[c07]" in combined and "门锁没有撬动痕迹" in combined
-    assert "直接引用（点名）" in combined
-    assert "关联引用（附证据）：[推理原文][c07,c08]" in combined
+    assert "例如，直接点名" in combined
+    assert "[你自己的完整推理][c07,c08]" in combined
+    assert "[门锁没有撬动痕迹][c07]" in combined
     assert {tool.name for tool in tools} == {"recall_public_clues", "update_role_reaction"}
     assert "[c01]" not in combined
 
@@ -121,30 +126,30 @@ def test_stream_filter_does_not_hold_prose_or_unbounded_brackets():
 
 
 @pytest.mark.asyncio
-async def test_intro_sse_and_persisted_content_use_the_same_empty_permission_set():
-    stored = []
+async def test_intro_sse_and_persisted_content_use_the_same_empty_permission_set(game):
+    db, controller = game
+    controller.session.current_stage = "intro"
+    controller.session.current_speaker = "a"
+    controller.session.revealed_clues = CLUES
+    await db.commit()
 
-    class Controller:
-        session = SimpleNamespace(current_stage="intro", revealed_clues=CLUES)
+    async def generate(*_):
+        for text in ["我是馆长。", "[c", "07]", "我负责保管钥匙。"]:
+            yield {"type": "token", "text": text}
 
-        async def generate_ai_speech(self, *_args):
-            for text in ["我是馆长。", "[c", "07]", "我负责保管钥匙。"]:
-                yield {"type": "token", "text": text}
+    controller.generate_ai_speech = generate
 
-        async def process_speech(self, **kwargs):
-            stored.append(kwargs["content"])
-            return {"next_speaker": "human"}
-
-    async def ensure(*_args):
-        return Controller()
+    async def ensure(*_):
+        return controller
 
     frames = [
         json.loads(frame.removeprefix("data: "))
-        async for frame in GameSpeechService(object(), ensure).stream_ai("scope", "ai")
+        async for frame in GameSpeechService(db, ensure).stream_ai("g", "a")
     ]
     text = "".join(frame["text"] for frame in frames if frame["type"] == "token")
     assert text == "我是馆长。我负责保管钥匙。"
-    assert stored == [text]
+    stored = await db.scalar(select(GameRecord).where(GameRecord.record_type == "speech"))
+    assert stored.raw_content == text and stored.clue_refs == []
     assert [frame["type"] for frame in frames][-2:] == ["speech_done", "done"]
 
 

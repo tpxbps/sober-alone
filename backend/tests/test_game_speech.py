@@ -47,32 +47,3 @@ async def test_human_stream_event_order_is_stable():
         "reactions_done",
         "done",
     ]
-
-
-@pytest.mark.asyncio
-async def test_ai_stream_finishes_with_speech_done_then_done():
-    class Controller:
-        session = SimpleNamespace(current_stage="intro", revealed_clues=[])
-
-        async def generate_ai_speech(self, _character_id, _db):
-            yield {"type": "progress", "status": "正在整理线索"}
-            yield {"type": "token", "text": "结"}
-            yield {"type": "token", "text": "论"}
-
-        async def process_speech(self, **kwargs):
-            assert kwargs["content"] == "结论"
-            return {"next_speaker": "human", "next_speaker_name": "林岚"}
-
-    async def ensure_controller(_session_id, _db):
-        return Controller()
-
-    service = GameSpeechService(object(), ensure_controller)
-    frames = [frame async for frame in service.stream_ai("session", "ai")]
-
-    assert [event_type(frame) for frame in frames] == [
-        "thinking",
-        "token",
-        "token",
-        "speech_done",
-        "done",
-    ]

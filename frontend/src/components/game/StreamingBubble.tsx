@@ -1,4 +1,6 @@
 import { useRef, useEffect, useCallback } from "react";
+import { modelDisplayName } from "@/lib/capabilityAdapter";
+import type { SystemCapabilities } from "@/types/capabilities";
 import { motion, AnimatePresence } from "framer-motion";
 import { Loader2 } from "lucide-react";
 import { useGameStore } from "@/stores/gameStore";
@@ -12,7 +14,7 @@ import { GameMessageMarkdown } from "@/components/ui/GameMessageMarkdown";
  * 这样 streamingContent 的每次更新只会重渲染这一个组件，
  * 不会导致 ChatArea 及其子组件（records 列表、输入框等）重渲染。
  */
-export function StreamingBubble() {
+export function StreamingBubble({ models }: { models: SystemCapabilities['models'] }) {
   // 使用 selector 精确订阅需要的字段
   const isStreaming = useGameStore((s) => s.isStreaming);
   const streamingContent = useGameStore((s) => s.streamingContent);
@@ -102,7 +104,7 @@ export function StreamingBubble() {
 
   const getModelDisplayName = (model: string | undefined | null) => {
     if (!model) return "";
-    return model;
+    return modelDisplayName(model, models);
   };
 
   return (

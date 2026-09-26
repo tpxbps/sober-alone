@@ -1,4 +1,5 @@
 import type { Character, GameState, GameStateResponse, Script } from '@/types/game'
+import { characterImages } from './characterImages'
 
 export type GameStatePatch = Pick<
   GameState,
@@ -19,6 +20,7 @@ export type GameStatePatch = Pick<
   | 'publicClues'
   | 'cluePresentation'
   | 'clueAssetPreload'
+  | 'speechGeneration'
 > & { isProcessingReactions: boolean }
 
 export function adaptGameState(state: GameStateResponse): GameStatePatch {
@@ -29,7 +31,7 @@ export function adaptGameState(state: GameStateResponse): GameStatePatch {
     occupation: character.occupation || '',
     profile: character.profile || '',
     avatar_url: character.avatar_url || '',
-  }))
+  })).map(characterImages)
   const humanCharacter = state.characters?.find((character) => character.is_human)
   const humanCharacterId = state.human_character_id || humanCharacter?.character_id || null
   const script: Script | null = state.script
@@ -50,7 +52,9 @@ export function adaptGameState(state: GameStateResponse): GameStatePatch {
     : null
 
   return {
-    isProcessingReactions: Boolean(state.turn_processing),    status: state.status,
+    speechGeneration: state.speech_generation ?? null,
+    isProcessingReactions: Boolean(state.turn_processing),
+    status: state.status,
     stage: state.current_stage,
     currentRound: state.current_round,
     playerStates: state.player_states || [],

@@ -145,7 +145,9 @@ test('连续镜头保留所有物证，暂停冻结运动，结尾仍可读正�
 test('暂停、跳至结尾、确认失败重试、刷新与多标签页恢复', async ({ page, context }) => {
   await images(page);
   let acknowledged = false, acknowledgements = 0, aiRequests = 0;
-  const characters = [{ character_id: 'human', name: '真人', character_script: '资料', is_human: true }, { character_id: 'ai', name: '甲', is_human: false }];
+  let originalRequests = 0;
+  await page.route('**/avatar-original.png', route => { originalRequests++; return route.abort(); });
+  const characters = [{ character_id: 'human', name: '真人', character_script: '资料', is_human: true, avatar_url: '/avatar-original.png', avatar_variants: [{ url: '/duxing_icon.png?thumbnail', width: 96, height: 96 }] }, { character_id: 'ai', name: '甲', is_human: false }];
   const state = () => ({
     success: true, session_id: 'cinema', status: 'playing', current_stage: 'clue_analysis', current_round: 1,
     current_speaker_id: acknowledged ? 'human' : null, speech_queue: ['human', 'ai'], human_character_id: 'human',
@@ -195,6 +197,7 @@ test('暂停、跳至结尾、确认失败重试、刷新与多标签页恢复',
   await expect(page.getByRole('textbox', { name: '发言输入框' })).toBeVisible();
   await expect(dialog).toBeHidden();
   expect(aiRequests).toBe(0);
+  expect(originalRequests).toBe(0);
   await other.close();
 });
 test('资源失效与减少动态效果仍有可读摘要和继续入口', async ({ page }) => {

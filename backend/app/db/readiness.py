@@ -28,7 +28,14 @@ REQUIRED_COLUMNS = {
     ),
     "player_states": frozenset({"last_seen_human_record_id"}),
     "game_sessions": frozenset(
-        {"runtime_snapshot", "revealed_clues", "last_active_at", "reviewer_hash", "pending_speech"}
+        {
+            "runtime_snapshot",
+            "revealed_clues",
+            "last_active_at",
+            "reviewer_hash",
+            "pending_speech",
+            "speech_generation",
+        }
     ),
     "game_records": frozenset({"clue_refs"}),
 }

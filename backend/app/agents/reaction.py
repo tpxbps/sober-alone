@@ -9,8 +9,8 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from app.agents.agent_prompts import GAMEPLAY_PRINCIPLES
 from app.game.clues import build_round_overview_context
 
-REACTION_MODEL_TIMEOUT_SECONDS = 60
-REACTION_TASK_TIMEOUT_SECONDS = 90.0
+REACTION_MODEL_TIMEOUT_SECONDS = 15
+REACTION_TASK_TIMEOUT_SECONDS = 30.0
 REACTION_SLOW_LOG_SECONDS = 10.0
 
 

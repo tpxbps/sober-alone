@@ -5,13 +5,19 @@ import re
 from starlette.staticfiles import StaticFiles
 
 _CONTENT_ADDRESSED_CLUE = re.compile(r"scripts/[^/]+/clues/asset-[0-9a-f]{64}\.webp")
+_CONTENT_ADDRESSED_VARIANT = re.compile(
+    r"(?:.*/)?_variants/[^/]+-[0-9a-f]{20}-v[0-9]+/(?:avatar|cover)-[0-9]+\.webp"
+)
 
 
 class ImageStaticFiles(StaticFiles):
     async def get_response(self, path, scope):
         response = await super().get_response(path, scope)
         # Other runtime images may be replaced in place; keep their existing policy.
-        immutable = _CONTENT_ADDRESSED_CLUE.fullmatch(path.replace("\\", "/"))
+        normalized = path.replace("\\", "/")
+        immutable = _CONTENT_ADDRESSED_CLUE.fullmatch(
+            normalized
+        ) or _CONTENT_ADDRESSED_VARIANT.fullmatch(normalized)
         if immutable and response.status_code in (200, 206):
             # Platform MIME registries can omit or misclassify WebP.
             response.headers["Content-Type"] = "image/webp"

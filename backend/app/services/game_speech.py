@@ -6,16 +6,14 @@ import asyncio
 import json
 import logging
 from collections.abc import Awaitable, Callable
+from contextlib import aclosing
 from datetime import datetime
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.inference import InferenceRecoveryError, raise_for_inference_recovery
 from app.db.models import GameStage
-from app.game.citation_stream import CitationStreamFilter
 from app.game.clue_media import presentation_pending
-from app.game.clues import stage_public_clues
 
 logger = logging.getLogger(__name__)
 _ai_speech_locks: dict[str, asyncio.Lock] = {}
@@ -66,6 +64,11 @@ class GameSpeechService:
 
             await finish_pending(flow_controller, self.db)
         human_character_id = flow_controller.session.human_character_id
+        if (getattr(flow_controller.session, "speech_generation", None) or {}).get(
+            "status"
+        ) == "failed":
+            yield encode_sse({"type": "error", "message": "请先重试或跳过未完成的发言"})
+            return
         if presentation_pending(flow_controller.session):
             yield encode_sse(
                 {
@@ -128,19 +131,36 @@ class GameSpeechService:
             }
         )
 
-    async def stream_ai(self, session_id: str, character_id: str):
+    async def stream_ai(
+        self,
+        session_id: str,
+        character_id: str,
+        *,
+        retry_generation_id: str | None = None,
+        expected_generation_id: str | None = None,
+    ):
         """Serialize one in-flight AI turn and reject stale duplicate requests."""
 
         from sqlalchemy import select
 
         from app.db.models import GameSession
+        from app.services.speech_generation import (
+            active_generations,
+            generation_event,
+            public_generation,
+        )
 
         lock = session_lock(session_id)
+        if session_id in active_generations or lock.locked():
+            yield encode_sse(
+                {
+                    "type": "error",
+                    "code": "speech_in_progress",
+                    "message": "该角色正在发言，请重新读取当前状态",
+                }
+            )
+            return
         async with lock:
-            if not hasattr(self.db, "expire_all"):
-                async for event in self._stream_ai_locked(session_id, character_id):
-                    yield event
-                return
             self.db.expire_all()
             result = await self.db.execute(
                 select(GameSession).where(GameSession.session_id == session_id)
@@ -148,6 +168,24 @@ class GameSpeechService:
             session = result.scalar_one_or_none()
             if not session:
                 yield encode_sse({"type": "error", "message": "游戏会话不存在或已结束"})
+                return
+            generation = public_generation(session) or {}
+            if expected_generation_id and expected_generation_id != generation.get("generation_id"):
+                yield encode_sse(
+                    {"type": "error", "code": "stale_speech", "message": "该发言请求已过期"}
+                )
+                return
+            if retry_generation_id:
+                if (
+                    generation.get("generation_id") != retry_generation_id
+                    or generation.get("status") != "failed"
+                ):
+                    yield encode_sse(
+                        {"type": "error", "code": "stale_speech", "message": "该发言请求已过期"}
+                    )
+                    return
+            elif generation.get("status") == "failed":
+                yield encode_sse(generation_event(session))
                 return
             if session.pending_speech:
                 from app.game.turn_state import finish_pending
@@ -168,140 +206,80 @@ class GameSpeechService:
                 return
             session.last_active_at = datetime.now()
             await self.db.commit()
-            async for event in self._stream_ai_locked(session_id, character_id):
-                yield event
+            async with aclosing(self._stream_ai_locked(session_id, character_id)) as stream:
+                async for event in stream:
+                    yield event
 
     async def _stream_ai_locked(self, session_id: str, character_id: str):
-        """
-        处理AI玩家发言（流式）
+        from contextlib import aclosing
 
-        返回SSE格式的流式数据，支持多种事件类型:
-        - token: LLM生成的文本片段（最终发言内容）
-        - thinking: AI正在思考/使用工具（不暴露工具内容）
-        - done: 流结束标记
+        from app.services.speech_generation import bounded_generation, heartbeat_while
 
-        Args:
-            session_id: 游戏会话ID
-            character_id: 角色ID
-
-        Yields:
-            str: SSE格式的数据行
-        """
-        flow_controller = await self._ensure_controller(session_id, self.db)
-        if not flow_controller:
+        controller = await self._ensure_controller(session_id, self.db)
+        if not controller:
             yield encode_sse({"type": "error", "message": "游戏会话不存在或已结束"})
             return
-
-        # 生成AI发言
-        if presentation_pending(flow_controller.session):
-            yield encode_sse(
-                {
-                    "type": "error",
-                    "code": "clue_presentation_pending",
-                    "message": "请先查看线索并确认继续推理",
-                }
-            )
-            return
-        full_content = ""
-        citation_filter = CitationStreamFilter(
-            stage_public_clues(
-                flow_controller.session.current_stage,
-                getattr(flow_controller.session, "revealed_clues", None) or [],
-            )
-        )
-        is_thinking = False
-        agent_error = False
-
-        try:
-            async for chunk in flow_controller.generate_ai_speech(character_id, self.db):
-                # chunk 是 dict，包含 type 和相应字段
-                if isinstance(chunk, dict):
-                    chunk_type = chunk.get("type", "unknown")
-
-                    if chunk_type == "token":
-                        if is_thinking:
-                            is_thinking = False
-
-                        text = citation_filter.feed(chunk.get("text", ""))
-                        full_content += text
-                        if text:
-                            yield encode_sse({"type": "token", "text": text})
-
-                    elif chunk_type == "progress":
-                        status = chunk.get("status", "")
-                        if status:
-                            yield encode_sse({"type": "thinking", "message": status})
-                            is_thinking = True
-
-                    elif chunk_type == "error":
-                        agent_error = True
-                        logger.error(f"Agent error for {character_id}: {chunk.get('message', '')}")
-        except InferenceRecoveryError:
-            raise
-        except Exception as e:
-            raise_for_inference_recovery(e)
-            agent_error = True
-            logger.error(f"AI speech stream error: {e}")
-
-        tail = citation_filter.finish()
-        if tail:
-            full_content += tail
-            yield encode_sse({"type": "token", "text": tail})
-
-        # AI发言流结束，通知前端进入反应处理阶段
-        yield encode_sse({"type": "speech_done"})
-
-        # 记录发言并确定下一位发言者
-        # 当 agent 出错或内容为空时，用兜底消息代替，确保流程继续推进
-        next_speaker_info = {}
-        content_to_record = full_content
-        if agent_error or not full_content.strip():
-            logger.warning(
-                f"Agent {character_id} produced no content (error={agent_error}), inserting fallback record"
-            )
-            content_to_record = "（系统提示：AI角色出现未知错误，暂时无法正常发言。）"
-            try:
-                result = await flow_controller.process_speech(
-                    character_id=character_id,
-                    content=content_to_record,
-                    is_human=False,
-                    db_session=self.db,
-                    skip_reactions=True,
+        async with aclosing(bounded_generation(controller, character_id, self.db)) as stream:
+            async for event in stream:
+                if event["type"] != "generation_ready":
+                    yield encode_sse(event)
+                    continue
+                result = None
+                async with aclosing(
+                    heartbeat_while(
+                        controller.process_speech(
+                            character_id=character_id,
+                            content=event["content"],
+                            is_human=False,
+                            db_session=self.db,
+                            consume_human_context=True,
+                            speech_attempt=event["attempt"],
+                        )
+                    )
+                ) as commit:
+                    async for item in commit:
+                        if item["type"] == "result":
+                            result = item["result"]
+                        else:
+                            yield encode_sse(item)
+                if not result or not result.get("success"):
+                    yield encode_sse(
+                        {"type": "error", "message": "发言未能提交，请重新读取当前状态"}
+                    )
+                    return
+                yield encode_sse({"type": "speech_done"})
+                yield encode_sse(
+                    {
+                        "type": "done",
+                        "next_speaker_id": result.get("next_speaker"),
+                        "next_speaker_name": result.get("next_speaker_name"),
+                        "stage_complete": result.get("stage_complete", False),
+                    }
                 )
-                next_speaker_info = {
-                    "next_speaker_id": result.get("next_speaker"),
-                    "next_speaker_name": result.get("next_speaker_name"),
-                    "stage_complete": result.get("stage_complete", False),
-                }
-            except InferenceRecoveryError:
-                raise
-            except Exception as e:
-                raise_for_inference_recovery(e)
-                logger.error(f"process_speech failed after agent error: {e}")
-                next_speaker_info = {
-                    "error": str(e),
-                }
-        else:
-            try:
-                result = await flow_controller.process_speech(
-                    character_id=character_id,
-                    content=full_content,
-                    is_human=False,
-                    db_session=self.db,
-                    consume_human_context=True,
-                )
-                next_speaker_info = {
-                    "next_speaker_id": result.get("next_speaker"),
-                    "next_speaker_name": result.get("next_speaker_name"),
-                    "stage_complete": result.get("stage_complete", False),
-                }
-            except InferenceRecoveryError:
-                raise
-            except Exception as e:
-                raise_for_inference_recovery(e)
-                next_speaker_info = {
-                    "error": str(e),
-                }
 
-        # 发送结束标记，包含下一位发言者信息
-        yield encode_sse({"type": "done", **next_speaker_info})
+    async def skip_ai(self, session_id: str, generation_id: str):
+        from app.agents.speech_attempt import SpeechAttempt
+        from app.services.speech_generation import public_generation
+
+        async with session_lock(session_id):
+            self.db.expire_all()
+            controller = await self._ensure_controller(session_id, self.db)
+            if not controller:
+                return {"success": False, "error": "游戏会话不存在"}
+            generation = public_generation(controller.session) or {}
+            if (
+                generation.get("generation_id") != generation_id
+                or generation.get("status") != "failed"
+            ):
+                return {"success": False, "error": "该发言请求已过期"}
+            character_id = generation["character_id"]
+            name = controller.agent_manager.get_character_name(character_id)
+            attempt = SpeechAttempt(generation_id, generation["attempt_id"])
+            return await controller.process_speech(
+                character_id,
+                f"系统提示：已跳过{name}的本次发言。",
+                db_session=self.db,
+                skip_reactions=True,
+                skipped=True,
+                speech_attempt=attempt,
+            )

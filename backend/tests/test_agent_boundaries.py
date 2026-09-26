@@ -135,7 +135,7 @@ def test_reaction_model_uses_the_same_provider_format_as_health_probe(
     assert captured["schema"] is SpeechReactionPayload
     assert captured["model_kwargs"]["model"] == model
     assert captured["model_kwargs"]["timeout"] == REACTION_MODEL_TIMEOUT_SECONDS
-    assert captured["model_kwargs"]["max_retries"] == 1
+    assert captured["model_kwargs"]["max_retries"] == 0
     assert captured["structured_kwargs"] == {"method": method}
 
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ThumbsUp, ThumbsDown } from "lucide-react";
+import { ThumbsUp, ThumbsDown, X } from "lucide-react";
 import api from "@/lib/api";
 import { useGameStore } from "@/stores/gameStore";
 
@@ -7,6 +7,14 @@ type Feedback = { recommended: boolean; comment: string; updated_at: string };
 
 export function GameFeedback() {
   const sessionId = useGameStore((state) => state.sessionId);
+  return <SessionFeedback key={sessionId} sessionId={sessionId} />;
+}
+
+function SessionFeedback({ sessionId }: { sessionId: string | null }) {
+  const storageKey = `game-feedback-dismissed:${sessionId}`;
+  const [dismissed, setDismissed] = useState(() => {
+    try { return localStorage.getItem(storageKey) === "1"; } catch { return false; }
+  });
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [comment, setComment] = useState("");
   const [expanded, setExpanded] = useState(false);
@@ -42,8 +50,13 @@ export function GameFeedback() {
     } catch { setError("提交失败，输入已保留，请重试。"); }
     finally { submitting.current = false; setBusy(false); }
   };
-  return <section aria-label="剧本体验评价" className="max-w-3xl mx-auto border border-border/60 bg-card/50 rounded-xl p-4 space-y-3">
-    <div><h3 className="text-sm font-medium">这个剧本值得推荐吗？</h3><p className="text-xs text-muted-foreground mt-1">你的反馈会帮助后来玩家选择剧本。</p></div>
+  if (dismissed) return null;
+  return <section aria-label="剧本体验评价" className="relative max-w-3xl mx-auto border border-border/60 bg-card/50 rounded-xl p-4 space-y-3">
+    <button type="button" aria-label="关闭剧本评价" onClick={() => {
+      setDismissed(true);
+      try { localStorage.setItem(storageKey, "1"); } catch { /* Closing still works without storage. */ }
+    }} className="absolute right-2 top-2 rounded-md p-2 text-muted-foreground hover:bg-secondary focus-visible:ring-2 focus-visible:ring-primary"><X size={16} /></button>
+    <div className="pr-8"><h3 className="text-sm font-medium">这个剧本值得推荐吗？</h3><p className="text-xs text-muted-foreground mt-1">你的反馈会帮助后来玩家选择剧本。</p></div>
     <div className="flex flex-wrap gap-2">
       {[true, false].map((recommended) => { const Icon = recommended ? ThumbsUp : ThumbsDown; return <button key={String(recommended)}
         aria-pressed={feedback?.recommended === recommended} disabled={!ready || busy} onClick={() => submit(recommended)}
@@ -58,8 +71,8 @@ export function GameFeedback() {
       <button disabled={!feedback || busy} onClick={() => feedback && submit(feedback.recommended, true)} className="min-w-32 px-4 py-2 text-sm rounded-lg bg-secondary disabled:cursor-default">{busy ? "提交中…" : "提交体验意见"}</button>
       {!feedback && <p className="text-xs text-muted-foreground">请先选择推荐或不推荐。</p>}
     </div>}
-    <p role={error ? "alert" : "status"} aria-live="polite" className={`min-h-4 text-xs ${error ? 'text-red-400' : 'text-muted-foreground'}`}>
+    {(error || busy || message) && <p role={error ? "alert" : "status"} aria-live="polite" className={`text-xs ${error ? 'text-red-400' : 'text-muted-foreground'}`}>
       {error || (busy ? "正在保存…" : message)}
-    </p>
+    </p>}
   </section>;
 }
