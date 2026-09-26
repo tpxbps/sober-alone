@@ -1,3 +1,4 @@
+import asyncio
 import json
 from types import SimpleNamespace
 
@@ -47,3 +48,32 @@ async def test_human_stream_event_order_is_stable():
         "reactions_done",
         "done",
     ]
+
+
+@pytest.mark.asyncio
+async def test_human_reaction_wait_heartbeats_and_disconnect_cancels_work(monkeypatch):
+    from app.services import speech_generation
+
+    monkeypatch.setattr(speech_generation, "HEARTBEAT_SECONDS", 0.01)
+    cancelled = asyncio.Event()
+
+    class Controller:
+        session = SimpleNamespace(
+            human_character_id="human", current_speaker="human", current_stage="intro"
+        )
+
+        async def process_speech(self, **_kwargs):
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+
+    async def ensure_controller(_session_id, _db):
+        return Controller()
+
+    stream = GameSpeechService(object(), ensure_controller).stream_human("heartbeat", "发言")
+    assert event_type(await anext(stream)) == "speech_recorded"
+    assert event_type(await asyncio.wait_for(anext(stream), 1)) == "heartbeat"
+    assert event_type(await asyncio.wait_for(anext(stream), 1)) == "heartbeat"
+    await stream.aclose()
+    assert cancelled.is_set()

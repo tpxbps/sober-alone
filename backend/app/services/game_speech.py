@@ -45,8 +45,9 @@ class GameSpeechService:
         """Serialize human and AI writes for one session."""
         lock = session_lock(session_id)
         async with lock:
-            async for event in self._stream_human_locked(session_id, content):
-                yield event
+            async with aclosing(self._stream_human_locked(session_id, content)) as stream:
+                async for event in stream:
+                    yield event
 
     async def _stream_human_locked(self, session_id: str, content: str):
         """
@@ -54,7 +55,15 @@ class GameSpeechService:
 
         记录发言并触发AI反应，返回SSE格式流式数据。
         """
-        flow_controller = await self._ensure_controller(session_id, self.db)
+        from app.services.speech_generation import heartbeat_while
+
+        flow_controller = None
+        async with aclosing(heartbeat_while(self._ensure_controller(session_id, self.db))) as wait:
+            async for event in wait:
+                if event["type"] == "result":
+                    flow_controller = event["result"]
+                else:
+                    yield encode_sse(event)
         if not flow_controller:
             yield encode_sse({"type": "error", "message": "游戏会话不存在或已结束"})
             return
@@ -62,7 +71,10 @@ class GameSpeechService:
         if getattr(flow_controller.session, "pending_speech", None):
             from app.game.turn_state import finish_pending
 
-            await finish_pending(flow_controller, self.db)
+            async with aclosing(heartbeat_while(finish_pending(flow_controller, self.db))) as wait:
+                async for event in wait:
+                    if event["type"] != "result":
+                        yield encode_sse(event)
         human_character_id = flow_controller.session.human_character_id
         if (getattr(flow_controller.session, "speech_generation", None) or {}).get(
             "status"
@@ -95,12 +107,22 @@ class GameSpeechService:
         flow_controller.session.last_active_at = datetime.now()
         yield encode_sse({"type": "speech_recorded", "message": "发言已记录"})
 
-        result = await flow_controller.process_speech(
-            character_id=human_character_id,
-            content=content,
-            is_human=True,
-            db_session=self.db,
-        )
+        result = None
+        async with aclosing(
+            heartbeat_while(
+                flow_controller.process_speech(
+                    character_id=human_character_id,
+                    content=content,
+                    is_human=True,
+                    db_session=self.db,
+                )
+            )
+        ) as wait:
+            async for event in wait:
+                if event["type"] == "result":
+                    result = event["result"]
+                else:
+                    yield encode_sse(event)
 
         if not result.get("success"):
             yield encode_sse({"type": "error", "message": result.get("error", "处理失败")})

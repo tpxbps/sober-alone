@@ -410,8 +410,11 @@ class GameService:
 
     async def process_human_speech_stream(self, session_id: str, content: str):
         """Preserve the historical human-speech streaming facade."""
-        async for event in self.speech_service.stream_human(session_id, content):
-            yield event
+        from contextlib import aclosing
+
+        async with aclosing(self.speech_service.stream_human(session_id, content)) as stream:
+            async for event in stream:
+                yield event
 
     async def process_ai_speech_stream(self, session_id: str, character_id: str, **kwargs):
         """Preserve the historical AI-speech streaming facade."""

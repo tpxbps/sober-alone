@@ -166,10 +166,11 @@ async def player_speech(
     game_service = GameService(db)
 
     async def generate():
-        async for chunk in game_service.process_human_speech_stream(
-            session_id=session_id, content=request.content
-        ):
-            yield chunk
+        async with aclosing(
+            game_service.process_human_speech_stream(session_id=session_id, content=request.content)
+        ) as stream:
+            async for chunk in stream:
+                yield chunk
 
     return StreamingResponse(
         generate(),
