@@ -17,7 +17,7 @@
 
 ## 快速开始
 
-环境要求：Python 3.13、Node.js 22、pnpm 10、[uv](https://docs.astral.sh/uv/)。
+环境要求：Python 3.13、Node.js 22、pnpm 10、uv。
 
 ### 使用通用 Agent 自动部署
 
