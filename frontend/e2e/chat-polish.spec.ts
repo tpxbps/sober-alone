@@ -71,22 +71,26 @@ for (const viewport of [{ width: 1920, height: 1080 }, { width: 1280, height: 72
 }
 
 for (const width of [1440, 390]) {
-  test(`feedback retains layout and draft through save, repeated choice and retry ${width}`, async ({ page }) => {
+  test(`feedback shows status on demand and retains draft through save and retry ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })
     const calls = await chat(page, true)
     const section = page.getByRole('region', { name: '剧本体验评价' })
     const recommend = section.getByRole('button', { name: '推荐', exact: true })
     await expect(recommend).toBeEnabled()
+    await expect(section.getByRole('status')).toHaveCount(0)
     await page.waitForTimeout(400)
     const before = await section.boundingBox()
-    const chatBefore = await page.locator('[data-record-id="1"]').boundingBox()
     await recommend.click()
     await expect(section.getByRole('status')).toContainText('正在保存')
     expect(await recommend.evaluate(el => getComputedStyle(el).opacity)).toBe('1')
-    expect((await section.boundingBox())!.y).toBe(before!.y)
+    const saving = await section.boundingBox()
+    expect(saving!.height).toBeGreaterThan(before!.height)
+    expect(saving!.x).toBe(before!.x)
+    expect(saving!.width).toBe(before!.width)
     await expect(recommend).toHaveAttribute('aria-pressed', 'true')
-    expect(await section.boundingBox()).toEqual(before)
-    expect(await page.locator('[data-record-id="1"]').boundingBox()).toEqual(chatBefore)
+    await expect(section.getByRole('status')).toContainText('评价已保存')
+    expect((await section.boundingBox())!.height).toBe(saving!.height)
+    await expect(page.locator('[data-record-id="1"]')).toContainText('仍然不能定案')
     await recommend.click()
     expect(calls.saves).toBe(1)
     await section.getByRole('button', { name: '留下体验意见（可选）' }).click()
