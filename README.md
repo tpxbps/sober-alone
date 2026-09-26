@@ -1,5 +1,11 @@
 <p align="center">
-  <img src="./frontend/public/project-overview.jpg" alt="独醒项目概览" width="100%" />
+  <img src="./frontend/public/project-overview.png" alt="独醒项目概览" width="100%" />
+</p>
+
+<p align="center">
+  <a href="https://duxing.chat/">体验地址</a>
+  &nbsp;·&nbsp;
+  <a href="https://juejin.cn/post/7689254246198542390">技术小结</a>
 </p>
 
 # 独醒（Sober Alone）
@@ -81,9 +87,7 @@ pnpm dev --host 127.0.0.1
 | 千问角色模型                   | `QWEN_API_KEY`    |
 | 混元角色模型                   | `HUNYUAN_API_KEY` |
 
-代码结构、核心流程、数据边界和阅读顺序统一记录在 [PROJECT.md](PROJECT.md)。
-
-线索引用、可选媒体和开发验证约定见 [PROJECT.md](PROJECT.md)。
+代码结构、核心流程、数据边界、阅读顺序、线索引用、可选媒体和开发验证约定，统一记录在 [PROJECT.md](PROJECT.md)。
 
 ## 技术栈
 
