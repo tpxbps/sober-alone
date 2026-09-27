@@ -67,13 +67,19 @@ def retryable_gateway_error(error: Exception) -> bool:
     """Retry transport failures once; account recovery must reach the caller."""
     from openai import APIConnectionError, APIStatusError
 
+    from app.core.rate_limits import rate_limit_details
+
     try:
         raise_for_inference_recovery(error)
     except InferenceRecoveryError:
         return False
-    return isinstance(error, (APIConnectionError, httpx.TransportError)) or (
-        isinstance(error, APIStatusError)
-        and (error.status_code in {408, 429} or error.status_code >= 500)
+    return (
+        rate_limit_details(error) is not None
+        or isinstance(error, (APIConnectionError, httpx.TransportError))
+        or (
+            isinstance(error, APIStatusError)
+            and (error.status_code in {408, 429} or error.status_code >= 500)
+        )
     )
 
 

@@ -36,6 +36,7 @@ from app.agents.game_model_paths import (
 from app.agents.reaction import (
     REACTION_MODEL_TIMEOUT_SECONDS,
     REACTION_SLOW_LOG_SECONDS,
+    REACTION_TASK_TIMEOUT_SECONDS,
     HumanSpeechReactionPayload,
     SpeechReaction,
     SpeechReactionPayload,
@@ -49,6 +50,7 @@ from app.core.inference import (
     retryable_gateway_error,
 )
 from app.core.llm_factory import create_summary_llm
+from app.core.rate_limits import retry_delay_seconds
 from app.game.clues import stage_public_clues
 
 logger = logging.getLogger(__name__)
@@ -618,8 +620,11 @@ suspected_by_changes 必须是数组；没有变化时返回空数组。main_per
 target 和 suspecter 只能是合法的其他角色，禁止填自己的名字。请重新返回完整结构。"""
                 if is_human:
                     prompt = prompt.replace("main_perspective 必须是字符串，", "")
+                remaining = REACTION_TASK_TIMEOUT_SECONDS - (time.perf_counter() - started_at)
+                if remaining <= 0:
+                    break
                 try:
-                    async with asyncio.timeout(REACTION_MODEL_TIMEOUT_SECONDS):
+                    async with asyncio.timeout(min(REACTION_MODEL_TIMEOUT_SECONDS, remaining)):
                         result = await structured.ainvoke(
                             [
                                 SystemMessage(
@@ -675,7 +680,14 @@ target 和 suspecter 只能是合法的其他角色，禁止填自己的名字�
                     if attempt == 0 and (
                         isinstance(exc, TimeoutError) or retryable_gateway_error(exc)
                     ):
-                        continue
+                        delay = retry_delay_seconds(
+                            exc,
+                            remaining_seconds=REACTION_TASK_TIMEOUT_SECONDS
+                            - (time.perf_counter() - started_at),
+                        )
+                        if delay is not None:
+                            await asyncio.sleep(delay)
+                            continue
                     logger.warning(
                         "Reaction analysis failed character=%s model=%s error=%s "
                         "status=%s request_id=%s",

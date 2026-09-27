@@ -239,6 +239,40 @@ async def test_reaction_recovers_once_without_confusing_transport_and_schema(mon
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("retry_after,expected_calls", [("0.01", 2), ("60", 1)])
+async def test_reaction_429_waits_within_total_budget(monkeypatch, retry_after, expected_calls):
+    import time
+
+    from test_rate_limits import limited
+
+    from app.core import rate_limits
+
+    monkeypatch.setattr(rate_limits.random, "uniform", lambda *_: 0)
+    starts = []
+
+    class Structured:
+        async def ainvoke(self, messages):
+            starts.append(time.perf_counter())
+            if len(starts) == 1:
+                raise limited(retry_after)
+            return SpeechReactionPayload(main_perspective="观察记录")
+
+    player = object.__new__(AgentPlayer)
+    player.character_name = "甲"
+    player.character_id = "ai"
+    player.reaction_llm_model = "deepseek-flash"
+    player._reaction_structured = Structured()
+    player._reaction_system_prompt = "系统提示"
+    result = await player.react_to_speech("乙", "发言")
+    assert len(starts) == expected_calls
+    if expected_calls == 2:
+        assert starts[1] - starts[0] >= 0.01
+        assert result.main_perspective == "观察记录"
+    else:
+        assert result.main_perspective == ""
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("failure,expected_calls", [("connection", 2), ("account", 1)])
 async def test_reaction_recovery_is_bounded_and_does_not_retry_account_errors(
     monkeypatch, failure, expected_calls, caplog

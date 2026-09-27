@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from test_state_reliability import game as base_game
 
 from app.agents.speech_attempt import SpeechAttempt, current_speech_attempt
+from app.core import rate_limits
 from app.db.models import GameRecord, PlayerState
 from app.services import speech_generation as limits
 from app.services.game_speech import GameSpeechService
@@ -20,7 +21,7 @@ def fast_deadlines(monkeypatch):
     monkeypatch.setattr(limits, "VISIBLE_IDLE_SECONDS", 0.04)
     monkeypatch.setattr(limits, "GENERATION_SECONDS", 3)
     monkeypatch.setattr(limits, "HEARTBEAT_SECONDS", 0.01)
-    monkeypatch.setattr(limits.random, "uniform", lambda *_: 0)
+    monkeypatch.setattr(rate_limits.random, "uniform", lambda *_: 0)
 
 
 async def service_for(game, generator):
@@ -199,6 +200,53 @@ async def test_network_retry_succeeds_without_extra_charge(game):
     assert calls == 2
     assert await speech_count(game[0]) == 1
     assert game[1].session.speech_generation["attempt"] == 2
+
+
+@pytest.mark.asyncio
+async def test_429_waits_with_heartbeats_then_commits_once(game):
+    import time
+
+    from test_rate_limits import limited
+
+    starts = []
+
+    async def generate(*_):
+        starts.append(time.monotonic())
+        if len(starts) == 1:
+            raise limited("0.06")
+        yield {"type": "token", "text": "恢复后的发言"}
+
+    events = await collect(await service_for(game, generate))
+    assert len(starts) == 2 and starts[1] - starts[0] >= 0.06
+    retry_index = next(
+        i
+        for i, event in enumerate(events)
+        if event.get("generation", {}).get("status") == "retrying"
+    )
+    assert any(event["type"] == "heartbeat" for event in events[retry_index:])
+    assert await speech_count(game[0]) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("partial,long_wait", [(False, False), (True, False), (False, True)])
+async def test_429_failure_remains_bounded_and_does_not_charge(game, partial, long_wait):
+    from test_rate_limits import limited
+
+    calls = 0
+
+    async def generate(*_):
+        nonlocal calls
+        calls += 1
+        if partial:
+            yield {"type": "token", "text": "未完成的正文"}
+        raise limited("60" if long_wait else "0")
+
+    await collect(await service_for(game, generate))
+    assert calls == (1 if partial or long_wait else 2)
+    assert await speech_count(game[0]) == 0
+    state = game[1].session.speech_generation
+    assert state["status"] == "failed"
+    assert state["partial_content"] == ("未完成的正文" if partial else "")
 
 
 @pytest.mark.asyncio

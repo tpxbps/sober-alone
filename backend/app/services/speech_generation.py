@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import random
 import time
 import uuid
 from contextlib import aclosing
@@ -18,6 +17,7 @@ from app.core.inference import (
     raise_for_inference_recovery,
     retryable_gateway_error,
 )
+from app.core.rate_limits import retry_delay_seconds
 from app.db.models import GameSession
 from app.game.citation_stream import CitationStreamFilter
 from app.game.citation_syntax import tokenize
@@ -301,16 +301,19 @@ async def bounded_generation(controller, character_id, db):
             if not failure:
                 yield {"type": "generation_ready", "content": full_content, "attempt": attempt}
                 return
+            delay = retry_delay_seconds(failure, remaining_seconds=deadline - time.monotonic())
             retry = (
                 not full_content.strip()
                 and number < MAX_ATTEMPTS
-                and time.monotonic() + 1.5 < deadline
+                and delay is not None
                 and (isinstance(failure, SpeechDeadline) or retryable_gateway_error(failure))
             )
             if retry:
                 await save_generation(db, session, status="retrying", reason=code)
                 yield generation_event(session)
-                await asyncio.sleep(random.uniform(0.5, 1.5))
+                async for event in heartbeat_while(asyncio.sleep(delay)):
+                    if event["type"] == "heartbeat":
+                        yield event
                 full_content = ""
             else:
                 await save_generation(
