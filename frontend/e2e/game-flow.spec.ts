@@ -142,6 +142,7 @@ test('大厅 → 选角 → 发言 → 推进 → 投票 → 复盘', async ({ p
       records = [
         {
           id: 1,
+          turn_id: route.request().postDataJSON().request_id,
           session_id: 'e2e-session',
           stage: 'intro',
           speaker_id: 'human',

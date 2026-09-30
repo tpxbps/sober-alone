@@ -1,20 +1,15 @@
-import json
-
 import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import Field
-from sqlalchemy import select
 from test_state_reliability import game as base_game
 
 from app.agents.agent_prompts import build_role_system_prompt
 from app.agents.game_model_paths import build_role_agent
-from app.db.models import GameRecord
 from app.game.citation_stream import CitationStreamFilter
 from app.game.clues import parse_clue_citations
-from app.services.game_speech import GameSpeechService
 
 game = base_game
 
@@ -126,31 +121,28 @@ def test_stream_filter_does_not_hold_prose_or_unbounded_brackets():
 
 
 @pytest.mark.asyncio
-async def test_intro_sse_and_persisted_content_use_the_same_empty_permission_set(game):
-    db, controller = game
-    controller.session.current_stage = "intro"
-    controller.session.current_speaker = "a"
-    controller.session.revealed_clues = CLUES
-    await db.commit()
+async def test_intro_sse_and_persisted_content_use_the_same_empty_permission_set(turns):
+    import asyncio
 
-    async def generate(*_):
-        for text in ["我是馆长。", "[c", "07]", "我负责保管钥匙。"]:
-            yield {"type": "token", "text": text}
+    from app.db.models import GameSession
 
-    controller.generate_ai_speech = generate
-
-    async def ensure(*_):
-        return controller
-
-    frames = [
-        json.loads(frame.removeprefix("data: "))
-        async for frame in GameSpeechService(db, ensure).stream_ai("g", "a")
-    ]
-    text = "".join(frame["text"] for frame in frames if frame["type"] == "token")
-    assert text == "我是馆长。我负责保管钥匙。"
-    stored = await db.scalar(select(GameRecord).where(GameRecord.record_type == "speech"))
-    assert stored.raw_content == text and stored.clue_refs == []
-    assert [frame["type"] for frame in frames][-2:] == ["speech_done", "done"]
+    async with turns.factory() as db:
+        session = await db.get(GameSession, "game")
+        session.revealed_clues = CLUES
+        await db.commit()
+    turns.chunks = ["我是馆长。[c07]", "我负责保管钥匙。"]
+    turns.text_gate.set()
+    turns.reaction_gate.set()
+    await turns.runner.start("game", "ai", "ai", request_id="scope")
+    async with asyncio.timeout(5):
+        while True:
+            turn, record = await turns.runner.snapshot("game", "scope")
+            if turn["status"] == "completed":
+                break
+            await asyncio.sleep(0.01)
+    assert turn["content"] == "我是馆长。我负责保管钥匙。"
+    assert record["content"] == turn["content"]
+    assert record["clue_refs"] == []
 
 
 def test_human_untrusted_tags_remain_text_without_reference_permission():

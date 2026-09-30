@@ -1,5 +1,5 @@
-import { CharacterPreview } from "@/components/game/CharacterPreview";
 import { gameApi } from "@/lib/api";
+import { CharacterPreview } from "@/components/game/CharacterPreview";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { AnimatePresence } from "framer-motion";
 import { FileEdit, BookOpen } from "lucide-react";
@@ -20,9 +20,9 @@ import { DraftNotebook } from "@/components/game/DraftNotebook";
 import { SettingsModal } from "@/components/SettingsModal";
 import { Dialog, DialogContent, DialogTitle, DialogDescription, DialogClose } from "@/components/ui/dialog";
 import { Markdown } from "@/components/ui/Markdown";
-import type { Character, GameStage, GameRecord } from "@/types/game";
+import type { Character, GameStage } from "@/types/game";
 import { resolveDisplayedSpeakerId } from "@/lib/speakerPresentation";
-import { citedIds, speechClues } from "@/lib/clueScope";
+import { readGameLocal, saveGameLocal } from "@/lib/gameTurnCoordinator";
 
 interface GamePageProps {
   sessionId: string;
@@ -39,7 +39,7 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
   const [previousStage, setPreviousStage] = useState<GameStage | null>(null);
   const [draftOpen, setDraftOpen] = useState(false);
   const [scriptOpen, setScriptOpen] = useState(false);
-  const [pauseAutoSpeak, setPauseAutoSpeak] = useState({
+  const [pauseAutoSpeak, setPauseAutoSpeak] = useState(() => readGameLocal<{ context: string; value: boolean }>(sessionId, 'pause') ?? {
     context: "",
     value: false,
   });
@@ -86,7 +86,9 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
     finalizeVoting,
     endGame,
     setStageTransition,
-    addRecord,
+    activeTurnId,
+    isLoading,
+    resumeActiveTurn,
     setPendingHumanSpeech,
     cancelActiveOperations,
   } = useGameStore(
@@ -121,27 +123,16 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
       finalizeVoting: s.finalizeVoting,
       endGame: s.endGame,
       setStageTransition: s.setStageTransition,
-      addRecord: s.addRecord,
+      activeTurnId: s.activeTurn?.turn_id,
+      isLoading: s.isLoading,
+      resumeActiveTurn: s.resumeActiveTurn,
       setPendingHumanSpeech: s.setPendingHumanSpeech,
       cancelActiveOperations: s.cancelActiveOperations,
     }))
   );
   useEffect(() => {
-    if (!isProcessingReactions || isStreaming) return;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout>;
-    const poll = async () => {
-      try {
-        const state = await gameApi.getGameState(sessionId);
-        if (!cancelled) useGameStore.getState().updateFromAPI(state);
-        if (state.turn_processing && !cancelled) timer = setTimeout(poll, 1500);
-      } catch {
-        if (!cancelled) timer = setTimeout(poll, 3000);
-      }
-    };
-    timer = setTimeout(poll, 1500);
-    return () => { cancelled = true; clearTimeout(timer); };
-  }, [sessionId, isProcessingReactions, isStreaming]);
+    if (activeTurnId) void resumeActiveTurn();
+  }, [activeTurnId, resumeActiveTurn]);
 
   useEffect(() => {
     if (cluePresentation?.status !== 'pending') return;
@@ -170,9 +161,11 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
   });
   const handlePauseAutoSpeakChange = useCallback(
     (value: boolean) => {
-      setPauseAutoSpeak({ context: value ? pauseContextKey : "", value });
+      const pause = { context: value ? pauseContextKey : "", value };
+      saveGameLocal(sessionId, 'pause', pause);
+      setPauseAutoSpeak(pause);
     },
-    [pauseContextKey]
+    [sessionId, pauseContextKey]
   );
 
   const handleScriptOpenChange = setScriptOpen;
@@ -231,7 +224,7 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
     if (stage !== "free_discussion") return;
     if (
       cluePresentation?.status !== "pending" &&
-      !isAdvancingStage &&
+      !activeTurnId && !isLoading && !isAdvancingStage &&
       !isStreaming &&
       !isProcessingReactions &&
       speechReminderRoundRef.current !== `${stage}:${currentRound}` &&
@@ -269,92 +262,27 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
     playerStates,
     humanCharacterId,
     currentRound,
+    activeTurnId,
+    isLoading,
   ]);
 
-  const speechGeneration = useGameStore(state => state.speechGeneration);
-  const speechConnectionError = useGameStore(state => state.speechConnectionError);
+  // One coordinator owns each turn. Queued human speech has priority.
   useEffect(() => {
-    const active = ['generating', 'streaming', 'retrying'].includes(speechGeneration?.status || '');
-    if (isStreaming || (!active && !speechConnectionError)) return;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout>;
-    const poll = async () => {
-      try {
-        const state = await gameApi.getGameState(sessionId);
-        const history = await gameApi.getGameHistory(sessionId);
-        if (cancelled) return;
-        useGameStore.getState().updateFromAPI(state);
-        useGameStore.setState({ records: history.records });
-        if (['completed', 'skipped'].includes(state.speech_generation?.status || '')) {
-          useGameStore.setState({ speechConnectionError: '' });
-          return;
-        }
-        if (state.speech_generation?.status === 'failed') return;
-      } catch {
-        if (!cancelled) useGameStore.setState({ speechConnectionError: '连接暂时中断，正在查询发言状态。' });
-      }
-      if (!cancelled) timer = setTimeout(poll, 3000);
-    };
-    timer = setTimeout(poll, 1500);
-    return () => { cancelled = true; clearTimeout(timer); };
-  }, [sessionId, isStreaming, speechGeneration?.status, speechConnectionError]);
-
-  // Auto-trigger AI speech when it's AI's turn (and hasn't spoken yet)
-  useEffect(() => {
-    if (
-      !speechConnectionError &&
-      !['failed', 'generating', 'streaming', 'retrying'].includes(speechGeneration?.status || '') &&
-      cluePresentation?.status !== "pending" &&
-      !isAdvancingStage &&
-      !isStreaming &&
-      !isProcessingReactions &&
-      currentSpeakerId &&
-      currentSpeakerId !== humanCharacterId &&
-      (stage === "intro" ||
-        stage === "clue_analysis" ||
-        stage === "free_discussion" ||
-        stage === "summary")
-      && !(stage === "free_discussion" && isAutoSpeakPaused)
-    ) {
-      // Check if this AI can speak
-      const speakerState = playerStates.find(
-        (p) => p.character_id === currentSpeakerId
-      );
-
-      // For free discussion: check remaining_speech_count
-      // For other stages: check has_spoken_this_round (each player speaks once per stage)
-      if (stage === "free_discussion") {
-        if (speakerState && speakerState.remaining_speech_count <= 0) {
-          return;
-        }
-      } else {
-        if (speakerState?.has_spoken_this_round) {
-          return;
-        }
-      }
-
-      // Small delay before AI starts speaking
-      // 自由讨论阶段留较长间隔，让玩家有机会点击"直接进入下一阶段"
-      const delay = stage === "free_discussion" ? 1500 : 500;
-      const timer = setTimeout(() => {
-        triggerAISpeak(currentSpeakerId);
-      }, delay);
-      return () => clearTimeout(timer);
+    if (cluePresentation?.status === "pending" || isLoading || isAdvancingStage || activeTurnId || isStreaming || isProcessingReactions) return;
+    if (pendingHumanSpeech && stage === "free_discussion" &&
+        playerStates.some(player => player.character_id === humanCharacterId && (player.remaining_speech_count ?? 0) > 0)) {
+      void humanSpeak(pendingHumanSpeech);
+      return;
     }
-  }, [
-    speechGeneration,
-    speechConnectionError,
-    cluePresentation,
-    isAdvancingStage,
-    currentSpeakerId,
-    humanCharacterId,
-    isStreaming,
-    isProcessingReactions,
-    stage,
-    triggerAISpeak,
-    playerStates,
-    isAutoSpeakPaused,
-  ]);
+    if (!currentSpeakerId || currentSpeakerId === humanCharacterId ||
+        !["intro", "clue_analysis", "free_discussion", "summary"].includes(stage) ||
+        (stage === "free_discussion" && isAutoSpeakPaused)) return;
+    const speaker = playerStates.find(player => player.character_id === currentSpeakerId);
+    if (stage === "free_discussion" ? (speaker?.remaining_speech_count ?? 1) <= 0 : speaker?.has_spoken_this_round) return;
+    void triggerAISpeak(currentSpeakerId);
+  }, [cluePresentation, activeTurnId, isLoading, isAdvancingStage, isStreaming, isProcessingReactions,
+    pendingHumanSpeech, humanSpeak, currentSpeakerId, humanCharacterId, stage,
+    isAutoSpeakPaused, triggerAISpeak, playerStates]);
 
   const handleCharacterMention = useCallback(
     (characterId: string) => {
@@ -372,33 +300,10 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
     setStageTransition(false);
   }, [setStageTransition]);
 
-  // Handle human message send
   const handleSendMessage = useCallback(
-    async (content: string) => {
-      if (useGameStore.getState().cluePresentation?.status === "pending") return;
-      // Get human character info for optimistic update
-      const humanChar = characters.find(
-        (c) => c.character_id === humanCharacterId
-      );
-
-      // Optimistically add the message to records immediately
-      const optimisticRecord: GameRecord = {
-        id: Date.now(), // temporary ID
-        session_id: sessionId,
-        stage: stage,
-        speaker_id: humanCharacterId || undefined,
-        speaker_name: humanChar?.name || "你",
-        content: content,
-        clue_refs: citedIds(content, speechClues(stage, publicClues)),
-        record_type: "speech",
-        created_at: new Date().toISOString(),
-      };
-      addRecord(optimisticRecord);
-
-      // Send to backend
-      await humanSpeak(content);
-    },
-    [humanSpeak, characters, humanCharacterId, stage, sessionId, addRecord, publicClues]
+    (content: string) => {
+      if (useGameStore.getState().cluePresentation?.status !== "pending") void humanSpeak(content);
+    }, [humanSpeak]
   );
 
   // Handle stage advance

@@ -10,6 +10,7 @@ REQUIRED_TABLES = frozenset(
         "game_sessions",
         "player_states",
         "game_records",
+        "game_turns",
         "editor_workflows",
         "editor_operations",
         "script_feedback",
@@ -35,9 +36,10 @@ REQUIRED_COLUMNS = {
             "reviewer_hash",
             "pending_speech",
             "speech_generation",
+            "state_revision",
         }
     ),
-    "game_records": frozenset({"clue_refs"}),
+    "game_records": frozenset({"clue_refs", "turn_id"}),
 }
 INIT_COMMAND = "uv run python -m app.cli init"
 CORE_TABLES = frozenset({"scripts", "characters", "game_sessions", "player_states", "game_records"})

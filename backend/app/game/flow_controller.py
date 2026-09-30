@@ -508,7 +508,7 @@ class GameFlowController:
                     continue
         await db_session.commit()
 
-    async def _determine_next_speaker(self, db_session) -> dict[str, Any]:
+    async def _determine_next_speaker(self, db_session, *, commit=True) -> dict[str, Any]:
         """确定下一位发言者"""
         current_stage = self.session.current_stage
 
@@ -518,20 +518,20 @@ class GameFlowController:
             GameStage.SUMMARY.value,
             GameStage.VOTE.value,
         ]:
-            result = await self._get_next_sequential_speaker(db_session)
+            result = await self._get_next_sequential_speaker(db_session, commit=commit)
             return result
 
         # 自由发言阶段
         elif current_stage == GameStage.FREE_DISCUSSION.value:
-            return await self._get_next_free_speaker(db_session)
+            return await self._get_next_free_speaker(db_session, commit=commit)
 
         # 线索分析阶段（顺序发言）
         elif current_stage == GameStage.CLUE_ANALYSIS.value:
-            return await self._get_next_sequential_speaker(db_session)
+            return await self._get_next_sequential_speaker(db_session, commit=commit)
 
         return {"next_speaker": None, "stage_complete": True}
 
-    async def _get_next_sequential_speaker(self, db_session=None) -> dict[str, Any]:
+    async def _get_next_sequential_speaker(self, db_session=None, *, commit=True) -> dict[str, Any]:
         """获取顺序发言的下一位"""
 
         from sqlalchemy import text
@@ -554,7 +554,8 @@ class GameFlowController:
                         "session_id": self.session.session_id,
                     },
                 )
-                await db_session.commit()
+                if commit:
+                    await db_session.commit()
 
             return {
                 "next_speaker": next_speaker,
@@ -572,7 +573,8 @@ class GameFlowController:
                     ),
                     {"session_id": self.session.session_id},
                 )
-                await db_session.commit()
+                if commit:
+                    await db_session.commit()
 
             return {
                 "next_speaker": None,
@@ -580,7 +582,7 @@ class GameFlowController:
                 "message": "当前阶段已完成，可以推进到下一阶段",
             }
 
-    async def _get_next_free_speaker(self, db_session) -> dict[str, Any]:
+    async def _get_next_free_speaker(self, db_session, *, commit=True) -> dict[str, Any]:
         """
         获取自由发言的下一位
 
@@ -636,7 +638,8 @@ class GameFlowController:
                         "session_id": self.session.session_id,
                     },
                 )
-                await db_session.commit()
+                if commit:
+                    await db_session.commit()
             return {
                 "next_speaker": next_speaker,
                 "next_speaker_name": self.agent_manager.get_character_name(next_speaker),
@@ -969,7 +972,7 @@ class GameFlowController:
         )
 
     async def generate_ai_speech(
-        self, character_id: str, db_session=None
+        self, character_id: str, db_session=None, *, checkpoint_id=None
     ) -> AsyncIterator[dict[str, Any]]:
         """
         生成AI玩家发言
@@ -999,6 +1002,7 @@ class GameFlowController:
 
         # 构建完整的游戏状态
         game_state = await self._build_game_state(character_id, db_session)
+        game_state["speech_checkpoint_id"] = checkpoint_id
         stage = self.session.current_stage
 
         async for chunk in agent.speak(game_state, stage):

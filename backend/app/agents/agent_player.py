@@ -194,7 +194,7 @@ class AgentPlayer:
     def _init_summary_model(self):
         """初始化用于摘要的轻量级LLM模型"""
         try:
-            return create_summary_llm()
+            return create_summary_llm(max_retries=0)
         except InferenceRecoveryError:
             raise
         except Exception as exc:
@@ -424,6 +424,16 @@ submit_final_vote(suspect_name="角色全名", reasoning="1-2句投票理由")
             print(f"Error building knowledge context: {e}")
             return ""
 
+    async def capture_speech_checkpoint(self) -> str:
+        """Pin the input branch so a retry cannot re-inject a previous attempt."""
+        config = {"configurable": {"thread_id": self.thread_id}}
+        snapshot = await self._agent.aget_state(config)
+        checkpoint = (snapshot.config or {}).get("configurable", {}).get("checkpoint_id")
+        if not checkpoint:
+            config = await self._agent.aupdate_state(config, {"messages": []})
+            checkpoint = config["configurable"]["checkpoint_id"]
+        return checkpoint
+
     async def speak(self, game_state: dict[str, Any], stage: str) -> AsyncIterator[StreamChunk]:
         """
         推送系统消息，让AI角色发言(流式输出)
@@ -498,6 +508,8 @@ submit_final_vote(suspect_name="角色全名", reasoning="1-2句投票理由")
         base_thread = game_state.get("agent_thread_id") or self.thread_id
         self.thread_id = base_thread
         config = {"configurable": {"thread_id": base_thread}}
+        if game_state.get("speech_checkpoint_id"):
+            config["configurable"]["checkpoint_id"] = game_state["speech_checkpoint_id"]
         if attempt:
             attempt.previous_thread_id = base_thread
             attempt.checkpointer = self._checkpointer
@@ -544,10 +556,7 @@ submit_final_vote(suspect_name="角色全名", reasoning="1-2句投票理由")
             raise
         except Exception as e:
             raise_for_inference_recovery(e)
-            if attempt:
-                raise
-            print(f"Error in stream: {e}")
-            yield StreamError(message=str(e))
+            raise
         finally:
             # 清除 db_session 上下文
             clear_db_session()
@@ -697,7 +706,7 @@ target 和 suspecter 只能是合法的其他角色，禁止填自己的名字�
                         getattr(exc, "status_code", None),
                         getattr(exc, "request_id", None),
                     )
-                    break
+                    raise
 
         return SpeechReaction(
             my_suspicion_graph={},

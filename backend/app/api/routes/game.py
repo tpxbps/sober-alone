@@ -3,7 +3,6 @@ Game API routes
 游戏相关API端点
 """
 
-from contextlib import aclosing
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -73,6 +72,20 @@ class SpeechRequest(BaseModel):
     """发言请求"""
 
     content: str = Field(..., min_length=1, max_length=3000, description="发言内容")
+    request_id: str | None = Field(None, min_length=1, max_length=64)
+    expected_revision: int | None = Field(None, ge=0)
+
+
+class TurnRequest(BaseModel):
+    request_id: str | None = Field(None, min_length=1, max_length=64)
+    expected_revision: int | None = Field(None, ge=0)
+
+
+class RetryTurnRequest(BaseModel):
+    expected_attempt: int = Field(..., ge=1)
+
+
+SSE_HEADERS = {"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"}
 
 
 class AdvanceRequest(BaseModel):
@@ -156,9 +169,8 @@ async def player_speech(
 
     返回SSE格式的流式数据:
     - speech_recorded: 发言已记录
-    - thinking: AI正在反应（带角色名提示）
-    - reactions_done: 所有反应完成
-    - done: 流结束，包含下一位发言者信息
+    - turn_snapshot: 可恢复的本轮快照（含稳定身份和事件序号）
+    - done: 反应已完成，包含一致的最终状态和下一位发言者
 
     - **session_id**: 游戏会话ID
     - **content**: 发言内容
@@ -166,24 +178,22 @@ async def player_speech(
     game_service = GameService(db)
 
     async def generate():
-        async with aclosing(
-            game_service.process_human_speech_stream(session_id=session_id, content=request.content)
-        ) as stream:
-            async for chunk in stream:
-                yield chunk
+        async for chunk in game_service.process_human_speech_stream(
+            session_id=session_id,
+            content=request.content,
+            request_id=request.request_id,
+            expected_revision=request.expected_revision,
+        ):
+            yield chunk
 
-    return StreamingResponse(
-        generate(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+    return StreamingResponse(generate(), media_type="text/event-stream", headers=SSE_HEADERS)
 
 
 @router.post("/{session_id}/ai-speech/{character_id}")
 async def ai_speech(
     session_id: str,
     character_id: str,
-    request: SpeechGenerationRequest | None = None,
+    request: TurnRequest | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -192,94 +202,54 @@ async def ai_speech(
     让指定的AI基于当前游戏stage生成发言内容
 
     返回SSE格式的流式数据，事件类型包括:
-    - token: LLM生成的文本片段
-    - tool_call: 工具调用
-    - tool_result: 工具执行结果
-    - progress: Agent进度更新
-    - done: 流结束标记
+    - turn_snapshot: 思考和流式正文快照，按 seq 原位更新
+    - speech_done: 文本生成结束，保留正文等待提交
+    - speech_recorded: 事务已提交，包含正式记录
+    - done: 反应完成，包含一致的最终状态
 
     - **session_id**: 游戏会话ID
     - **character_id**: AI角色ID
-    - **tts**: 是否启用TTS语音合成（默认false）
+    - **request_id**: 客户端生成的幂等回合身份
     """
     game_service = GameService(db)
 
     async def generate():
-        async with aclosing(
-            game_service.process_ai_speech_stream(
-                session_id,
-                character_id,
-                expected_generation_id=request.generation_id if request else None,
-            )
-        ) as stream:
-            async for chunk in stream:
-                yield chunk
+        async for chunk in game_service.process_ai_speech_stream(
+            session_id, character_id, **(request.model_dump() if request else {})
+        ):
+            yield chunk
 
+    return StreamingResponse(generate(), media_type="text/event-stream", headers=SSE_HEADERS)
+
+
+@router.get("/{session_id}/turns/{turn_id}/events")
+async def turn_events(session_id: str, turn_id: str, after_seq: int = -1):
+    from app.services.game_turns import TurnConflict, game_turn_runner
+
+    try:
+        await game_turn_runner.snapshot(session_id, turn_id)
+    except TurnConflict as exc:
+        raise HTTPException(404, "回合不存在") from exc
     return StreamingResponse(
-        generate(),
+        game_turn_runner.events(session_id, turn_id, after_seq),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        headers=SSE_HEADERS,
     )
 
 
-@router.post("/{session_id}/speech/retry")
-async def retry_speech(
-    session_id: str, request: SpeechGenerationRequest, db: AsyncSession = Depends(get_db)
-):
-    from app.db.models import GameSession
+@router.post("/{session_id}/turns/{turn_id}/retry")
+async def retry_turn(session_id: str, turn_id: str, request: RetryTurnRequest):
+    from app.services.game_turns import TurnConflict, game_turn_runner
 
-    session = await db.get(GameSession, session_id)
-    generation = (session.speech_generation or {}) if session else {}
-    if not request.generation_id or generation.get("generation_id") != request.generation_id:
-        raise HTTPException(409, "该发言请求已过期")
-    service = GameService(db)
+    try:
+        await game_turn_runner.retry(session_id, turn_id, request.expected_attempt)
+    except TurnConflict as exc:
+        raise HTTPException(409, "回合已变化，请重新同步") from exc
     return StreamingResponse(
-        service.process_ai_speech_stream(
-            session_id, generation["character_id"], retry_generation_id=request.generation_id
-        ),
+        game_turn_runner.events(session_id, turn_id),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        headers=SSE_HEADERS,
     )
-
-
-@router.post("/{session_id}/speech/skip")
-async def skip_speech(
-    session_id: str, request: SpeechGenerationRequest, db: AsyncSession = Depends(get_db)
-):
-    service = GameService(db)
-    result = await service.speech_service.skip_ai(session_id, request.generation_id or "")
-    if not result.get("success"):
-        raise HTTPException(409, result.get("error", "该发言请求已过期"))
-    return await service.get_game_state(session_id)
-
-
-@router.post("/{session_id}/speech/displayed", status_code=204)
-async def speech_displayed(
-    session_id: str, request: SpeechDisplayedRequest, db: AsyncSession = Depends(get_db)
-):
-    import logging
-
-    from app.db.models import GameSession
-
-    session = await db.get(GameSession, session_id)
-    generation = (session.speech_generation or {}) if session else {}
-    if (
-        generation.get("generation_id") == request.generation_id
-        and generation.get("attempt_id") == request.attempt_id
-    ):
-        from app.services.speech_telemetry import report_speech_metric
-
-        report_speech_metric(
-            "first_display", session_id, generation, client_first_display_ms=request.elapsed_ms
-        )
-        logging.getLogger(__name__).info(
-            "Role first display session=%s generation=%s attempt=%s elapsed_ms=%s",
-            session_id,
-            request.generation_id,
-            request.attempt_id,
-            request.elapsed_ms,
-        )
-    return Response(status_code=204)
 
 
 @router.post("/{session_id}/advance")

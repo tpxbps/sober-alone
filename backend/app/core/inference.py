@@ -97,8 +97,13 @@ def model_retry_middleware():
     return ModelRetryMiddleware(max_retries=3, backoff_factor=2.0, initial_delay=1.0)
 
 
-def tool_retry_middleware():
+def tool_retry_middleware(*, max_retries=None):
     from langchain.agents.middleware import ToolRetryMiddleware
+
+    if max_retries is not None:
+        return ToolRetryMiddleware(
+            max_retries=max_retries, retry_on=retryable_gateway_error, on_failure="error"
+        )
 
     if settings.INFERENCE_BACKEND == "tokendance":
         return ToolRetryMiddleware(

@@ -1,6 +1,7 @@
 import { useGameStore } from "@/stores/gameStore";
 import { useState, useEffect, useRef, useCallback, memo } from "react";
 import { Send, Loader2, ArrowRight, Plus, X, CircleHelp } from "lucide-react";
+import { readGameLocal, saveGameLocal } from "@/lib/gameTurnCoordinator";
 import { speechClues } from "@/lib/clueScope";
 import { Switch } from "@/components/ui/switch";
 import { DynamicDot } from "@/components/ui/DynamicDot";
@@ -23,7 +24,6 @@ interface ChatInputAreaProps {
   thinkingMessage: string;
   streamingSpeakerName: string;
   currentSpeakerId: string | null;
-  currentSpeakerName: string;
   onSendMessage: (content: string) => void;
   onAdvanceStage: () => void;
   onEndGame: () => void;
@@ -48,7 +48,6 @@ export const ChatInputArea = memo(function ChatInputArea({
   thinkingMessage,
   streamingSpeakerName,
   currentSpeakerId,
-  currentSpeakerName,
   onSendMessage,
   onAdvanceStage,
   onEndGame,
@@ -60,12 +59,20 @@ export const ChatInputArea = memo(function ChatInputArea({
   onPauseAutoSpeakChange,
   onHumanSpeechCompleted,
 }: ChatInputAreaProps) {
-  const recoveryRequired = useGameStore(state => state.speechGeneration?.status === 'failed' || !!state.speechConnectionError);
-  const [input, setInput] = useState("");
-  const [draftClues, setDraftClues] = useState<PublicClue[] | null>(null);
+  const sessionId = useGameStore(s => s.sessionId);
+  const hasActiveTurn = useGameStore(s => !!s.activeTurn);
+  const recoveryRequired = useGameStore(s => !!s.activeTurn && ['failed', 'blocked'].includes(s.activeTurn.status));
+  const reconnecting = useGameStore(s => s.isReconnecting);
+  const [savedDraft] = useState(() => sessionId
+    ? readGameLocal<{ input: string; lines: string[]; clues: PublicClue[] | null }>(sessionId, `composer:${stage}`) : null);
+  const [input, setInput] = useState(savedDraft?.input ?? "");
+  const [draftClues, setDraftClues] = useState<PublicClue[] | null>(savedDraft?.clues ?? null);
   const availableClues = draftClues ?? speechClues(stage, publicClues);
-  const [pendingLines, setPendingLines] = useState<string[]>([]);
+  const [pendingLines, setPendingLines] = useState<string[]>(savedDraft?.lines ?? []);
   const inputRef = useRef<MentionComposerHandle>(null);
+  useEffect(() => {
+    if (sessionId) saveGameLocal(sessionId, `composer:${stage}`, { input, lines: pendingLines, clues: draftClues });
+  }, [sessionId, stage, input, pendingLines, draftClues]);
 
   // Focus input when it's human's turn
   useEffect(() => {
@@ -98,13 +105,13 @@ export const ChatInputArea = memo(function ChatInputArea({
     if (input.trim()) {
       allLines.push(input.trim());
     }
-    if (allLines.length === 0) return;
+    if (allLines.length === 0 || allLines.join("\n").length > 3000) return;
 
     const fullSpeech = allLines.join("\n");
     onHumanSpeechCompleted();
 
     // 自由发言阶段且AI正在发言：暂存发言，等待AI完成
-    if (stage === "free_discussion" && (isStreaming || isProcessingReactions)) {
+    if (stage === "free_discussion" && (hasActiveTurn || isStreaming || isProcessingReactions)) {
       onSetPendingHumanSpeech(fullSpeech, availableClues);
       setDraftClues(null);
       setPendingLines([]);
@@ -124,6 +131,7 @@ export const ChatInputArea = memo(function ChatInputArea({
     stage,
     isStreaming,
     isProcessingReactions,
+    hasActiveTurn,
     onSendMessage,
     onSetPendingHumanSpeech,
     onHumanSpeechCompleted,
@@ -132,7 +140,7 @@ export const ChatInputArea = memo(function ChatInputArea({
 
   const inputDisabled =
     !!pendingHumanSpeech ||
-    (stage !== "free_discussion" && (isStreaming || isProcessingReactions)) ||
+    (stage !== "free_discussion" && (hasActiveTurn || isStreaming || isProcessingReactions)) ||
     (stage === "free_discussion" &&
       humanRemainingSpeechCount !== undefined &&
       humanRemainingSpeechCount <= 0);
@@ -140,6 +148,7 @@ export const ChatInputArea = memo(function ChatInputArea({
   return (
     <div data-game-composer className="border-t border-border/50 p-4 bg-card/30">
       <div className="max-w-3xl mx-auto">
+        {reconnecting && <p role="status" className="mb-2 text-center text-xs text-muted-foreground">连接暂时中断，正在恢复本轮…</p>}
         {/* Stage is review - show results and end game button */}
         {stage === "review" ? (
           <div className="text-center space-y-4 py-4">
@@ -197,8 +206,9 @@ export const ChatInputArea = memo(function ChatInputArea({
             {pendingHumanSpeech && (
               <div className="flex items-center justify-center gap-2 py-2 text-sm text-primary">
                 <Loader2 className="w-4 h-4 animate-spin" />
-                <span>你的发言将在AI发言结束后发送</span>
+                <span>{humanRemainingSpeechCount === 0 ? '发言次数已用完，待发送内容已保留' : '你的发言将在AI发言结束后发送'}</span>
                 <DynamicDot />
+                <button type="button" className="underline" onClick={() => onSetPendingHumanSpeech(null)}>取消排队</button>
               </div>
             )}
             {/* Pending lines preview */}
@@ -229,7 +239,7 @@ export const ChatInputArea = memo(function ChatInputArea({
               </div>
             )}
             {/* Advance early button */}
-            {canAdvanceEarly && !isStreaming && !isProcessingReactions && (
+            {canAdvanceEarly && !hasActiveTurn && !isStreaming && !isProcessingReactions && (
               <div className="flex justify-center pb-2">
                 <button
                   type="button"
@@ -265,10 +275,11 @@ export const ChatInputArea = memo(function ChatInputArea({
                       {pauseAutoSpeak && !isStreaming && !isProcessingReactions && "AI 已暂停"}
                     </span>
                   </div> : undefined}
+                  initialValue={savedDraft?.input ?? ""}
+                  maxLength={Math.max(0, 3000 - pendingLines.join("\n").length - (pendingLines.length ? 1 : 0))}
                   characters={characters}
                   clues={availableClues}
                   disabled={inputDisabled}
-                  maxLength={3000}
                   onChange={value => {
                     setInput(value);
                     if (value) setDraftClues(previous => previous ?? speechClues(stage, publicClues));
@@ -334,6 +345,7 @@ export const ChatInputArea = memo(function ChatInputArea({
           </form>
         ) : /* Can advance stage — only when no current speaker and nothing processing */
         currentSpeakerId === null &&
+          !hasActiveTurn &&
           !isProcessingReactions &&
           !isStreaming &&
           !isAdvancingStage ? (
@@ -356,11 +368,7 @@ export const ChatInputArea = memo(function ChatInputArea({
             <span>{streamingSpeakerName} 正在发言</span>
             <DynamicDot />
           </div>
-        ) : (
-          <div className="flex items-center justify-center gap-3 py-3 text-muted-foreground">
-            <span>等待 {currentSpeakerName} 发言</span>
-          </div>
-        )}
+        ) : null}
       </div>
     </div>
   );

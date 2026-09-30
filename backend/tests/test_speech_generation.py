@@ -1,170 +1,19 @@
 import asyncio
-import json
-from contextlib import aclosing
 
 import pytest
 from sqlalchemy import func, select
 from test_state_reliability import game as base_game
 
-from app.agents.speech_attempt import SpeechAttempt, current_speech_attempt
-from app.core import rate_limits
-from app.db.models import GameRecord, PlayerState
-from app.services import speech_generation as limits
-from app.services.game_speech import GameSpeechService
+from app.agents.speech_attempt import SpeechAttempt
+from app.db.models import GameRecord
 
 game = base_game
-
-
-@pytest.fixture(autouse=True)
-def fast_deadlines(monkeypatch):
-    monkeypatch.setattr(limits, "FIRST_VISIBLE_SECONDS", 0.04)
-    monkeypatch.setattr(limits, "VISIBLE_IDLE_SECONDS", 0.04)
-    monkeypatch.setattr(limits, "GENERATION_SECONDS", 3)
-    monkeypatch.setattr(limits, "HEARTBEAT_SECONDS", 0.01)
-    monkeypatch.setattr(rate_limits.random, "uniform", lambda *_: 0)
-
-
-async def service_for(game, generator):
-    db, controller = game
-    controller.session.current_speaker = "a"
-    await db.commit()
-    controller.generate_ai_speech = generator
-
-    async def ensure(_id, _db):
-        from app.db.models import GameSession
-
-        controller.session = await _db.get(GameSession, "g")
-        return controller
-
-    return GameSpeechService(db, ensure)
-
-
-async def collect(service, **kwargs):
-    return [
-        json.loads(frame.removeprefix("data: "))
-        async for frame in service.stream_ai("g", "a", **kwargs)
-    ]
 
 
 async def speech_count(db):
     return await db.scalar(
         select(func.count()).select_from(GameRecord).where(GameRecord.record_type == "speech")
     )
-
-
-@pytest.mark.asyncio
-async def test_visible_success_commits_once_and_terminal_order(game):
-    async def generate(*_):
-        current_speech_attempt().thread_id = "accepted-attempt"
-        yield {"type": "token", "text": "结论"}
-
-    service = await service_for(game, generate)
-    events = await collect(service)
-    assert [event["type"] for event in events][-2:] == ["speech_done", "done"]
-    db, controller = game
-    assert await speech_count(db) == 1
-    assert controller.session.speech_generation["status"] == "completed"
-    assert controller.session.player_threads["a"] == "accepted-attempt"
-    player = await db.scalar(select(PlayerState).where(PlayerState.character_id == "a"))
-    assert player.remaining_speech_count == 3
-
-
-@pytest.mark.asyncio
-async def test_empty_frames_retry_once_failure_survives_refresh_and_skip_once(game):
-    attempts = []
-
-    async def generate(*_):
-        attempts.append(current_speech_attempt())
-        while True:
-            yield {"type": "token", "text": ""}
-            yield {"type": "progress", "status": "分析中"}
-            await asyncio.sleep(0.002)
-
-    service = await service_for(game, generate)
-    events = await collect(service)
-    db, controller = game
-    state = controller.session.speech_generation
-    assert len(attempts) == 2 and not any(a.active for a in attempts)
-    assert state["status"] == "failed" and state["reason"] == "first_visible_timeout"
-    assert any(event["type"] == "heartbeat" for event in events)
-    assert await speech_count(db) == 0
-    player = await db.scalar(select(PlayerState).where(PlayerState.character_id == "a"))
-    assert player.remaining_speech_count == 4
-    assert limits.public_generation(controller.session)["status"] == "failed"
-    await collect(service)
-    assert len(attempts) == 2  # a refreshed client must not restart the cycle
-    result = await service.skip_ai("g", state["generation_id"])
-    assert result["success"]
-    assert not (await service.skip_ai("g", state["generation_id"]))["success"]
-    await db.refresh(player)
-    assert player.remaining_speech_count == 3
-    assert await speech_count(db) == 0
-    assert await db.scalar(select(func.count()).select_from(GameRecord)) == 1
-
-
-@pytest.mark.asyncio
-async def test_partial_output_stalls_without_replay_or_memory_commit(game):
-    attempts = []
-
-    async def generate(*_):
-        attempt = current_speech_attempt()
-        attempts.append(attempt)
-        attempt.role_updates.append({"my_suspicion_graph": {"b": {"score": 0.8}}})
-        yield {"type": "token", "text": "尚未完成"}
-        await asyncio.sleep(10)
-
-    service = await service_for(game, generate)
-    await collect(service)
-    db, controller = game
-    state = controller.session.speech_generation
-    assert len(attempts) == 1
-    assert state["reason"] == "visible_idle_timeout" and state["partial_content"] == "尚未完成"
-    assert await speech_count(db) == 0
-    player = await db.scalar(select(PlayerState).where(PlayerState.character_id == "a"))
-    assert not player.suspicion_reasons
-    with pytest.raises(asyncio.CancelledError):
-        await controller.process_speech("a", "晚到结果", db_session=db, speech_attempt=attempts[0])
-    assert await speech_count(db) == 0
-
-
-@pytest.mark.asyncio
-async def test_total_budget_includes_tool_wait_and_stale_retry_rejected(game, monkeypatch):
-    monkeypatch.setattr(limits, "FIRST_VISIBLE_SECONDS", 1)
-    monkeypatch.setattr(limits, "GENERATION_SECONDS", 0.04)
-
-    async def generate(*_):
-        yield {"type": "progress", "status": "查询线索"}
-        await asyncio.sleep(10)
-
-    service = await service_for(game, generate)
-    await collect(service)
-    assert game[1].session.speech_generation["reason"] == "generation_timeout"
-    result = await collect(service, retry_generation_id="stale")
-    assert result[0]["code"] == "stale_speech"
-
-
-@pytest.mark.asyncio
-async def test_disconnect_closes_generation_and_restores_failed_state(game):
-    stopped = asyncio.Event()
-
-    async def generate(*_):
-        try:
-            yield {"type": "token", "text": "部分正文"}
-            await asyncio.sleep(10)
-        finally:
-            stopped.set()
-
-    service = await service_for(game, generate)
-    async with aclosing(service.stream_ai("g", "a")) as stream:
-        async for frame in stream:
-            if json.loads(frame.removeprefix("data: "))["type"] == "token":
-                break
-    assert stopped.is_set()
-    db, controller = game
-    await db.refresh(controller.session)
-    assert controller.session.speech_generation["status"] == "failed"
-    assert controller.session.speech_generation["partial_content"] == "部分正文"
-    assert await speech_count(db) == 0
 
 
 @pytest.mark.asyncio
@@ -180,92 +29,6 @@ async def test_previous_attempt_cannot_commit_after_replacement(game):
     stale = SpeechAttempt("old", "old-attempt")
     result = await controller.process_speech("a", "晚到正文", db_session=db, speech_attempt=stale)
     assert not result["success"] and await speech_count(db) == 0
-
-
-@pytest.mark.asyncio
-async def test_network_retry_succeeds_without_extra_charge(game):
-    import httpx
-
-    calls = 0
-
-    async def generate(*_):
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            raise httpx.ReadError("connection lost")
-        yield {"type": "token", "text": "恢复后的完整发言"}
-
-    service = await service_for(game, generate)
-    await collect(service)
-    assert calls == 2
-    assert await speech_count(game[0]) == 1
-    assert game[1].session.speech_generation["attempt"] == 2
-
-
-@pytest.mark.asyncio
-async def test_429_waits_with_heartbeats_then_commits_once(game):
-    import time
-
-    from test_rate_limits import limited
-
-    starts = []
-
-    async def generate(*_):
-        starts.append(time.monotonic())
-        if len(starts) == 1:
-            raise limited("0.06")
-        yield {"type": "token", "text": "恢复后的发言"}
-
-    events = await collect(await service_for(game, generate))
-    assert len(starts) == 2 and starts[1] - starts[0] >= 0.06
-    retry_index = next(
-        i
-        for i, event in enumerate(events)
-        if event.get("generation", {}).get("status") == "retrying"
-    )
-    assert any(event["type"] == "heartbeat" for event in events[retry_index:])
-    assert await speech_count(game[0]) == 1
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("partial,long_wait", [(False, False), (True, False), (False, True)])
-async def test_429_failure_remains_bounded_and_does_not_charge(game, partial, long_wait):
-    from test_rate_limits import limited
-
-    calls = 0
-
-    async def generate(*_):
-        nonlocal calls
-        calls += 1
-        if partial:
-            yield {"type": "token", "text": "未完成的正文"}
-        raise limited("60" if long_wait else "0")
-
-    await collect(await service_for(game, generate))
-    assert calls == (1 if partial or long_wait else 2)
-    assert await speech_count(game[0]) == 0
-    state = game[1].session.speech_generation
-    assert state["status"] == "failed"
-    assert state["partial_content"] == ("未完成的正文" if partial else "")
-
-
-@pytest.mark.asyncio
-async def test_account_recovery_does_not_retry(game):
-    from app.core.inference import InferenceRecoveryError
-
-    calls = 0
-
-    async def generate(*_):
-        nonlocal calls
-        calls += 1
-        raise InferenceRecoveryError("top_up_balance")
-        yield  # pragma: no cover
-
-    service = await service_for(game, generate)
-    with pytest.raises(InferenceRecoveryError):
-        await collect(service)
-    assert calls == 1 and await speech_count(game[0]) == 0
-    assert game[1].session.speech_generation["reason"] == "account_recovery"
 
 
 def test_metrics_never_forward_prompt_or_reply():
@@ -370,3 +133,131 @@ async def test_database_fence_rejects_a_stale_orm_snapshot(game):
         "a", "晚到的旧结果", db_session=db, speech_attempt=SpeechAttempt("old", "old-attempt")
     )
     assert not result["success"] and await speech_count(db) == 0
+
+
+@pytest.mark.asyncio
+async def test_durable_attempt_accepts_checkpoint_only_after_commit(turns, monkeypatch):
+    from test_game_speech import until
+
+    from app.agents.speech_attempt import current_speech_attempt
+    from app.db.models import GameSession
+    from app.services import game_turns
+
+    attempt_refs = []
+
+    async def generate():
+        attempt = current_speech_attempt()
+        attempt_refs.append(attempt)
+        attempt.thread_id = "accepted-scratch"
+        attempt.observation_ids = {"one-observation"}
+        yield {"type": "token", "text": "完整正文"}
+
+    turns.generator = generate
+    original = game_turns.process_turn
+
+    async def delayed(*_args, **_kwargs):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(game_turns, "process_turn", delayed)
+    await turns.runner.start("game", "ai", "ai", request_id="scratch")
+    await until(turns.runner, "scratch", lambda t: t["status"] == "committing")
+    async with turns.factory() as db:
+        assert not (await db.get(GameSession, "game")).player_threads
+    await turns.runner.shutdown()
+    assert not attempt_refs[0].active
+    monkeypatch.setattr(game_turns, "process_turn", original)
+    turns.reaction_gate.set()
+    await turns.runner.recover()
+    await until(turns.runner, "scratch", lambda t: t["status"] == "completed")
+    async with turns.factory() as db:
+        assert (await db.get(GameSession, "game")).player_threads["ai"] == "accepted-scratch"
+        assert await speech_count(db) == 1
+    assert len(attempt_refs) == 1
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_cooldown_retry_is_single_budget(turns, monkeypatch):
+    import time
+
+    from test_game_speech import until
+    from test_rate_limits import limited
+
+    from app.core import rate_limits
+
+    monkeypatch.setattr(rate_limits.random, "uniform", lambda *_: 0)
+    starts = []
+
+    async def generate():
+        starts.append(time.monotonic())
+        if len(starts) < 3:
+            raise limited("0.06")
+        yield {"type": "token", "text": "恢复后的正文"}
+
+    turns.generator = generate
+    turns.reaction_gate.set()
+    await turns.runner.start("game", "ai", "ai", request_id="cooldown")
+    await until(turns.runner, "cooldown", lambda t: t["status"] == "completed")
+    assert len(starts) == 3
+    assert all(b - a >= 0.06 for a, b in zip(starts, starts[1:]))
+    async with turns.factory() as db:
+        assert await speech_count(db) == 1
+
+
+@pytest.mark.asyncio
+async def test_excessive_retry_after_preserves_partial_and_does_not_charge(turns):
+    from test_game_speech import until
+    from test_rate_limits import limited
+
+    calls = []
+
+    async def generate():
+        calls.append(1)
+        yield {"type": "token", "text": "未完成正文"}
+        raise limited("3600")
+
+    turns.generator = generate
+    await turns.runner.start("game", "ai", "ai", request_id="long-cooldown")
+    snapshot, _ = await until(turns.runner, "long-cooldown", lambda t: t["status"] == "failed")
+    assert snapshot["content"] == "未完成正文" and len(calls) == 1
+    async with turns.factory() as db:
+        assert await speech_count(db) == 0
+
+
+@pytest.mark.asyncio
+async def test_continuous_empty_output_has_explicit_failure_not_skip(turns, monkeypatch):
+    from test_game_speech import until
+
+    from app.services import game_turns
+
+    monkeypatch.setattr(game_turns, "GENERATION_SECONDS", 0.05)
+
+    async def generate():
+        while True:
+            yield {"type": "token", "text": ""}
+            await asyncio.sleep(0.001)
+
+    turns.generator = generate
+    await turns.runner.start("game", "ai", "ai", request_id="empty")
+    snapshot, _ = await until(turns.runner, "empty", lambda t: t["status"] == "failed")
+    assert snapshot["content"] == ""
+    async with turns.factory() as db:
+        assert await speech_count(db) == 0
+
+
+@pytest.mark.asyncio
+async def test_legacy_generation_failure_is_adopted_without_model_call(turns):
+    from app.db.models import GameSession
+
+    async with turns.factory() as db:
+        session = await db.get(GameSession, "game")
+        session.speech_generation = {
+            "generation_id": "legacy",
+            "character_id": "ai",
+            "status": "failed",
+            "partial_content": "旧正文",
+        }
+        await db.commit()
+    await turns.runner.recover()
+    snapshot, _ = await turns.runner.snapshot("game", "legacy")
+    assert snapshot["status"] == "failed" and snapshot["content"] == "旧正文"
+    assert turns.calls == 0

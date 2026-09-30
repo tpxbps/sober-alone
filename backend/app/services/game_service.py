@@ -274,9 +274,7 @@ class GameService:
             return {"success": False, "error": "游戏会话不存在"}
 
         # 获取玩家状态
-        from app.services.speech_generation import active_generations, public_generation
-
-        generation = public_generation(game_session)
+        generation = game_session.speech_generation or None
         player_states = await self._get_player_states(session_id)
 
         # 获取剧本数据以获取角色信息
@@ -288,46 +286,28 @@ class GameService:
             characters, game_session.human_character_id
         )
 
-        # 获取流程控制器
-        flow_controller = await ensure_flow_controller(
-            session_id,
-            self.db,
-            resume_pending=resume_pending and session_id not in active_generations,
-        )
+        from app.services.game_turns import active_turn_query, game_turn_runner
 
-        if flow_controller:
-            flow_controller.session = game_session
-            player_states = await self._get_player_states(session_id)
-            state = flow_controller.get_game_state()
-            state["player_states"] = player_states
-            state["script"] = script_info
-            state["characters"] = presented_characters
-            state["success"] = True
-            state["speech_generation"] = generation
-            # 确保字段名与前端一致
-            if "current_speaker" in state:
-                state["current_speaker_id"] = state.pop("current_speaker")
-            # 返回投票状态（刷新恢复用）
-            state["votes"] = dict(game_session.votes or {})
-            state["vote_results"] = game_session.vote_result or None
-            game_session.last_active_at = datetime.now()
-            await self.db.commit()
-            return state
-
-        await self.db.commit()
-        return {
+        # Recovery is scheduled independently; a state read never awaits inference.
+        if resume_pending and (game_session.pending_speech or game_session.speech_generation):
+            await game_turn_runner.recover(session_id)
+        turn = await self.db.scalar(active_turn_query(session_id))
+        llm_configs = (script_data or {}).get("llm_configs") or {}
+        # Read committed state, never the mutable ORM object held by a running agent.
+        state = {
             "success": True,
             "session_id": game_session.session_id,
             "speech_generation": generation,
             "status": game_session.status,
             "current_stage": game_session.current_stage,
             "current_round": game_session.current_round,
+            "state_revision": game_session.state_revision,
             "current_speaker_id": game_session.current_speaker,
             "human_character_id": game_session.human_character_id,
             "player_states": player_states,
             "script": script_info,
             "characters": presented_characters,
-            "speech_queue": game_session.speech_queue or [],
+            "speech_queue": list(game_session.speech_queue or []),
             "votes": dict(game_session.votes or {}),
             "vote_results": game_session.vote_result or None,
             "public_clues": list(game_session.revealed_clues or []),
@@ -337,7 +317,20 @@ class GameService:
             "clue_asset_preload": upcoming_presentation_assets(
                 game_session, (script_data or {}).get("clue_stages", [])
             ),
+            "has_all_spoken": not game_session.speech_queue,
+            "turn_processing": bool(game_session.pending_speech),
+            "active_turn": turn.snapshot() if turn else None,
+            "agent_llm_info": {
+                cid: {**config, "is_human": cid == game_session.human_character_id}
+                for cid, config in llm_configs.items()
+            },
         }
+        revision = game_session.state_revision
+        await self.db.refresh(game_session)
+        if revision != game_session.state_revision:
+            self.db.expire_all()
+            return await self.get_game_state(session_id, resume_pending=False)
+        return state
 
     async def _get_player_states(self, session_id: str) -> list[dict[str, Any]]:
         """获取所有玩家状态"""
@@ -408,34 +401,26 @@ class GameService:
 
         return result
 
-    async def process_human_speech_stream(self, session_id: str, content: str):
+    async def process_human_speech_stream(self, session_id: str, content: str, **command):
         """Preserve the historical human-speech streaming facade."""
-        from contextlib import aclosing
+        async for event in self.speech_service.stream_human(session_id, content, **command):
+            yield event
 
-        async with aclosing(self.speech_service.stream_human(session_id, content)) as stream:
-            async for event in stream:
-                yield event
-
-    async def process_ai_speech_stream(self, session_id: str, character_id: str, **kwargs):
+    async def process_ai_speech_stream(self, session_id: str, character_id: str, **command):
         """Preserve the historical AI-speech streaming facade."""
-        from contextlib import aclosing
-
-        async with aclosing(
-            self.speech_service.stream_ai(session_id, character_id, **kwargs)
-        ) as stream:
-            async for event in stream:
-                yield event
+        async for event in self.speech_service.stream_ai(session_id, character_id, **command):
+            yield event
 
     async def advance_stage(self, session_id: str) -> dict[str, Any]:
         from app.services.game_speech import session_lock
+        from app.services.game_turns import active_turn_query, game_turn_runner
 
         lock = session_lock(session_id)
         if lock.locked():
             return {"success": False, "error": "玩家正在思考，请稍后推进流程"}
-        async with lock:
-            session = await self.db.get(GameSession, session_id)
-            if session and (session.speech_generation or {}).get("status") == "failed":
-                return {"success": False, "error": "请先重试或跳过未完成的发言"}
+        async with game_turn_runner.command_lock(session_id), lock:
+            if await self.db.scalar(active_turn_query(session_id)):
+                return {"success": False, "error": "当前发言尚未完成，请先恢复本轮"}
             return await self._advance_stage_locked(session_id)
 
     async def acknowledge_clue_presentation(self, session_id: str, presentation_id: str):
@@ -456,6 +441,7 @@ class GameService:
                 current.clue_presentation_state = {**state, "status": "acknowledged"}
                 current.current_speaker = (current.speech_queue or [None])[0]
                 current.last_active_at = datetime.now()
+                current.state_revision = (current.state_revision or 0) + 1
                 await self.db.commit()
             controller = get_flow_controller(session_id)
             if controller:
@@ -486,6 +472,7 @@ class GameService:
 
                 await finish_pending(flow_controller, self.db)
             transition = await flow_controller.advance_stage(self.db)
+            current.state_revision = (current.state_revision or 0) + 1
 
             # 持久化游戏会话状态变更到数据库
             import json
@@ -593,21 +580,23 @@ class GameService:
             select(GameRecord)
             .where(GameRecord.session_id == session_id)
             .order_by(GameRecord.id.asc())
-            .limit(limit)
         )
-        records = result.scalars().all()
+        records = list(result.scalars().all())
 
         from app.game.citation_history import display_records
 
         session = await self.db.get(GameSession, session_id)
         if session is None:
             return []
-        return display_records(records, session)
+        # Historical citation permissions include announcements before this page.
+        return display_records(records, session)[-limit:]
 
     async def abandon_session(self, session_id: str) -> dict[str, Any]:
         """放弃游戏会话（用户中途退出时调用，清理资源）"""
         from app.services.checkpoint_runtime import delete_game_checkpoints
+        from app.services.game_turns import game_turn_runner
 
+        await game_turn_runner.cancel_session(session_id)
         game_session = await self.db.get(GameSession, session_id)
         characters = (
             (game_session.runtime_snapshot or {}).get("characters", []) if game_session else []
@@ -641,6 +630,10 @@ class GameService:
         if not game_session:
             return {"success": False, "error": "游戏会话不存在"}
 
+        from app.services.game_turns import game_turn_runner
+
+        await game_turn_runner.cancel_session(session_id)
+        await self.db.refresh(game_session)
         game_session.status = GameStatus.FINISHED.value
         game_session.finished_at = datetime.now()
 

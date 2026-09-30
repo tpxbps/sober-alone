@@ -57,7 +57,7 @@ export function CharacterPanel({
         const human = isHuman(character.character_id);
 
         return (
-          <CharacterPreview className="w-full min-w-0 max-w-full" key={character.character_id} name={character.name} src={character.portrait_url || character.avatar_url}
+          <CharacterPreview showButton={false} className="w-full min-w-0 max-w-full" key={character.character_id} name={character.name} src={character.portrait_url || character.avatar_url}
             side={side === "left" ? "right" : "left"}
             details={<>
               <h3 className="text-base font-semibold">{character.name}</h3>

@@ -46,6 +46,7 @@ test(`紧凑开关暂停、继续与发送后恢复 ${viewport.width}`, async ({
 
   await page.addInitScript(() => {
     localStorage.setItem('sober_alone_session', 'pause-session')
+    sessionStorage.setItem('game:pause-session:pause', JSON.stringify({ context: 'pause-session:free_discussion:1', value: true }))
   })
 
   await page.route('**/api/v1/**', async (route) => {
@@ -119,8 +120,6 @@ test(`紧凑开关暂停、继续与发送后恢复 ${viewport.width}`, async ({
   expect(buttonBox!.y + buttonBox!.height).toBeLessThan(composerBox!.y + 36)
   expect(buttonBox!.x).toBeGreaterThanOrEqual(0)
   expect(buttonBox!.x + buttonBox!.width).toBeLessThanOrEqual(viewport.width)
-  await pauseButton.focus()
-  await page.keyboard.press('Space')
   const resumeButton = pauseButton
   await expect(resumeButton).toHaveAttribute('aria-checked', 'true')
   await expect(pauseButton).toBeChecked()
@@ -130,7 +129,8 @@ test(`紧凑开关暂停、继续与发送后恢复 ${viewport.width}`, async ({
 
   await page.waitForTimeout(1700)
   expect(aiSpeakRequests).toBe(0)
-  await resumeButton.click()
+  await resumeButton.focus()
+  await page.keyboard.press('Space')
   await expect.poll(() => aiSpeakRequests).toBe(1)
   await expect(pauseButton).toHaveAttribute('aria-checked', 'false')
   await pauseButton.click()

@@ -272,7 +272,7 @@ class AgentManager:
                 if isinstance(result, InferenceRecoveryError):
                     raise result
                 if isinstance(result, Exception):
-                    reactions[char_id] = {"error": str(result)}
+                    reactions[char_id] = result
                 elif isinstance(result, dict) and "error" in result:
                     reactions[char_id] = result
                 else:
@@ -317,13 +317,11 @@ class AgentManager:
             else:
                 # 最后的兜底：尝试转换为dict
                 return cast(dict[str, Any], dict(result))
-        except TimeoutError:
-            return {"error": f"Reaction timed out after {timeout}s"}
         except InferenceRecoveryError:
             raise
         except Exception as e:
             raise_for_inference_recovery(e)
-            return {"error": str(e)}
+            raise
 
     async def make_ai_speak(self, character_id: str, game_state: dict[str, Any], stage: str):
         """

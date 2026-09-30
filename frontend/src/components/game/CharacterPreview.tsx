@@ -9,9 +9,10 @@ function Portrait({ src, name }: { src?: string | null; name: string }) {
     : <div className="flex h-full min-h-40 w-full items-center justify-center bg-gradient-to-br from-primary/15 to-accent/15 text-5xl text-primary/60">{name.slice(0, 1)}</div>;
 }
 
-export function CharacterPreview({ name, src, children, details, side = "right", className = "" }: {
+export function CharacterPreview({ name, src, children, details, side = "right", className = "", showButton = true }: {
   name: string; src?: string | null; children: ReactNode; details?: ReactNode;
   side?: "left" | "right"; className?: string;
+  showButton?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [narrow, setNarrow] = useState(() => window.matchMedia("(max-width: 639px)").matches);
@@ -43,11 +44,11 @@ export function CharacterPreview({ name, src, children, details, side = "right",
           {children}
         </div>
       </HoverCard.Trigger>
-      <button type="button" aria-label={`查看${name}的人物形象`} aria-expanded={open}
+      {showButton && <button type="button" aria-label={`查看${name}的人物形象`} aria-expanded={open}
         onClick={event => { event.stopPropagation(); setOpen(value => !value); }}
         className="absolute bottom-1 right-1 rounded-full bg-background/85 p-1.5 text-muted-foreground shadow-sm hover:text-primary [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:focus:opacity-100 [@media(hover:hover)]:hover:opacity-100">
         <Eye className="h-3 w-3" />
-      </button>
+      </button>}
     </div>
     <HoverCard.Portal>
       <HoverCard.Content side={narrow ? "top" : side} align="center" sideOffset={10} collisionPadding={details ? { top: 76, bottom: 12, left: 12, right: 12 } : 12}

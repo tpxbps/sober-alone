@@ -88,20 +88,19 @@ async def test_real_graph_summary_tool_progress_and_checkpoint_keep_role_text(mo
             checkpointer=saver,
             middleware=[],
         )
-        if retry and attempt == 0:
+        invocation = config
+        if attempt == 0 and retry:
+            invocation = await agent.aupdate_state(config, {"messages": []})
+            # The graph must expose a transport failure to the durable runner;
+            # a new attempt branches from its saved input checkpoint.
             with pytest.raises(httpx.ReadError):
-                async for _ in agent.astream(
-                    state,
-                    {"configurable": {"thread_id": "failed-isolated-attempt"}},
-                    stream_mode=["messages", "custom"],
-                ):
+                async for _ in agent.astream(state, invocation, stream_mode=["messages", "custom"]):
                     pass
-            assert len(role.calls) == 1  # no hidden middleware retry
         events = [
             event
             async for event in agent.astream(
                 state if attempt == 0 else {"messages": [HumanMessage(content="再次核对")]},
-                config,
+                invocation,
                 stream_mode=["messages", "custom"],
             )
         ]

@@ -55,6 +55,9 @@ async def test_healthz_checks_local_database_only():
 async def test_lifespan_fails_fast_until_schema_exists(monkeypatch):
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     monkeypatch.setattr("app.main.engine", engine)
+    monkeypatch.setattr(
+        "app.main.game_turn_runner.factory", async_sessionmaker(engine, expire_on_commit=False)
+    )
 
     with pytest.raises(DatabaseNotInitializedError, match="app.cli init"):
         async with lifespan(app):
