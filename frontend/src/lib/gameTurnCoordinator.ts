@@ -255,7 +255,7 @@ export async function resumeSpeech(get: Get, set: Set) {
   if (!state.sessionId || connection) return;
   const pending = readGameLocal<{ content: string; id: string; clues: PublicClue[] }>(state.sessionId, 'pending');
   if (pending) queueHumanSpeech(get, set, pending.content, pending.clues, pending.id);
-  if (state.activeTurn) {
+  if (state.activeTurn && state.activeTurn.seq >= 0) {
     const turn = state.activeTurn;
     if (['failed', 'blocked', 'cancelled'].includes(turn.status)) return;
     return connect(get, set, signal => speechApi.turnEvents(state.sessionId!, turn.turn_id, turn.seq, signal));

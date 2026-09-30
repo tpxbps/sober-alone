@@ -117,6 +117,19 @@ describe('durable turn coordination', () => {
     state().cancelActiveOperations(); await second;
   });
 
+  it('detached optimistic reservation resends its idempotent command instead of subscribing to an unaccepted turn', async () => {
+    const first = channel(); const resumed = channel();
+    api.aiSpeakStream.mockResolvedValueOnce(first.response).mockResolvedValueOnce(resumed.response);
+    const work = state().triggerAISpeak('ai');
+    const id = state().activeTurn!.turn_id;
+    state().cancelActiveOperations(); await work;
+    const recovery = state().resumeActiveTurn();
+    await vi.waitFor(() => expect(api.aiSpeakStream).toHaveBeenCalledTimes(2));
+    expect(api.aiSpeakStream.mock.calls[1][3].request_id).toBe(id);
+    expect(api.turnEvents).not.toHaveBeenCalled();
+    state().cancelActiveOperations(); await recovery;
+  });
+
   it('EOF without done retains text and reconnects without generating again', async () => {
     vi.useFakeTimers();
     const lost = channel(); const resumed = channel();
