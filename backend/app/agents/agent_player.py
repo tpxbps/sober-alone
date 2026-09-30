@@ -556,6 +556,9 @@ submit_final_vote(suspect_name="角色全名", reasoning="1-2句投票理由")
             raise
         except Exception as e:
             raise_for_inference_recovery(e)
+            from app.services.turn_errors import mark_model_error
+
+            mark_model_error(e, self.llm_model)
             raise
         finally:
             # 清除 db_session 上下文

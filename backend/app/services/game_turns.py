@@ -20,6 +20,7 @@ from app.game.citation_stream import CitationStreamFilter
 from app.game.clue_media import presentation_pending
 from app.game.clues import parse_clue_citations, stage_public_clues
 from app.game.turn_state import finish_pending, process_turn
+from app.services.turn_errors import turn_error_message
 
 logger = logging.getLogger(__name__)
 RUNNING = ("queued", "speaking", "committing", "reacting")
@@ -418,9 +419,10 @@ class GameTurnRunner:
             raise
         except Exception as error:
             logger.warning("Turn failed turn=%s error=%s", turn_id, type(error).__name__)
-            await self.fail(
-                turn_id, "failed", "execution_failed", "本轮暂时未能完成，请重试", draft
+            code, message = turn_error_message(
+                error, empty_output=isinstance(error, EmptySpeechError)
             )
+            await self.fail(turn_id, "failed", code, message, draft)
 
         finally:
             if attempt:

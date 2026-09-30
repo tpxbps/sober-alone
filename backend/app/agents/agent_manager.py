@@ -321,6 +321,9 @@ class AgentManager:
             raise
         except Exception as e:
             raise_for_inference_recovery(e)
+            from app.services.turn_errors import mark_model_error
+
+            mark_model_error(e, getattr(agent, "reaction_llm_model", None))
             raise
 
     async def make_ai_speak(self, character_id: str, game_state: dict[str, Any], stage: str):

@@ -32,9 +32,9 @@ export function StreamingBubble({ record, isHuman }: { record: GameRecord; isHum
       allowedCitationIds={record.stage === 'intro' ? [] : (turn?.clue_refs ?? record.clue_refs ?? [])}
       preserveWhitespace={isHuman}>{content}</GameMessageMarkdown>
     {record.pending && !turn && <p className="mt-1 text-xs text-muted-foreground">将在当前回应结束后发送</p>}
-    {failed && <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground" role="status">
-      <span>{turn.error_message}</span>
-      <button type="button" className="text-primary underline disabled:opacity-50" disabled={reconnecting}
+    {failed && <div className="mt-2 flex flex-wrap items-start gap-2 text-xs text-muted-foreground" role="status">
+      <span className="min-w-0 break-words">{turn.error_message}</span>
+      <button type="button" className="shrink-0 text-primary underline disabled:opacity-50" disabled={reconnecting}
         onClick={() => void retry()}>重试本轮</button>
     </div>}
   </div>;

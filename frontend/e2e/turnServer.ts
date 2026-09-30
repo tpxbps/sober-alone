@@ -92,9 +92,9 @@ export async function turnServer(stage: 'intro' | 'free_discussion' = 'intro') {
     url: `http://127.0.0.1:${address.port}/?session=continuity`,
     get retries() { return retries; },
     get turn() { return active; }, get posts() { return posts; }, get subscriptions() { return subscriptions; },
-    update(status: GameTurn['status'], content?: string, nextSpeaker: string | null = 'human') {
+    update(status: GameTurn['status'], content?: string, nextSpeaker: string | null = 'human', errorMessage = '') {
       if (!active) throw new Error('No active turn');
-      active = { ...active, status, seq: active.seq + 1, content: content ?? active.content };
+      active = { ...active, error_message: errorMessage, status, seq: active.seq + 1, content: content ?? active.content };
       if (status === 'reacting') {
         active.record_id = records.length + 1;
         active.state_revision = ++revision;
