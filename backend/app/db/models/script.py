@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, true
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -34,6 +34,9 @@ class Script(Base):
     free_speech_limits: Mapped[list] = mapped_column(JSON, default=list)
     is_ai_generated: Mapped[bool] = mapped_column(Boolean, default=False)
     owner_key_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    optimization_authorized: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=true()
+    )
     content_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
     ai_review: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     quality_report: Mapped[dict | None] = mapped_column(JSON, nullable=True)

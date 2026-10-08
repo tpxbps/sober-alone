@@ -538,7 +538,7 @@ async def list_scripts(
         text(
             "SELECT script_id, title, overview, tags, difficulty, player_count, "
             "cover_image_url, is_ai_generated, estimated_duration, owner_key_hash, "
-            "content_fingerprint, ai_review FROM scripts"
+            "content_fingerprint, ai_review, optimization_authorized FROM scripts"
         )
     )
     scripts = result.fetchall()
@@ -560,6 +560,7 @@ async def list_scripts(
                 "is_ai_generated": bool(row[7]) if row[7] is not None else False,
                 "estimated_duration": row[8] if row[8] else 0,
                 "can_manage": owner_hash_matches(row[9], owner_key_hash),
+                "optimization_authorized": bool(row[12]),
                 "feedback_summary": summaries.get(row[0], feedback_summary()),
                 "ai_review": public_ai_review(
                     json.loads(row[11]) if isinstance(row[11], str) else row[11], row[10]

@@ -20,6 +20,7 @@ REQUIRED_COLUMNS = {
     "scripts": frozenset(
         {
             "owner_key_hash",
+            "optimization_authorized",
             "clue_stages",
             "clue_schema_version",
             "content_fingerprint",

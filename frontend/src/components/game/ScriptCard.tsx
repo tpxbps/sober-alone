@@ -8,8 +8,10 @@ import {
   Trash2,
   Sparkles,
   Pencil,
+  ShieldCheck,
 } from "lucide-react";
 import { ScriptRating } from "./ScriptRating";
+import { ScriptOptimizationDialog } from "./ScriptOptimizationDialog";
 import type { Script } from "@/types/game";
 import { editorApi } from "@/lib/editorApi";
 import { getScriptDisplayTags } from "@/lib/scriptDisplay";
@@ -19,18 +21,21 @@ interface ScriptCardProps {
   onClick: () => void;
   onDeleted?: () => void;
   onEdit?: () => void;
+  onAuthorizationChanged: (authorized: boolean) => void;
   quiet?: boolean;
   selected?: boolean;
   previewsEnabled?: boolean;
 }
 
-export function ScriptCard({ script, onClick, onDeleted, onEdit, quiet = false, selected = false, previewsEnabled = true }: ScriptCardProps) {
+export function ScriptCard({ script, onClick, onDeleted, onEdit, onAuthorizationChanged, quiet = false, selected = false, previewsEnabled = true }: ScriptCardProps) {
   const displayTags = getScriptDisplayTags(script);
 
   const [showMenu, setShowMenu] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showOptimization, setShowOptimization] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const manageButtonRef = useRef<HTMLButtonElement>(null);
 
   // 点击外部关闭菜单
   useEffect(() => {
@@ -61,6 +66,7 @@ export function ScriptCard({ script, onClick, onDeleted, onEdit, quiet = false, 
   };
 
   return (
+    <>
     <motion.div
       whileTap={quiet ? undefined : { scale: 0.995 }}
       data-script-id={script.script_id}
@@ -79,6 +85,7 @@ export function ScriptCard({ script, onClick, onDeleted, onEdit, quiet = false, 
         {script.can_manage && (
           <div ref={menuRef} className="absolute top-3 left-3 z-10">
             <button
+              ref={manageButtonRef}
               aria-label={`管理剧本 ${script.title}`}
               onClick={(e) => {
                 e.stopPropagation();
@@ -101,6 +108,17 @@ export function ScriptCard({ script, onClick, onDeleted, onEdit, quiet = false, 
                 >
                   <Pencil className="w-3.5 h-3.5" />
                   编辑剧本
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowMenu(false);
+                    setShowOptimization(true);
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary/50 transition-colors"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  优化授权
                 </button>
                 <button
                   onClick={(e) => {
@@ -157,7 +175,7 @@ export function ScriptCard({ script, onClick, onDeleted, onEdit, quiet = false, 
             <Clock className="w-3.5 h-3.5" />
             <span>{script.estimated_duration}分钟</span>
           </div>
-          <ScriptRating script={script} disabled={!previewsEnabled || showMenu || showDeleteConfirm} />
+          <ScriptRating script={script} disabled={!previewsEnabled || showMenu || showDeleteConfirm || showOptimization} />
         </div>
 
         {/* Overview */}
@@ -200,5 +218,14 @@ export function ScriptCard({ script, onClick, onDeleted, onEdit, quiet = false, 
         </div>
       )}
     </motion.div>
+    {showOptimization && script.can_manage && (
+      <ScriptOptimizationDialog
+        script={script}
+        onClose={() => setShowOptimization(false)}
+        onSaved={onAuthorizationChanged}
+        onRestoreFocus={() => manageButtonRef.current?.focus({ preventScroll: true })}
+      />
+    )}
+    </>
   );
 }

@@ -123,6 +123,7 @@ def test_script_editor_route_split_preserves_public_paths_and_methods():
         "/api/v1/script-editor/steps/info": {"get"},
         "/api/v1/script-editor/scripts/{script_id}": {"delete"},
         "/api/v1/script-editor/scripts/{script_id}/edit": {"post"},
+        "/api/v1/script-editor/scripts/{script_id}/optimization-authorization": {"put"},
         "/api/v1/script-editor/legacy-ownership/claim": {"post"},
         "/api/v1/script-editor/{thread_id}/asset-progress": {"get"},
         "/api/v1/script-editor/{thread_id}/convert-progress": {"get"},
