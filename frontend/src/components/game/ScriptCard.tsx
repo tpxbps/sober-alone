@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
+import { DialogFooter } from "@/components/ui/dialog";
 import { StoryCover } from "@/components/lobby/StoryCover";
 import {
   Users,
@@ -193,7 +194,7 @@ export function ScriptCard({ script, onClick, onDeleted, onEdit, onAuthorization
           <div className="text-center p-4 space-y-3">
             <p className="text-sm font-medium">确认删除「{script.title}」？</p>
             <p className="text-xs text-muted-foreground">此操作不可恢复</p>
-            <div className="flex items-center gap-2 justify-center">
+            <DialogFooter>
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -213,7 +214,7 @@ export function ScriptCard({ script, onClick, onDeleted, onEdit, onAuthorization
               >
                 {isDeleting ? "删除中..." : "确认删除"}
               </button>
-            </div>
+            </DialogFooter>
           </div>
         </div>
       )}

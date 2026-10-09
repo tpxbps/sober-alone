@@ -18,7 +18,7 @@ import { usePersonalScriptRead } from "@/hooks/usePersonalScriptRead";
 import { PlayerScriptTooltip } from "@/components/game/PlayerScriptTooltip";
 import { DraftNotebook } from "@/components/game/DraftNotebook";
 import { SettingsModal } from "@/components/SettingsModal";
-import { Dialog, DialogContent, DialogTitle, DialogDescription, DialogClose } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogTitle, DialogDescription, DialogClose } from "@/components/ui/dialog";
 import { Markdown } from "@/components/ui/Markdown";
 import type { Character, GameStage } from "@/types/game";
 import { resolveDisplayedSpeakerId } from "@/lib/speakerPresentation";
@@ -526,14 +526,14 @@ export function GamePage({ sessionId, onExit }: GamePageProps) {
           <DialogTitle className="font-serif text-xl">{script?.title}</DialogTitle>
           <DialogDescription className="sr-only">当前剧本简介</DialogDescription>
           {script?.description && <Markdown className="text-sm text-muted-foreground leading-relaxed">{script.description}</Markdown>}
-          <DialogClose asChild><button className="justify-self-start px-4 py-2 rounded-lg bg-primary text-primary-foreground">关闭</button></DialogClose>
+          <DialogFooter><DialogClose asChild><button className="px-4 py-2 rounded-lg bg-primary text-primary-foreground">关闭</button></DialogClose></DialogFooter>
         </DialogContent>
       </Dialog>
       <Dialog open={showSpeechReminder} onOpenChange={setShowSpeechReminder}>
         <DialogContent className="sm:max-w-sm">
           <DialogTitle>发言提醒</DialogTitle>
           <DialogDescription>自由讨论阶段，每位玩家（包括您）至少需要进行一次发言，游戏才可以正常推进。</DialogDescription>
-          <DialogClose asChild><button className="px-6 py-2.5 rounded-lg bg-primary text-primary-foreground font-medium hover:bg-primary/90">我知道了</button></DialogClose>
+          <DialogFooter><DialogClose asChild><button className="px-6 py-2.5 rounded-lg bg-primary text-primary-foreground font-medium hover:bg-primary/90">我知道了</button></DialogClose></DialogFooter>
         </DialogContent>
       </Dialog>
 
