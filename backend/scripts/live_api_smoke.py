@@ -29,7 +29,6 @@ from app.db.base import Base
 from app.db.models import GameRecord, PlayerState
 from app.seed import CHARACTERS, SAMPLE_SCRIPT_ID, seed_sample_if_empty
 from app.services.game_service import GameService, remove_flow_controller
-from app.services.game_turns import GameTurnRunner
 from app.services.tts_service import TTSService
 
 
@@ -111,18 +110,12 @@ async def deepseek_smoke() -> None:
                 raise RuntimeError("Flow controller was not registered")
             flow.session.speech_queue = [ai_character_id]
             flow.session.current_speaker = ai_character_id
-            await session.commit()
 
             event_types: list[str] = []
-            runner = GameTurnRunner(session_factory)
-            turn = await runner.start(session_id, ai_character_id, "ai")
-            async for payload in runner.events(session_id, turn["turn_id"]):
-                if not payload.startswith("data: "):
-                    continue
+            async for payload in service.process_ai_speech_stream(session_id, ai_character_id):
                 event = json.loads(payload.removeprefix("data: ").strip())
                 event_types.append(event["type"])
-            await runner.shutdown()
-            if "turn_snapshot" not in event_types or event_types[-1] != "done":
+            if "token" not in event_types or event_types[-2:] != ["speech_done", "done"]:
                 raise RuntimeError(f"Unexpected SSE event sequence: {event_types}")
             report("deepseek.ai_sse", events=len(event_types))
 

@@ -1,7 +1,7 @@
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, StrictBool, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class StartWorkflowRequest(BaseModel):
@@ -19,10 +19,6 @@ class StartWorkflowRequest(BaseModel):
 
 class LegacyOwnershipClaimRequest(BaseModel):
     legacy_owner_uuids: list[UUID] = Field(min_length=1, max_length=100)
-
-
-class ScriptOptimizationAuthorizationRequest(BaseModel):
-    optimization_authorized: StrictBool
 
 
 class ResumeWorkflowRequest(BaseModel):

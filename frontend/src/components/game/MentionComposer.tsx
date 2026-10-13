@@ -21,7 +21,6 @@ export interface MentionComposerHandle {
 
 interface MentionComposerProps {
   toolbar?: ReactNode;
-  initialValue?: string;
   characters: Character[];
   clues: PublicClue[];
   disabled?: boolean;
@@ -52,14 +51,11 @@ function serialize(root: HTMLElement): string {
 
 export const MentionComposer = forwardRef<MentionComposerHandle, MentionComposerProps>(
   function MentionComposer(
-    { characters, clues, disabled, toolbar, initialValue = "", maxLength = 3000, onChange, onCtrlEnter, onEnter },
+    { characters, clues, disabled, toolbar, maxLength = 3000, onChange, onCtrlEnter, onEnter },
     forwardedRef,
   ) {
     const editorRef = useRef<HTMLDivElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
-    useEffect(() => {
-      if (editorRef.current) editorRef.current.textContent = initialValue;
-    }, [initialValue]);
     const listboxRef = useRef<HTMLDivElement>(null);
     const savedRangeRef = useRef<Range | null>(null);
     const triggerRangeRef = useRef<Range | null>(null);

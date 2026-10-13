@@ -238,23 +238,17 @@ async def run(args):
                     stream = service.process_ai_speech_stream(sid, speaker)
                 async with asyncio.timeout(240):
                     async for payload in stream:
-                        if not payload.startswith("data: "):
-                            continue
                         event = json.loads(payload.removeprefix("data: ").strip())
                         events.append(event["type"])
-                        if event["type"] == "error" or event.get("turn", {}).get("status") in (
-                            "failed",
-                            "blocked",
-                        ):
+                        if event["type"] == "error":
                             raise RuntimeError("SSE error")
-                        if event.get("turn", {}).get("content"):
+                        if event["type"] == "token" and event.get("text"):
                             if first_token is None:
                                 first_token = round(time.perf_counter() - started, 3)
-                            chars = len(event["turn"]["content"])
+                            chars += len(event["text"])
                 if not events or events[-1] != "done":
                     raise RuntimeError("SSE did not terminate")
-                next_speaker = event["state"].get("current_speaker_id")
-                db.expire_all()
+                next_speaker = event.get("next_speaker_id")
                 if speaker != human_id:
                     item = {
                         "model": assigned[speaker]["model"],

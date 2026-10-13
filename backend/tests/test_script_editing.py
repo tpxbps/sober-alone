@@ -233,7 +233,6 @@ async def test_edit_save_updates_in_place_and_preserves_sessions_and_resources(
     created_at = datetime(2025, 1, 1)
     script, characters = completed_script()
     script.created_at = created_at
-    script.optimization_authorized = False
     script.cover_image_url = "/images/old-cover.png"
     characters[0].avatar_url = "/images/old-avatar.png"
     async with factory() as session:
@@ -277,7 +276,6 @@ async def test_edit_save_updates_in_place_and_preserves_sessions_and_resources(
         assert persisted.title == "原位更新标题"
         assert persisted.ending_config == state["game_data_sections"]["ending_config"]
         assert persisted.created_at == created_at
-        assert persisted.optimization_authorized is False
         assert persisted.cover_image_url == "/images/old-cover.png"
         assert persisted_character is not None
         assert persisted_character.avatar_url == "/images/old-avatar.png"

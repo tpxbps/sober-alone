@@ -1,6 +1,5 @@
 import axios from 'axios';
 import { warmCluePresentation } from '@/lib/clueImageLoader';
-import { decodeSpeechEvents } from './sse';
 import { characterImages } from './characterImages';
 import type {
   Script,
@@ -11,6 +10,7 @@ import type {
   GameRecord,
   StageTransition,
   VoteResults,
+  StreamingMessage,
   LLMConfig,
 } from '@/types/game';
 import type { ModelHealthResponse, SystemCapabilities } from '@/types/capabilities';
@@ -192,24 +192,15 @@ export const gameApi = {
 };
 
 // ============ Speech APIs ============
-async function openSpeech(url: string, init: RequestInit = {}): Promise<Response> {
-  const headers = new AbortController();
-  const timer = setTimeout(() => headers.abort(), 30000);
-  try {
-    return await fetch(url, { ...init, signal: init.signal
-      ? AbortSignal.any([init.signal, headers.signal]) : headers.signal });
-  } finally { clearTimeout(timer); }
-}
-
 export const speechApi = {
   // Human player speech (SSE streaming)
-  humanSpeakStream: async (sessionId: string, content: string, signal?: AbortSignal, command?: { request_id: string; expected_revision: number }): Promise<Response> => {
-    const response = await openSpeech(
+  humanSpeakStream: async (sessionId: string, content: string, signal?: AbortSignal): Promise<Response> => {
+    const response = await fetch(
       `${API_BASE_URL}/game/${sessionId}/speech`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content, ...command }),
+        body: JSON.stringify({ content }),
         signal,
       }
     );
@@ -217,30 +208,73 @@ export const speechApi = {
   },
 
   // AI speech stream (SSE)
-  aiSpeakStream: async (sessionId: string, characterId: string, signal?: AbortSignal, command?: { request_id: string; expected_revision: number }): Promise<Response> => {
-    const response = await openSpeech(
-      `${API_BASE_URL}/game/${sessionId}/ai-speech/${characterId}`,
+  aiSpeakStream: async (sessionId: string, characterId: string, signal?: AbortSignal, generationId?: string, retry = false): Promise<Response> => {
+    const headerController = new AbortController();
+    const timer = setTimeout(() => headerController.abort(new Error('连接暂时中断，请重试。')), 15000);
+    try {
+    const response = await fetch(
+      `${API_BASE_URL}/game/${sessionId}/${retry ? "speech/retry" : `ai-speech/${characterId}`}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(command ?? {}),
-        signal,
+        body: JSON.stringify({ generation_id: generationId }),
+        signal: signal ? AbortSignal.any([signal, headerController.signal]) : headerController.signal,
       }
     );
     return response;
+    } finally { clearTimeout(timer); }
   },
 
-  turnEvents: (sessionId: string, turnId: string, seq: number, signal?: AbortSignal): Promise<Response> =>
-    openSpeech(`${API_BASE_URL}/game/${sessionId}/turns/${turnId}/events?after_seq=${seq}`, { signal }),
+  // Process SSE stream
+  processSSEStream: async function* (
+    response: Response,
+    signal?: AbortSignal,
+    idleMs = 0,
+  ): AsyncGenerator<StreamingMessage> {
+    if (!response.ok) throw new Error(`发言请求失败 (${response.status})`);
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error('Response body is not readable');
 
-  retryTurn: (sessionId: string, turnId: string, attempt: number, signal?: AbortSignal): Promise<Response> =>
-    openSpeech(`${API_BASE_URL}/game/${sessionId}/turns/${turnId}/retry`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ expected_attempt: attempt }), signal,
-    }),
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let lastEvent = Date.now();
+    try {
+    while (true) {
+      if (signal?.aborted) break;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let packet: ReadableStreamReadResult<Uint8Array>;
+      try {
+        packet = idleMs ? await Promise.race([
+          reader.read(),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error('连接暂时中断，请重试。')), Math.max(0, idleMs - (Date.now() - lastEvent)));
+          }),
+        ]) : await reader.read();
+      } finally { if (timer) clearTimeout(timer); }
+      const { done, value } = packet;
+      if (done) break;
 
-  processSSEStream: decodeSpeechEvents,
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
 
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            lastEvent = Date.now();
+            yield data;
+          } catch {
+            // Skip invalid JSON
+          }
+        }
+      }
+    }
+    } finally {
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
+    }
+  },
 };
 
 // ============ Vote APIs ============

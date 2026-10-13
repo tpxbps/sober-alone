@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Dialog, DialogContent, DialogFooter, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import {
   ChevronDown,
@@ -265,15 +265,13 @@ export function SettingsModal({
           </>
         )}
 
-        <DialogFooter className="mt-5">
-          <button
-            onClick={onClose}
-            className="px-4 py-2.5 rounded-lg bg-secondary hover:bg-secondary/80
-                     text-sm font-medium transition-colors"
-          >
-            关闭
-          </button>
-        </DialogFooter>
+        <button
+          onClick={onClose}
+          className="w-full mt-5 px-4 py-2.5 rounded-lg bg-secondary hover:bg-secondary/80
+                   text-sm font-medium transition-colors"
+        >
+          关闭
+        </button>
       </DialogContent>
     </Dialog>
   );

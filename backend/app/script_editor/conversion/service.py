@@ -488,7 +488,7 @@ async def convert_to_game_data(state: ScriptGenState) -> dict:
         json.dumps(
             [
                 PROMPT_VERSION,
-                "conversion-v4-portrait-appearance",
+                "conversion-v3-output-cache",
                 material,
                 state.get("game_data_sections")
                 if (state.get("refinement") or {}).get("target") == "review_game_data"

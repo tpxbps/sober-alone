@@ -58,13 +58,7 @@ async def public_character(llm, state, character, prompt):
         for c in group
     ]
     expected = {c["character_id"] for c in group}
-    material = {
-        "角色": identities,
-        "全剧公开角色": [
-            {k: c.get(k) for k in ("name", "gender", "age", "occupation")} for c in characters
-        ],
-        **audience_material(state),
-    }
+    material = {"角色": identities, **audience_material(state)}
 
     def validate(value):
         if (
@@ -82,9 +76,7 @@ async def public_character(llm, state, character, prompt):
             llm,
             PublicRoles,
             prompt + "\n为输入的全部角色分别生成公开选角简介、外貌及音色。"
-            "只为「角色」列表返回结果；「全剧公开角色」仅用于对照人物辨识度。"
-            "简介与外貌各约100至200字，只用公开材料，不能猜测秘密。"
-            "外貌着重区分脸型五官、年龄感、发型体态与衣着材质，不通过不同背景、灯光或画风区分角色。",
+            "每项约100至200字，只用公开材料，不能猜测秘密。",
             material,
             validate=validate,
         ),

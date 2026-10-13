@@ -513,7 +513,7 @@ class VotingService:
             sql_text(
                 "UPDATE game_sessions SET current_stage = :stage, "
                 "current_round = :round, status = :status, "
-                "speech_queue = :queue, current_speaker = :speaker, state_revision = state_revision + 1 "
+                "speech_queue = :queue, current_speaker = :speaker "
                 "WHERE session_id = :session_id"
             ),
             {

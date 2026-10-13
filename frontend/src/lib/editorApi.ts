@@ -124,17 +124,6 @@ export const editorApi = {
     return response.data;
   },
 
-  updateOptimizationAuthorization: async (scriptId: string, authorized: boolean): Promise<{
-    success: boolean;
-    script_id: string;
-    optimization_authorized: boolean;
-  }> => {
-    const response = await api.put(`/script-editor/scripts/${scriptId}/optimization-authorization`, {
-      optimization_authorized: authorized,
-    }, { timeout: 15000 });
-    return response.data;
-  },
-
   // Delete a script
   deleteScript: async (scriptId: string) => {
     const response = await api.delete(`/script-editor/scripts/${scriptId}`);

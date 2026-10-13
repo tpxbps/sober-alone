@@ -393,10 +393,7 @@ def normalize_game_data(state: ScriptGenState) -> dict[str, Any]:
 
 
 def _task_dependencies(state: ScriptGenState) -> list[dict[str, Any]]:
-    from app.script_editor.services.portrait_direction import portrait_context
-
     sections = state.get("game_data_sections", {})
-    visual_context = portrait_context(state)
     characters = state.get("characters", [])
     scripts = state.get("character_scripts", {})
     tasks: list[dict[str, Any]] = []
@@ -425,7 +422,6 @@ def _task_dependencies(state: ScriptGenState) -> list[dict[str, Any]]:
                 "title": state.get("script_title", ""),
                 "overview": sections.get("overview", ""),
                 "description": sections.get("description", ""),
-                "visual_context": visual_context,
             },
         }
     )
@@ -440,9 +436,6 @@ def _task_dependencies(state: ScriptGenState) -> list[dict[str, Any]]:
                     "name": character.get("name", ""),
                     "gender": character.get("gender", ""),
                     "appearance": character.get("appearance", ""),
-                    "age": character.get("age"),
-                    "occupation": character.get("occupation", ""),
-                    "visual_context": visual_context,
                 },
             }
         )

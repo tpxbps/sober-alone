@@ -32,7 +32,6 @@ export interface Script {
   full_truth?: string;
   is_ai_generated?: boolean;
   can_manage: boolean;
-  optimization_authorized?: boolean;
   feedback_summary?: { total: number; positive: number; positive_rate: number | null; label: string; threshold: number };
   ai_review?: { score: number; model: string; reviewed_at: string; rubric_version: string;
     dimensions: Array<{ key: string; label: string; weight: number; score: number }> } | null;
@@ -81,9 +80,6 @@ export interface PlayerState {
 // Game record from backend
 export interface GameRecord {
   id: number;
-  uiKey?: string;
-  pending?: boolean;
-  turn_id?: string | null;
   session_id: string;
   stage: string;
   speaker_id?: string;
@@ -92,25 +88,6 @@ export interface GameRecord {
   record_type: 'system' | 'speech' | 'action';
   audio_url?: string; // TTS audio file URL
   clue_refs?: string[];
-  created_at: string;
-}
-
-export interface GameTurn {
-  turn_id: string;
-  session_id: string;
-  speaker_id: string;
-  kind: 'ai' | 'human';
-  stage: string;
-  status: 'queued' | 'speaking' | 'committing' | 'reacting' | 'completed' | 'failed' | 'blocked' | 'cancelled';
-  attempt: number;
-  seq: number;
-  state_revision: number;
-  content: string;
-  thinking_tip: string;
-  clue_refs: string[];
-  record_id: number | null;
-  error_code: string;
-  error_message: string;
   created_at: string;
 }
 
@@ -148,10 +125,7 @@ export interface GameSessionState {
 
 // Streaming message types
 export interface StreamingMessage {
-  type: 'turn_snapshot' | 'speech_recorded' | 'resync' | 'token' | 'complete' | 'done' | 'error' | 'progress' | 'tool_call' | 'tool_result' | 'thinking' | 'thinking_end' | 'speech_done' | 'reactions_done' | 'audio_delta' | 'audio_done' | 'heartbeat' | 'speech_status';
-  turn?: GameTurn;
-  record?: GameRecord | null;
-  state?: GameStateResponse;
+  type: 'token' | 'complete' | 'done' | 'error' | 'progress' | 'tool_call' | 'tool_result' | 'thinking' | 'thinking_end' | 'speech_done' | 'reactions_done' | 'audio_delta' | 'audio_done' | 'heartbeat' | 'speech_status';
   generation?: SpeechGeneration;
   character_id?: string;
   character_name?: string;
@@ -223,8 +197,6 @@ export interface StageTransition {
 // Game state response
 export interface GameStateResponse {
   speech_generation?: SpeechGeneration | null;
-  state_revision?: number;
-  active_turn?: GameTurn | null;
   turn_processing?: boolean;
   success: boolean;
   session_id: string;
@@ -285,10 +257,6 @@ export interface AgentLlmInfo {
 export interface GameState {
   speechGeneration: SpeechGeneration | null;
   speechConnectionError: string;
-  stateRevision: number;
-  activeTurn: GameTurn | null;
-  isReconnecting: boolean;
-  pendingHumanRequestId: string | null;
   // Session info
   sessionId: string | null;
   scriptId: string;

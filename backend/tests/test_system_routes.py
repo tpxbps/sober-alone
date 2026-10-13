@@ -55,9 +55,6 @@ async def test_healthz_checks_local_database_only():
 async def test_lifespan_fails_fast_until_schema_exists(monkeypatch):
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     monkeypatch.setattr("app.main.engine", engine)
-    monkeypatch.setattr(
-        "app.main.game_turn_runner.factory", async_sessionmaker(engine, expire_on_commit=False)
-    )
 
     with pytest.raises(DatabaseNotInitializedError, match="app.cli init"):
         async with lifespan(app):
@@ -123,7 +120,6 @@ def test_script_editor_route_split_preserves_public_paths_and_methods():
         "/api/v1/script-editor/steps/info": {"get"},
         "/api/v1/script-editor/scripts/{script_id}": {"delete"},
         "/api/v1/script-editor/scripts/{script_id}/edit": {"post"},
-        "/api/v1/script-editor/scripts/{script_id}/optimization-authorization": {"put"},
         "/api/v1/script-editor/legacy-ownership/claim": {"post"},
         "/api/v1/script-editor/{thread_id}/asset-progress": {"get"},
         "/api/v1/script-editor/{thread_id}/convert-progress": {"get"},

@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { X, CheckCircle, AlertTriangle } from "lucide-react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { DialogFooter } from "@/components/ui/dialog";
 import type { Character, VoteResults, VoteInfo } from "@/types/game";
 
 interface VotingModalProps {
@@ -322,11 +321,11 @@ export function VotingModal({
 
             {/* Footer */}
             {!showResults && !hasAlreadyVoted && (
-              <DialogFooter className="p-6 border-t border-border/50">
+              <div className="p-6 border-t border-border/50">
                 <button
                   onClick={handleSubmit}
                   disabled={!selectedSuspect || isSubmitting}
-                  className="px-6 py-3 rounded-xl bg-primary text-primary-foreground font-medium
+                  className="w-full py-4 rounded-xl bg-primary text-primary-foreground font-medium
                            hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed
                            transition-all flex items-center justify-center gap-2 glow"
                 >
@@ -339,7 +338,7 @@ export function VotingModal({
                     "确认投票"
                   )}
                 </button>
-              </DialogFooter>
+              </div>
             )}
           </motion.div>
         </Dialog.Content>

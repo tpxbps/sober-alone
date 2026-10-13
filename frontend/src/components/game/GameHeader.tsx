@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Settings, LogOut, BookOpen } from 'lucide-react';
-import { Dialog, DialogContent, DialogFooter, DialogTitle, DialogDescription, DialogClose } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogTitle, DialogDescription, DialogClose } from '@/components/ui/dialog';
 import { STAGE_NAMES, type GameStage } from '@/types/game';
 import { BookIcon } from '@/components/ui/BookIcon';
 
@@ -100,13 +100,13 @@ export function GameHeader({
         <DialogContent className="sm:max-w-sm">
           <DialogTitle>确认退出</DialogTitle>
           <DialogDescription>确定要退出当前游戏吗？游戏进度不会保存。</DialogDescription>
-          <DialogFooter className="gap-3">
+          <div className="flex gap-3">
             <DialogClose asChild>
-              <button className="px-4 py-2.5 rounded-lg bg-secondary text-secondary-foreground hover:bg-secondary/80">继续游戏</button>
+              <button className="flex-1 py-2.5 rounded-lg bg-secondary text-secondary-foreground hover:bg-secondary/80">继续游戏</button>
             </DialogClose>
             <button onClick={() => { setShowExitConfirm(false); onExit(); }}
-              className="px-4 py-2.5 rounded-lg bg-destructive text-destructive-foreground font-medium hover:bg-destructive/90">确认退出</button>
-          </DialogFooter>
+              className="flex-1 py-2.5 rounded-lg bg-destructive text-destructive-foreground font-medium hover:bg-destructive/90">确认退出</button>
+          </div>
         </DialogContent>
       </Dialog>
     </header>

@@ -101,7 +101,7 @@ class SingleCharacterResult(BaseModel):
     )
     appearance: str = Field(
         default="",
-        description="人物外貌（100-200字）：年龄感、脸型五官、肤色、发型、体态、服装材质与神态；不含背景、灯光或画风",
+        description="外貌描述（100-200字，用于AI绘图提示词，包含体型、发型、服装、特征）",
     )
     system_prompt: str = Field(
         default="",

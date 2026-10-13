@@ -8,10 +8,7 @@ from sqlalchemy import bindparam, delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents import remove_agent_manager
-from app.api.schemas.script_editor import (
-    LegacyOwnershipClaimRequest,
-    ScriptOptimizationAuthorizationRequest,
-)
+from app.api.schemas.script_editor import LegacyOwnershipClaimRequest
 from app.core.config import settings
 from app.db.models import Character, GameSession, Script
 from app.db.session import get_db
@@ -83,29 +80,6 @@ async def claim_legacy_ownership(
         "success": True,
         "claimed_count": claimed_count,
         "matched_count": matched_count,
-    }
-
-
-@router.put("/scripts/{script_id}/optimization-authorization")
-async def update_optimization_authorization(
-    script_id: str,
-    request: ScriptOptimizationAuthorizationRequest,
-    db: AsyncSession = Depends(get_db),
-    owner_key_hash: str = Depends(require_author_key_hash),
-):
-    """Let the author grant or revoke maintainer optimization permission."""
-    script = await db.get(Script, script_id)
-    if not script:
-        raise HTTPException(status_code=404, detail="剧本不存在")
-    if not owner_hash_matches(script.owner_key_hash, owner_key_hash):
-        raise HTTPException(status_code=403, detail="无权修改该剧本的优化授权")
-
-    script.optimization_authorized = request.optimization_authorized
-    await db.commit()
-    return {
-        "success": True,
-        "script_id": script_id,
-        "optimization_authorized": script.optimization_authorized,
     }
 
 
