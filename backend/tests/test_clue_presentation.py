@@ -206,11 +206,16 @@ async def test_gate_blocks_all_speech_and_advance_until_idempotent_ack(game, mon
     assert not (await controller.process_speech("human", "直接入口", is_human=True, db_session=db))[
         "success"
     ]
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.services.game_turns import GameTurnRunner, TurnConflict
+
+    runner = GameTurnRunner(async_sessionmaker(db.bind, expire_on_commit=False))
     for cid in ("a", "human"):
-        events = [event async for event in service.process_ai_speech_stream("g", cid)]
-        assert "clue_presentation_pending" in "".join(events)
-    events = [event async for event in service.process_human_speech_stream("g", "提前说话")]
-    assert "clue_presentation_pending" in "".join(events)
+        with pytest.raises(TurnConflict):
+            await runner.start("g", cid, "ai")
+    with pytest.raises(TurnConflict):
+        await runner.start("g", None, "human", "提前说话")
     assert controller.agent_manager.broadcast_speech.await_count == 0
     assert not (await service.acknowledge_clue_presentation("g", "expired"))["success"]
     # Restore a controller from the persisted session, just as a reload/restart does.

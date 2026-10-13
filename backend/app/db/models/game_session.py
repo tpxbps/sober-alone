@@ -77,6 +77,7 @@ class GameSession(Base):
     # speech_queue: [character_id, ...] - 发言队列
     speech_queue: Mapped[list] = mapped_column(JSON, default=list)
     pending_speech: Mapped[dict] = mapped_column(JSON, default=dict)
+    state_revision: Mapped[int] = mapped_column(Integer, default=0)
 
     # 当前发言角色
     current_speaker: Mapped[str | None] = mapped_column(String(36), nullable=True)

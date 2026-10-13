@@ -18,6 +18,7 @@ from app.script_editor.graph import set_script_gen_graph
 from app.script_editor.services.operation_service import editor_operation_runner
 from app.services.checkpoint_runtime import set_game_checkpointer
 from app.services.game_service import prune_flow_controllers
+from app.services.game_turns import game_turn_runner
 
 
 async def _runtime_janitor(stop: asyncio.Event) -> None:
@@ -51,6 +52,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         set_script_gen_graph(workflows)
         set_game_checkpointer(games)
         await editor_operation_runner.recover_pending()
+        await game_turn_runner.recover()
         stop = asyncio.Event()
         janitor = asyncio.create_task(_runtime_janitor(stop))
         try:
@@ -59,6 +61,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             stop.set()
             await janitor
             await editor_operation_runner.shutdown()
+            await game_turn_runner.shutdown()
             set_game_checkpointer(None)
 
 

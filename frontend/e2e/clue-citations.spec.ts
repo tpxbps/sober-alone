@@ -81,6 +81,7 @@ test('斜杠选择公开线索并在发言气泡展示可访问引用', async ({
       records = [
         {
           id: 1,
+          turn_id: route.request().postDataJSON().request_id,
           session_id: 'clue-session',
           stage: 'free_discussion',
           speaker_id: 'human',

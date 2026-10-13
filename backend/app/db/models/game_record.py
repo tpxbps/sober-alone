@@ -37,6 +37,7 @@ class GameRecord(Base):
     __tablename__ = "game_records"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    turn_id: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
     session_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("game_sessions.session_id", ondelete="CASCADE"), nullable=False
     )
@@ -76,6 +77,7 @@ class GameRecord(Base):
         """转换为字典"""
         return {
             "id": self.id,
+            "turn_id": self.turn_id,
             "session_id": self.session_id,
             "record_type": self.record_type,
             "stage": self.stage,
@@ -101,6 +103,7 @@ class GameRecord(Base):
             "id": self.id,
             "session_id": self.session_id,
             "record_type": self.record_type,  # Frontend expects record_type
+            "turn_id": self.turn_id,
             "stage": self.stage,
             "speaker_id": self.speaker_character_id,  # Frontend expects speaker_id
             "speaker_name": (

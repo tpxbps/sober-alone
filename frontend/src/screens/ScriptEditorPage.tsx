@@ -10,7 +10,7 @@ import {
   X,
 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { Dialog, DialogTrigger, DialogContent, DialogTitle, DialogDescription, DialogClose } from "@/components/ui/dialog";
+import { Dialog, DialogTrigger, DialogContent, DialogFooter, DialogTitle, DialogDescription, DialogClose } from "@/components/ui/dialog";
 import { OutlineWorkspace } from "@/components/script-editor/OutlineWorkspace";
 import { useEditorStore } from "@/stores/editorStore";
 import { HorizontalTimeline } from "@/components/script-editor/HorizontalTimeline";
@@ -303,10 +303,10 @@ export function ScriptEditorPage({ onBack, editScriptId }: ScriptEditorPageProps
                 <DialogDescription>{workflowState?.workflow_mode === "edit"
                   ? "尚未确认保存的修改将被放弃，原剧本不会被删除。"
                   : "确认放弃此剧本？已生成的所有资源将被清除。"}</DialogDescription>
-                <div className="flex justify-end gap-2">
+                <DialogFooter>
                   <DialogClose asChild><button className="rounded-md bg-secondary px-4 py-2 text-sm">取消</button></DialogClose>
                   <button onClick={() => { setShowDiscardConfirm(false); void handleDiscardScript(); }} className="rounded-md bg-destructive px-4 py-2 text-sm text-destructive-foreground">确认放弃</button>
-                </div>
+                </DialogFooter>
               </DialogContent>
             </Dialog>
           )}

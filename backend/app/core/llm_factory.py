@@ -231,14 +231,14 @@ def create_chat_model_for_agent(
     return create_llm(model=model, temperature=0.7, disable_thinking=True)  # type: ignore[arg-type]
 
 
-def create_summary_llm() -> BaseChatModel:
+def create_summary_llm(*, max_retries: int = 2) -> BaseChatModel:
     """Create the summary model, falling back to the configured primary model."""
     if settings.INFERENCE_BACKEND == "tokendance":
         return create_llm(
             model="qwen3.8-flash",
             temperature=0.3,
             timeout=90,
-            max_retries=2,
+            max_retries=max_retries,
             disable_thinking=True,
         )
     api_key = settings.get_api_key("stepfun")
@@ -248,7 +248,7 @@ def create_summary_llm() -> BaseChatModel:
             model=cast(SupportedModel, settings.get_llm_model_name().lower()),
             temperature=0.3,
             timeout=90,
-            max_retries=2,
+            max_retries=max_retries,
             disable_thinking=True,
         )
 
@@ -258,6 +258,6 @@ def create_summary_llm() -> BaseChatModel:
         base_url=base_url,
         temperature=0.3,
         timeout=90,
-        max_retries=2,
+        max_retries=max_retries,
         max_tokens=100000,  # type: ignore[arg-type]
     )

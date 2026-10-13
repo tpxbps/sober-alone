@@ -70,3 +70,32 @@ python scripts/check_public_tree.py --staged
 ```
 
 `pre-commit` 检查暂存树，`pre-push` 检查每个待推送提交及最终树，CI 再次检查。检查器直接读取 Git 对象，强制添加的忽略文件也会被拦截；它报告路径与整改方式，不自动删除文件。密钥扫描同时由 CI 的 Gitleaks 完整历史检查补充。本轮治理规则不要求重写已有历史。
+
+## 8. 聊天回合与恢复
+
+`game_turns` 保存稳定回合身份、正文快照、尝试编号、事件序号、生成完成标记和输入 checkpoint。
+状态为 `queued → speaking → committing → reacting → completed`；失败和账户暂停保留正文。
+单进程后台执行器拥有任务，浏览器仅订阅；离线后本轮继续，下一轮由在线客户端发起。
+发言、次数扣减和待执行反应原子提交；反应完成与下一位选择也原子提交。
+状态接口读取已提交数据，不读取运行中控制器的临时对象或等待模型反应。
+
+原发言 POST 增加 `request_id` 和 `expected_revision`。重复命令返回已有操作，过期命令返回
+`resync`。状态增加 `active_turn`、`state_revision`；历史记录增加可空的 `turn_id`。
+`GET /api/v1/game/{session}/turns/{turn}/events?after_seq=N` 首先发送完整快照，再发送新序号的
+快照。`speech_done` 表示文本生成结束，`speech_recorded` 携带已提交记录，`done` 携带最终
+一致状态。慢订阅者可能跳过中间状态，因此每帧都携带完整 turn。每 10 秒心跳，禁止代理缓冲。
+`POST /api/v1/game/{session}/turns/{turn}/retry` 使用 `expected_attempt` 防止重复重试。
+
+前端将思考占位、流式正文和历史记录放在同一消息列表，使用不变的 `uiKey`；记录确认、
+反应结束及历史同步不重新挂载气泡。EOF 不代表业务完成：保留内容并查询、订阅原回合。
+暂停、草稿与排队真人发言按会话保存在当前标签页，排队真人优先于下一位 AI。
+
+服务重启后，已生成完整正文继续提交，已提交发言只补做剩余反应；未完成生成保留草稿并
+提供重试。重试绑定本轮输入 checkpoint，新尝试不拼接旧尝试。发言执行器与每个反应调用
+最多三次尝试，SDK 和图中间件不叠加重试。格式偏差按规则降级；供应商或持久化故障暂停
+当前操作，不再插入错误发言并扣次。放弃或结束对局会取消任务并禁止恢复。
+
+增量迁移为 `0015_game_turns`，前后端须配套更新。关键测试为 `test_game_speech.py`、
+`gameTurnCoordinator.test.ts` 和 `chat-continuity.spec.ts`；浏览器测试使用真实分段 HTTP SSE，
+逐帧检查气泡、头像、Markdown 容器与文字连续性。显式付费验收脚本为
+`backend/scripts/verify_turns_live.py`，使用隔离样例库且只输出身份、时间、长度和记录编号。

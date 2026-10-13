@@ -7,7 +7,7 @@ from sqlalchemy import select, update
 
 from app.agents.role_state import apply_beliefs, normalize_beliefs, observations, put_observation
 from app.core.inference import InferenceRecoveryError, raise_for_inference_recovery
-from app.db.models import GameRecord, GameSession, PlayerState
+from app.db.models import GameRecord, GameSession, GameTurn, PlayerState
 from app.game.clue_media import presentation_pending
 from app.game.clues import parse_clue_citations, public_round_overviews, stage_public_clues
 
@@ -37,6 +37,8 @@ async def process_turn(
     consume_human_context=False,
     speech_attempt=None,
     skipped=False,
+    turn_id=None,
+    defer_reactions=False,
 ):
     db = db_session
     if db is None:
@@ -98,6 +100,7 @@ async def process_turn(
             await db.rollback()
             return {"success": False, "error": "该发言请求已过期"}
     record = GameRecord(
+        turn_id=turn_id,
         session_id=session.session_id,
         record_type="system" if skipped else "speech",
         stage=session.current_stage,
@@ -176,16 +179,27 @@ async def process_turn(
                 **(session.player_threads or {}),
                 character_id: speech_attempt.thread_id,
             }
+    session.state_revision = (session.state_revision or 0) + 1
+    if turn_id:
+        turn = await db.get(GameTurn, turn_id)
+        turn.record_id = record.id
+        turn.content = text
+        turn.clue_refs = refs
+        turn.status = "reacting"
+        turn.thinking_tip = ""
+        turn.state_revision = session.state_revision
+        turn.seq += 1
     # This commit includes the speech, counters, consume cursor and durable pending work.
     await db.commit()
     controller.scheduler.record_speech(character_id)
     getattr(controller, "_pending_observation_ids", {}).pop(character_id, None)
-    result = await finish_pending(controller, db)
+    result = {} if defer_reactions else await finish_pending(controller, db)
     return {
         "success": True,
         "speaker_id": character_id,
         "speaker_name": names.get(character_id, ""),
         "clue_refs": refs,
+        "record_id": record.id,
         **result,
     }
 
@@ -202,7 +216,7 @@ async def finish_pending(controller, db):
     players = {p.character_id: p for p in await players_for(controller, db)}
     remaining = [cid for cid in pending["targets"] if cid not in pending["completed"]]
     attempts = dict(pending.get("attempts", {}))
-    targets = [cid for cid in remaining if attempts.get(cid, 0) < 2]
+    targets = remaining
     contexts = {}
     for cid in targets:
         normalize_beliefs(players[cid], names)
@@ -244,9 +258,15 @@ async def finish_pending(controller, db):
                 session.pending_speech = pending
                 await db.commit()
                 raise
+            raise
+    completed = list(pending["completed"])
+    failures = []
     for cid in remaining:
         player = players[cid]
         value = reactions.get(cid, {})
+        if isinstance(value, Exception):
+            failures.append(value)
+            continue
         value = value.model_dump() if hasattr(value, "model_dump") else value
         if not isinstance(value, dict) or "error" in value:
             value = {}
@@ -265,12 +285,22 @@ async def finish_pending(controller, db):
             stage=record.stage,
             round_num=record.round_num,
         )
-    session.pending_speech = {**pending, "attempts": attempts, "completed": pending["targets"]}
+        completed.append(cid)
+    session.pending_speech = {**pending, "attempts": attempts, "completed": completed}
     await db.commit()
+    if failures:
+        raise failures[0]
     # Clearing pending and persisting the chosen speaker share the same transaction.
-    session.pending_speech = {}
-    result = await controller._determine_next_speaker(db)
+    result = await controller._determine_next_speaker(db, commit=False)
     session.current_speaker = result.get("next_speaker")
+    session.pending_speech = {}
+    session.state_revision = (session.state_revision or 0) + 1
+    if record.turn_id:
+        turn = await db.get(GameTurn, record.turn_id)
+        turn.status = "completed"
+        turn.error_code = turn.error_message = ""
+        turn.state_revision = session.state_revision
+        turn.seq += 1
     await db.commit()
     return result
 

@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
+import { DialogFooter } from '@/components/ui/dialog';
 import { RotateCcw, X } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
 import type { GameDataSections } from '@/types/editor';
@@ -44,7 +45,7 @@ export function RefineButton({ step, content, gameData, humanReview, prompt, get
           <textarea aria-label="改进方向" value={feedback} required maxLength={8000} onChange={e => setFeedback(e.target.value)}
             placeholder="例如：保留人物关系，让案发前的冲突更克制，并补清关键行动的时间。"
             className="mt-4 min-h-28 w-full resize-y rounded-lg border border-border bg-background p-3 text-sm focus:outline-primary" />
-          <button disabled={!feedback.trim()} className="mt-3 w-full rounded-lg bg-primary px-4 py-2.5 text-sm text-primary-foreground disabled:opacity-40">按此方向改写</button>
+          <DialogFooter className="mt-3"><button disabled={!feedback.trim()} className="rounded-lg bg-primary px-4 py-2.5 text-sm text-primary-foreground disabled:opacity-40">按此方向改写</button></DialogFooter>
         </form>}
         <Dialog.Close aria-label="关闭改进方向" className="absolute right-4 top-4"><X className="size-4" /></Dialog.Close>
       </Dialog.Content>

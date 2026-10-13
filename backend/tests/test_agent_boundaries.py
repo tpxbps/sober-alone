@@ -263,13 +263,17 @@ async def test_reaction_429_waits_within_total_budget(monkeypatch, retry_after, 
     player.reaction_llm_model = "deepseek-flash"
     player._reaction_structured = Structured()
     player._reaction_system_prompt = "系统提示"
-    result = await player.react_to_speech("乙", "发言")
+    if expected_calls == 1:
+        from openai import RateLimitError
+
+        with pytest.raises(RateLimitError):
+            await player.react_to_speech("乙", "发言")
+    else:
+        result = await player.react_to_speech("乙", "发言")
     assert len(starts) == expected_calls
     if expected_calls == 2:
         assert starts[1] - starts[0] >= 0.01
         assert result.main_perspective == "观察记录"
-    else:
-        assert result.main_perspective == ""
 
 
 @pytest.mark.asyncio
@@ -302,8 +306,8 @@ async def test_reaction_recovery_is_bounded_and_does_not_retry_account_errors(
         with pytest.raises(InferenceRecoveryError):
             await player.react_to_speech("乙", "现场还有一个时间点需要核实。")
     else:
-        result = await player.react_to_speech("乙", "现场还有一个时间点需要核实。")
-        assert result.main_perspective == ""
+        with pytest.raises(APIConnectionError):
+            await player.react_to_speech("乙", "现场还有一个时间点需要核实。")
         assert "Reaction analysis failed" in caplog.text
     assert len(calls) == expected_calls
 

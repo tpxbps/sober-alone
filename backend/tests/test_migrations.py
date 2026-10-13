@@ -184,6 +184,7 @@ def test_init_is_idempotent(tmp_path: Path):
     assert script_count == 1
     assert character_count == 4
     assert "owner_key_hash" in script_columns
+    assert "optimization_authorized" in script_columns
     assert {
         "clue_stages",
         "clue_schema_version",
@@ -221,3 +222,41 @@ def test_init_is_idempotent(tmp_path: Path):
             (SAMPLE_SCRIPT_ID,),
         ).fetchone() == (None, None)
         assert connection.execute("SELECT count(*) FROM script_feedback").fetchone()[0] == 0
+
+
+def test_optimization_authorization_migration_defaults_and_keeps_revocation(tmp_path):
+    database = tmp_path / "authorization.db"
+    env = {**os.environ, "DATABASE_URL": f"sqlite+aiosqlite:///{database.as_posix()}"}
+
+    def upgrade(revision):
+        subprocess.run(
+            [sys.executable, "-m", "alembic", "upgrade", revision],
+            check=True,
+            capture_output=True,
+            env=env,
+            cwd=BACKEND_ROOT,
+        )
+
+    def insert(db, script_id):
+        db.execute(
+            "INSERT INTO scripts (script_id, title, game_full_process, free_speech_limits, "
+            "created_at) VALUES (?, '剧本', '[]', '[]', '2026-10-08 00:00:00')",
+            (script_id,),
+        )
+
+    upgrade("0015_game_turns")
+    with sqlite3.connect(database) as db:
+        insert(db, "existing")
+    upgrade("head")
+    with sqlite3.connect(database) as db:
+        insert(db, "new")
+        assert db.execute(
+            "SELECT script_id, optimization_authorized FROM scripts ORDER BY script_id"
+        ).fetchall() == [("existing", 1), ("new", 1)]
+        db.execute("UPDATE scripts SET optimization_authorized = 0 WHERE script_id = 'existing'")
+    upgrade("head")
+    with sqlite3.connect(database) as db:
+        assert db.execute(
+            "SELECT optimization_authorized FROM scripts WHERE script_id = 'existing'"
+        ).fetchone() == (0,)
+        assert db.execute("PRAGMA integrity_check").fetchone() == ("ok",)

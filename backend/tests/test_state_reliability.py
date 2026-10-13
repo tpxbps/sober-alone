@@ -223,6 +223,30 @@ async def test_interrupted_reactions_resume_without_duplicate_records_or_counter
 
 
 @pytest.mark.asyncio
+async def test_provider_failure_keeps_only_unfinished_listeners_pending(game):
+    db, controller = game
+
+    async def partial(**_kwargs):
+        return {"a": {}, "b": RuntimeError("unavailable provider")}
+
+    controller.agent_manager.broadcast_speech = partial
+    with pytest.raises(RuntimeError):
+        await controller.process_speech("human", "已提交原文", is_human=True, db_session=db)
+    assert controller.session.pending_speech["completed"] == ["a"]
+    assert controller.session.current_speaker is None
+
+    async def recovered(**kwargs):
+        assert kwargs["target_ids"] == ["b"]
+        return {"b": {}}
+
+    controller.agent_manager.broadcast_speech = recovered
+    await finish_pending(controller, db)
+    assert len(list(await db.scalars(select(GameRecord)))) == 1
+    human = await db.scalar(select(PlayerState).where(PlayerState.character_id == "human"))
+    assert human.total_speeches == 1
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("action", ["reauthorize_api_key", "top_up_balance", "api_key_quota"])
 async def test_account_recovery_keeps_reactions_pending_without_spending_attempts(game, action):
     from app.core.inference import InferenceRecoveryError

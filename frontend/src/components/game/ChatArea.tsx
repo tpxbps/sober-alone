@@ -11,7 +11,6 @@ import type {
 import { GameMessageMarkdown } from "@/components/ui/GameMessageMarkdown";
 import { StreamingBubble } from "@/components/game/StreamingBubble";
 import { GameFeedback } from "./GameFeedback";
-import { SpeechRecovery } from "./SpeechRecovery";
 import { ChatInputArea } from "@/components/game/ChatInputArea";
 import { SpeakerIcon, type SpeakerState } from "@/components/ui/SpeakerIcon";
 import { AudioSpeedButton } from "@/components/ui/AudioSpeedButton";
@@ -22,11 +21,7 @@ import type { SystemCapabilities } from "@/types/capabilities";
 import { useGameStore } from "@/stores/gameStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 
-const THINKING_MESSAGES = [
-  "大家正在分析听到的发言",
-  "这段发言引发了大家的深思",
-  "众人正在消化这些信息",
-];
+const THINKING_MESSAGE = "这段发言引发了大家思考";
 
 function formatAudioTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -87,7 +82,8 @@ export function ChatArea({
   onPauseAutoSpeakChange,
   onHumanSpeechCompleted,
 }: ChatAreaProps) {
-  const [thinkingMessage, setThinkingMessage] = useState(THINKING_MESSAGES[0]);
+  const composerKey = useGameStore(s => `${s.sessionId}:${s.stage}:${s.currentRound}`);
+  const thinkingMessage = THINKING_MESSAGE;
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // TTS state tracking per-record: recordId -> 'loading' | 'playing' | 'error'
@@ -99,7 +95,7 @@ export function ChatArea({
     Record<number, SpeakerState>
   >({});
   const ttsEnabled = useSettingsStore((s) => s.ttsEnabled);
-  const pendingHumanClues = useGameStore(s => s.pendingHumanClues);
+
   const [canSynthesizeSpeech, setCanSynthesizeSpeech] = useState(false);
   const [models, setModels] = useState<SystemCapabilities['models']>([]);
   const getModelDisplayName = (id: string | undefined | null) => modelDisplayName(id, models);
@@ -354,15 +350,6 @@ export function ChatArea({
     [stopActiveAudio]
   );
 
-  // Update thinking message when processing starts
-  useEffect(() => {
-    if (isProcessingReactions) {
-      setThinkingMessage(
-        THINKING_MESSAGES[Math.floor(Math.random() * THINKING_MESSAGES.length)]
-      );
-    }
-  }, [isProcessingReactions]);
-
   // Get character info by ID
   const getCharacter = (characterId?: string): Character | undefined => {
     if (!characterId) return undefined;
@@ -384,8 +371,8 @@ export function ChatArea({
       prevRecordCountRef.current = newCount;
       if (scrollRafRef.current !== null) return;
       scrollRafRef.current = requestAnimationFrame(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
-        userScrollTimerRef.current = 0;
+        const parent = messagesEndRef.current?.closest<HTMLElement>('[data-chat-scroll]');
+        if (parent && parent.dataset.followTail !== 'false') parent.scrollTop = parent.scrollHeight;
         scrollRafRef.current = null;
       });
     } else {
@@ -406,10 +393,17 @@ export function ChatArea({
   return (
     <div className="flex flex-col flex-1 min-h-0">
       {/* Messages Area */}
-      <div className="flex-1 overflow-auto p-4 scrollbar-thin">
+      <div className="flex-1 overflow-auto p-4 scrollbar-thin" data-chat-scroll
+        onWheel={event => { if (event.deltaY < 0) event.currentTarget.dataset.followTail = 'false'; }}
+        onScroll={event => {
+          const node = event.currentTarget;
+          if (node.scrollHeight - node.scrollTop - node.clientHeight < 80) node.dataset.followTail = 'true';
+          else if (node.scrollTop < userScrollTimerRef.current) node.dataset.followTail = 'false';
+          userScrollTimerRef.current = node.scrollTop;
+        }}>
         <div className="max-w-3xl mx-auto space-y-4">
           <AnimatePresence mode="popLayout">
-            {records.map((record, index) => {
+            {records.map((record) => {
               const character = getCharacter(record.speaker_id);
               const isHuman = record.speaker_id === humanCharacterId;
               const isSystem = record.record_type === "system";
@@ -423,7 +417,7 @@ export function ChatArea({
                 const isPlaying = sysSpeakerState === "playing";
                 return (
                   <motion.div
-                    key={record.id || index}
+                    key={record.uiKey ?? `record:${record.id}`}
                     data-record-id={record.id}
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -493,15 +487,17 @@ export function ChatArea({
               // Player message styling
               const isAI = !isHuman && record.speaker_id;
               const recordSpeakerState: SpeakerState = isAI
-                ? ttsEnabled && (canSynthesizeSpeech || Boolean(record.audio_url) || Boolean(audioPlayerManager.getCachedUrl(record.id)))
+                ? record.id > 0 && ttsEnabled && (canSynthesizeSpeech || Boolean(record.audio_url) || Boolean(audioPlayerManager.getCachedUrl(record.id)))
                   ? ttsStates[record.id] || "off"
                   : "disabled"
                 : "disabled";
 
               return (
                 <motion.div
-                  key={record.id || index}
+                  key={record.uiKey ?? `record:${record.id}`}
                   data-record-id={record.id}
+                  data-message-key={record.uiKey ?? `record:${record.id}`}
+                  data-turn-id={record.turn_id}
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
@@ -570,15 +566,7 @@ export function ChatArea({
                           : "bg-card border border-border/50 rounded-tl-sm"
                       }`}
                     >
-                      <GameMessageMarkdown
-                        className="text-sm"
-                        characters={characters}
-                        publicClues={publicClues}
-                        allowedCitationIds={record.stage === "intro" ? [] : (record.clue_refs ?? [])}
-                        preserveWhitespace={isHuman}
-                      >
-                        {record.content}
-                      </GameMessageMarkdown>
+                      <StreamingBubble record={record} isHuman={isHuman} />
                     </div>
                   </div>
                 </motion.div>
@@ -586,68 +574,15 @@ export function ChatArea({
             })}
           </AnimatePresence>
 
-          {/* Streaming message - isolated component subscribes to store directly */}
-          <StreamingBubble models={models} />
-
-          {/* Pending human message - shown when queued during AI speech */}
-          {pendingHumanSpeech && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="flex gap-3 flex-row-reverse"
-            >
-              <div className="shrink-0">
-                <div
-                  className="w-10 h-10 rounded-full overflow-hidden bg-gradient-to-br from-primary/30 to-accent/30
-                              flex items-center justify-center text-sm font-bold"
-                >
-                  {getCharacter(humanCharacterId || undefined)?.avatar_url ? (
-                    <img
-                      src={
-                        getCharacter(humanCharacterId || undefined)?.avatar_url
-                      }
-                      alt={getCharacter(humanCharacterId || undefined)?.name}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <span>
-                      {getCharacter(humanCharacterId || undefined)?.name?.[0] ||
-                        "你"}
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div className="flex flex-col items-end max-w-[70%]">
-                <span className="text-xs text-muted-foreground mb-1 text-right">
-                  {getCharacter(humanCharacterId || undefined)?.name}
-                  <span className="ml-1 text-accent">(你)</span>
-                  <span className="ml-1 text-primary/70">(等待发送)</span>
-                </span>
-                <div className="px-4 py-3 rounded-2xl bg-primary/10 border border-primary/20 rounded-tr-sm opacity-70">
-                  <GameMessageMarkdown
-                    className="text-sm"
-                    characters={characters}
-                    publicClues={pendingHumanClues}
-                    allowedCitationIds={pendingHumanClues.map(clue => clue.id)}
-                    preserveWhitespace
-                  >
-                    {pendingHumanSpeech}
-                  </GameMessageMarkdown>
-                </div>
-              </div>
-            </motion.div>
-          )}
-
           <div ref={messagesEndRef} />
         </div>
       </div>
 
       {/* Input Area */}
-      <SpeechRecovery />
       {stage === "review" && records.some((record) => record.stage === "review" && !record.speaker_id) && (
         <div className="px-4 pt-3 max-h-[45vh] overflow-y-auto"><GameFeedback /></div>
       )}
-      <ChatInputArea
+      <ChatInputArea key={composerKey}
         stage={stage}
         isStreaming={isStreaming}
         isProcessingReactions={isProcessingReactions}
@@ -661,9 +596,6 @@ export function ChatArea({
           getCharacter(streamingSpeakerId || undefined)?.name || "AI"
         }
         currentSpeakerId={currentSpeakerId}
-        currentSpeakerName={
-          getCharacter(currentSpeakerId || undefined)?.name || "..."
-        }
         onSendMessage={onSendMessage}
         onAdvanceStage={onAdvanceStage}
         onEndGame={onEndGame}

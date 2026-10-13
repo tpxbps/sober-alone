@@ -81,6 +81,13 @@ export function Homepage({ onStartGame, onOpenEditor }: HomepageProps) {
     void switchScene(script);
   };
   const returnToList = (keyboard = false) => { void switchScene(null, keyboard); };
+  const updateAuthorization = (scriptId: string, authorized: boolean) => {
+    const update = (script: Script) => script.script_id === scriptId
+      ? { ...script, optimization_authorized: authorized }
+      : script;
+    setScripts(current => current.map(update));
+    setSelectedScript(current => current ? update(current) : current);
+  };
   const groups = scripts.reduce((result, script) => {
     const difficulty = script.difficulty || 1;
     (result[difficulty] ||= []).push(script);
@@ -160,7 +167,7 @@ export function Homepage({ onStartGame, onOpenEditor }: HomepageProps) {
             <section key={difficulty} className="lobby-difficulty-group" aria-label={difficultyLabels[Number(difficulty)] || "其他剧本"}>
               <h2 className="lobby-group-title">{difficultyLabels[Number(difficulty)] || "其他剧本"}<span>{stories.length}</span></h2>
               <div className="lobby-catalog-grid">{stories.map(script =>
-                <ScriptCard key={script.script_id} script={script} selected={script.script_id === selectedScript?.script_id} quiet={quiet} previewsEnabled={!busy && !showSettings} onClick={() => selectScript(script)} onDeleted={loadScripts} onEdit={() => onOpenEditor(script.script_id)} />
+                <ScriptCard key={script.script_id} script={script} selected={script.script_id === selectedScript?.script_id} quiet={quiet} previewsEnabled={!busy && !showSettings} onClick={() => selectScript(script)} onDeleted={loadScripts} onEdit={() => onOpenEditor(script.script_id)} onAuthorizationChanged={authorized => updateAuthorization(script.script_id, authorized)} />
               )}</div>
             </section>
           )}
