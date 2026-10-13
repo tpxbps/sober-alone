@@ -20,6 +20,7 @@ from app.script_editor.asset_generation.progress import (
     get_asset_progress,
 )
 from app.script_editor.repositories.script_repository import ScriptRepository
+from app.script_editor.services.portrait_direction import get_portrait_direction
 from app.script_editor.services.progress_registry import asset_progress_registry
 from app.script_editor.state import STEP_GENERATE_ASSETS, ScriptGenState
 
@@ -430,6 +431,14 @@ async def _run_images(
     """图片生成阶段（封面 + 角色头像）— 全部并行"""
 
     tasks = []
+    try:
+        visual_direction = await get_portrait_direction(script_id, state)
+    except Exception as error:
+        raise_for_inference_recovery(error)
+        logger.warning("Unable to persist shared portrait direction: %s", type(error).__name__)
+        for task_id in selected_task_ids:
+            _finish_asset_failure(script_id, task_id, "无法保存剧本美术说明，请重试")
+        return
 
     # 封面
     sections = state.get("game_data_sections", {})
@@ -446,6 +455,7 @@ async def _run_images(
                     )[:500],
                     "title": state.get("script_title", ""),
                     "force": force,
+                    "visual_direction": visual_direction,
                 },
             )
         )
@@ -467,6 +477,9 @@ async def _run_images(
                     "name": c.get("name", ""),
                     "appearance": c.get("appearance", ""),
                     "gender": c.get("gender", ""),
+                    "age": c.get("age"),
+                    "occupation": c.get("occupation", ""),
+                    "visual_direction": visual_direction,
                     "force": force,
                 },
             )
@@ -642,6 +655,7 @@ async def _retry_single_asset(script_id: str, task_id: str, state: ScriptGenStat
                 )[:500],
                 title=state.get("script_title", ""),
                 force=True,
+                visual_direction=await get_portrait_direction(script_id, state),
             )
             if cover_url:
                 import aiosqlite
@@ -673,6 +687,9 @@ async def _retry_single_asset(script_id: str, task_id: str, state: ScriptGenStat
                     name=char.get("name", ""),
                     appearance=char.get("appearance", ""),
                     gender=char.get("gender", ""),
+                    age=char.get("age"),
+                    occupation=char.get("occupation", ""),
+                    visual_direction=await get_portrait_direction(script_id, state),
                     force=True,
                 )
                 if avatar_url:
