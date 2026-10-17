@@ -163,7 +163,7 @@ test("触屏直接选本且卡片描述保持清晰", async ({browser,baseURL}) 
 });
 test.describe("动态显现",()=>{
   test.use({reducedMotion:"no-preference",viewport:{width:1280,height:800}});
-  test("单画布、即时坐标、跨卡片显现和 WebGL 回退",async({page},info)=>{
+  test("共享 WebGL、即时坐标、跨卡片显现和回退",async({page},info)=>{
     await fixture(page);
     await expect(page.locator(".dream-lobby")).toHaveAttribute("data-renderer",/webgl|fallback/);
     await expect(page.locator(".lobby-atmosphere")).toHaveCount(1);
@@ -181,10 +181,11 @@ test.describe("动态显现",()=>{
     await expect.poll(()=>page.evaluate(()=>getComputedStyle(document.querySelector('.card-overview')!).filter===(document.querySelector('.dream-lobby')?.getAttribute('data-renderer')==='fallback'?'none':'blur(0.65px)'))).toBe(true);
     await page.waitForTimeout(5500); // Include an autonomous current in the acceptance recording.
     await page.screenshot({path:info.outputPath("fluid-ambient.png")});
-    await page.locator("canvas").evaluate((canvas:HTMLCanvasElement)=>canvas.getContext("webgl2")?.getExtension("WEBGL_lose_context")?.loseContext());
+    await page.locator(".lobby-atmosphere").evaluate((canvas:HTMLCanvasElement)=>canvas.getContext("webgl2")?.getExtension("WEBGL_lose_context")?.loseContext());
     await expect(page.locator(".dream-lobby")).toHaveAttribute("data-renderer","fallback");
     await expect(page.locator(".card-overview").first()).toHaveCSS("filter","none");
     await expect(page.locator(".card-cover-media").first()).not.toHaveAttribute("data-gpu","ready");
+    await expect(page.locator(".card-cover-effect")).toHaveCount(0);
   });
   test("持续低帧率时退出流体绘制，保持卡片可读且可以选本",async({page})=>{
     // A slow frame scheduler models a device that can present only about 8fps.

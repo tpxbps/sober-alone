@@ -107,6 +107,7 @@ void main() {
 `;
 type Cover = {
   image: HTMLImageElement; card: HTMLElement; mesh: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;
+  surface: HTMLCanvasElement; context: CanvasRenderingContext2D;
   bounds: DOMRect; reveal: number; origin: THREE.Vector2; source: string;
 };
 
@@ -119,8 +120,10 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
   catch (error) { renderer.dispose(); throw error; }
   fluid.enableDye = true;
   const scene = new THREE.Scene();
+  const coverScene = new THREE.Scene();
   let canvasBounds = canvas.getBoundingClientRect();
   const camera = new THREE.OrthographicCamera(0, canvasBounds.width, canvasBounds.height, 0, -10, 10);
+  const coverCamera = new THREE.OrthographicCamera(0, 1, 1, 0, -10, 10);
   const geometry = new THREE.PlaneGeometry(1, 1);
   const covers = new Map<HTMLImageElement, Cover>();
   const textures = new Map<string, THREE.Texture>();
@@ -131,7 +134,6 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
   let lastTime = performance.now(), nextAmbient = lastTime + 1500, ambientUntil = 0;
   let ambientX = .5, ambientY = .5, ambientBegan = 0, ambientDuration = 1, broadAmbient = false;
   const pendingPoints: RevealPoint[] = [];
-  const content = root.querySelector<HTMLElement>(".lobby-main");
   const pointer = new THREE.Vector2(-2, -2);
   const pointerClient = new THREE.Vector2(-2, -2);
   let pointerActive = 0;
@@ -194,16 +196,22 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
     const images = new Set(root.querySelectorAll<HTMLImageElement>(".card-cover-media"));
     covers.forEach((cover, image) => {
       if (!images.has(image) || image.currentSrc !== cover.source) {
-        scene.remove(cover.mesh); cover.mesh.material.dispose(); delete image.dataset.gpu; covers.delete(image);
+        coverScene.remove(cover.mesh); cover.surface.remove(); cover.mesh.material.dispose(); delete image.dataset.gpu; covers.delete(image);
       }
     });
     images.forEach(image => {
       if (covers.has(image) || !image.complete || !image.naturalWidth) return;
       const card = image.closest<HTMLElement>(".lobby-card")!;
+      const surface = document.createElement("canvas");
+      const context = surface.getContext("2d");
+      if (!context) return;
+      surface.className = "card-cover-effect";
+      surface.setAttribute("aria-hidden", "true");
+      image.after(surface);
       const mesh = new THREE.Mesh(geometry, material(true));
-      mesh.renderOrder = 1; mesh.visible = false;
-      const cover = { image, card, mesh, bounds: image.getBoundingClientRect(), reveal: 0, origin: new THREE.Vector2(.5, .5), source: image.currentSrc };
-      covers.set(image, cover); scene.add(mesh);
+      mesh.visible = false;
+      const cover = { image, card, mesh, surface, context, bounds: image.getBoundingClientRect(), reveal: 0, origin: new THREE.Vector2(.5, .5), source: image.currentSrc };
+      covers.set(image, cover); coverScene.add(mesh);
       loadImage(cover.source, texture => {
         if (!image.isConnected || covers.get(image) !== cover) return;
         mesh.material.uniforms.map.value = texture;
@@ -225,6 +233,7 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
     // Reallocating render targets is a new warm-up, not sustained device slowness.
     frameBudget.reset();
     camera.right = width; camera.top = height; camera.updateProjectionMatrix();
+    coverCamera.right = canvas.width; coverCamera.top = canvas.height; coverCamera.updateProjectionMatrix();
     background.position.set(width / 2, height / 2, 0); background.scale.set(width, height, 1);
     background.material.uniforms.rect.value.set(0, 0, width, height);
     background.material.uniforms.panelSize.value.set(width, height); dirty = true;
@@ -265,7 +274,6 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
   window.addEventListener("pointermove", move, { passive: true });
   document.documentElement.addEventListener("pointerleave", leave);
   window.addEventListener("blur", leave);
-  window.addEventListener("scroll", markDirty, { passive: true });
   window.addEventListener("resize", resize);
   root.addEventListener("load", markDirty, true);
   const visibility = () => { leave(); clearPointerDye=true; lastTime = performance.now(); frameBudget.reset(); if (!document.hidden && !frame) frame = requestAnimationFrame(draw); };
@@ -289,7 +297,6 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
       return;
     }
     const transitioning = root.classList.contains("is-transitioning");
-    const surfaceOpacity = content ? Number(getComputedStyle(content).opacity) : 1;
     if (pointerActive) pointer.set((pointerClient.x - canvasBounds.left) / width, 1 - (pointerClient.y - canvasBounds.top) / height);
     if (dirty || transitioning) { syncCovers(); dirty = false; }
     // Transforms (including the tap spring) do not trigger ResizeObserver.
@@ -352,17 +359,36 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
         mat.uniforms.detailSize.value.set(image.width,image.height);
       }
       mat.uniforms.viewport.value.set(width, height); mat.uniforms.time.value = now / 1000;
-      mat.uniforms.surfaceOpacity.value = surfaceOpacity;
       mat.uniforms.ambientOrigin.value.set(ambientX, ambientY);
       mat.uniforms.ambientWave.value = broadAmbient && now < ambientUntil ? Math.sin((now - ambientBegan) / ambientDuration * Math.PI) : 0;
     };
     update(background.material);
+    renderer.setRenderTarget(null);
+    renderer.setViewport(0, 0, width, height);
+    const ratio = renderer.getPixelRatio();
+    // Batch the visible covers into one atlas before copying their pixels into
+    // card-local surfaces. Reuse one WebGL context without JS pixel readback.
+    const batch: Array<{ cover: Cover; x: number; y: number; width: number; height: number }> = [];
+    let tileX = 0, tileY = 0, rowHeight = 0;
+    const presentCovers = () => {
+      if (!batch.length) return;
+      renderer.render(coverScene, coverCamera);
+      for (const tile of batch) {
+        const { cover, x, y, width: w, height: h } = tile;
+        if (cover.surface.width !== w) cover.surface.width = w;
+        if (cover.surface.height !== h) cover.surface.height = h;
+        cover.context.clearRect(0, 0, w, h);
+        cover.context.drawImage(canvas, x, canvas.height - y - h, w, h, 0, 0, w, h);
+        cover.image.dataset.gpu = "ready";
+        cover.mesh.visible = false;
+      }
+      batch.length = 0; tileX = tileY = rowHeight = 0;
+    };
     covers.forEach(cover => {
       const rect = cover.bounds;
       const left = rect.left - canvasBounds.left, top = rect.top - canvasBounds.top;
       const visible = top + rect.height > 0 && top < height && left + rect.width > 0 && left < width;
-      cover.mesh.visible = visible && Boolean(cover.mesh.material.uniforms.map.value);
-      if (!visible) return;
+      if (!visible || !cover.mesh.material.uniforms.map.value) return;
       const active = cover.card.matches(":hover, :focus-within");
       cover.reveal = active ? Math.min(1, cover.reveal + delta / .25) : Math.max(0, cover.reveal - delta / .8);
       const mat = cover.mesh.material;
@@ -370,18 +396,27 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
       mat.uniforms.reveal.value = cover.reveal; mat.uniforms.origin.value.copy(cover.origin);
       mat.uniforms.rect.value.set(left, height - top - rect.height, rect.width, rect.height);
       mat.uniforms.panelSize.value.set(rect.width, rect.height);
-      cover.mesh.position.set(left + rect.width / 2, height - top - rect.height / 2, 1);
-      cover.mesh.scale.set(rect.width, rect.height, 1);
+      // Keep the same fluid shader, but present its pixels inside the card.
+      // Native scrolling then moves the last complete frame with the DOM even
+      // while JS/GPU is busy. Only the decorative animation can lag, never the
+      // cover's position. Shader coordinates still sample the viewport's fluid.
+      const drawWidth = Math.min(canvas.width, Math.max(1, Math.round(rect.width * ratio)));
+      const drawHeight = Math.min(canvas.height, Math.max(1, Math.round(rect.height * ratio)));
+      if (tileX + drawWidth > canvas.width) { tileX = 0; tileY += rowHeight; rowHeight = 0; }
+      if (tileY + drawHeight > canvas.height) presentCovers();
+      cover.mesh.visible = true;
+      cover.mesh.position.set(tileX + drawWidth / 2, tileY + drawHeight / 2, 0);
+      cover.mesh.scale.set(drawWidth, drawHeight, 1);
+      batch.push({ cover, x: tileX, y: tileY, width: drawWidth, height: drawHeight });
+      tileX += drawWidth; rowHeight = Math.max(rowHeight, drawHeight);
     });
-    renderer.setRenderTarget(null); renderer.render(scene, camera);
+    presentCovers();
+    renderer.render(scene, camera);
     // Keep the DOM backdrop and covers visible until a textured frame exists.
     // Texture download completion alone does not mean pixels have been drawn.
     if (background.material.uniforms.map.value) {
       if (root.dataset.renderer !== 'webgl') performance.mark('lobby:atmosphere-frame');
       root.dataset.renderer = "webgl";
-      covers.forEach(cover => {
-        if (cover.mesh.visible) cover.image.dataset.gpu = "ready";
-      });
     }
   }
   frame = requestAnimationFrame(draw);
@@ -389,10 +424,10 @@ export function createAtmosphere(canvas: HTMLCanvasElement, root: HTMLElement, p
     if (disposed) return;
     disposed = true; cancelAnimationFrame(frame); observer.disconnect(); resizeObserver.disconnect();
     window.removeEventListener("pointermove", move); document.documentElement.removeEventListener("pointerleave", leave); window.removeEventListener("blur", leave);
-    window.removeEventListener("scroll", markDirty); window.removeEventListener("resize", resize);
+    window.removeEventListener("resize", resize);
     root.removeEventListener("load", markDirty, true); document.removeEventListener("visibilitychange", visibility);
     canvas.removeEventListener("webglcontextlost", contextLost);
-    covers.forEach(cover => { delete cover.image.dataset.gpu; cover.mesh.material.dispose(); });
+    covers.forEach(cover => { delete cover.image.dataset.gpu; cover.surface.remove(); cover.mesh.material.dispose(); });
     textures.forEach(texture => texture.dispose());
     bitmaps.forEach(bitmap => bitmap.close());
     background.material.dispose(); geometry.dispose(); fluid.dispose(); renderer.dispose();

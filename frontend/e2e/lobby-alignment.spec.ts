@@ -9,7 +9,11 @@ async function openCalibrationLobby(page: Page) {
     const schedule = window.requestAnimationFrame.bind(window);
     let lastReal = 0;
     let frameTime = performance.now();
-    window.requestAnimationFrame = callback => schedule(realTime => {
+    window.requestAnimationFrame = callback => schedule(function present(realTime) {
+      if ((window as Window & { pauseLobbyFrames?: boolean }).pauseLobbyFrames) {
+        schedule(present);
+        return;
+      }
       if (realTime !== lastReal) {
         frameTime += Math.min(1000 / 60, Math.max(0, realTime - lastReal));
         lastReal = realTime;
@@ -38,7 +42,7 @@ async function openCalibrationLobby(page: Page) {
   await expect(page.locator(".card-cover-media").first()).toHaveCSS("opacity", "0");
 }
 
-/** Check rendered pixels, not just the DOM boxes that the WebGL overlay copies. */
+/** Check rendered pixels, not just the cover's DOM box. */
 async function expectCoverPixelsAligned(page: Page) {
   await expect.poll(() => page.locator(".lobby-atmosphere").evaluate((node: HTMLCanvasElement) => {
     const box = node.getBoundingClientRect();
@@ -79,6 +83,37 @@ async function expectCoverPixelsAligned(page: Page) {
     expect(Math.abs(spans[i].left - row[i].left), "GPU left edge").toBeLessThanOrEqual(1.5);
     expect(Math.abs(spans[i].right - row[i].right), "GPU right edge").toBeLessThanOrEqual(1.5);
   }
+  // Horizontal checks alone miss a cover that trails vertically while scrolling.
+  const x = Math.floor(boxes[0].left + boxes[0].width / 2);
+  const column = boxes.filter(box => box.left < x && box.right > x);
+  const vertical = await page.evaluate(async ({ data, x }) => {
+    const image = new Image();
+    image.src = "data:image/png;base64," + data;
+    await image.decode();
+    const canvas = document.createElement("canvas");
+    canvas.width = 1; canvas.height = image.height;
+    const context = canvas.getContext("2d")!;
+    context.drawImage(image, x, 0, 1, image.height, 0, 0, 1, image.height);
+    const pixels = context.getImageData(0, 0, 1, image.height).data;
+    const spans: Array<{ top: number; bottom: number }> = [];
+    let start = -1;
+    for (let y = 85; y <= image.height; y++) {
+      const red = y < image.height && pixels[y * 4] > 65
+        && pixels[y * 4] > pixels[y * 4 + 1] * 2.5
+        && pixels[y * 4] > pixels[y * 4 + 2] * 2.5;
+      if (red && start === -1) start = y;
+      if (!red && start !== -1) {
+        if (start > 85 && y < image.height) spans.push({ top: start, bottom: y });
+        start = -1;
+      }
+    }
+    return spans;
+  }, { data: png.toString("base64"), x });
+  expect(vertical).toHaveLength(column.length);
+  for (let i = 0; i < column.length; i++) {
+    expect(Math.abs(vertical[i].top - column[i].top), "cover top edge").toBeLessThanOrEqual(1.5);
+    expect(Math.abs(vertical[i].bottom - column[i].bottom), "cover bottom edge").toBeLessThanOrEqual(1.5);
+  }
 }
 
 for (const deviceScaleFactor of [1, 1.25, 2]) {
@@ -103,6 +138,21 @@ for (const deviceScaleFactor of [1, 1.25, 2]) {
       await expectCoverPixelsAligned(page);
       await page.evaluate(() => window.scrollTo(0, 390));
       await expectCoverPixelsAligned(page);
+    });
+    test("特效暂停更新时快速往返滚动，封面像素仍与卡片同步", async ({ page }) => {
+      test.setTimeout(60_000);
+      await openCalibrationLobby(page);
+      await expectCoverPixelsAligned(page);
+      await page.evaluate(() => { (window as Window & { pauseLobbyFrames?: boolean }).pauseLobbyFrames = true; });
+      for (const delta of [280, -220, 300, -360]) {
+        const target = await page.evaluate(delta => Math.max(0, Math.min(
+          document.documentElement.scrollHeight - innerHeight, scrollY + delta,
+        )), delta);
+        await page.mouse.wheel(0, delta);
+        await expect.poll(() => page.evaluate(() => scrollY)).toBe(target);
+        await expectCoverPixelsAligned(page);
+      }
+      await page.evaluate(() => { (window as Window & { pauseLobbyFrames?: boolean }).pauseLobbyFrames = false; });
     });
   });
 }
