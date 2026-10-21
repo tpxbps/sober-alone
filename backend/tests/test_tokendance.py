@@ -67,7 +67,7 @@ def test_recovery_contract(action):
 
 
 def test_model_aliases():
-    assert gateway_model("deepseek-flash") == "deepseek-v4.1-flash"
+    assert gateway_model("deepseek-flash") == "deepseek-v4.1-flash-1017"
     assert gateway_model("doubao-seed-2-0-mini-260215") == "seed-2.0-lite"
     assert gateway_model("doubao-seed-2-0-lite-260215") == "seed-2.0-lite"
 

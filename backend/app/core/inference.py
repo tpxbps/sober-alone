@@ -220,7 +220,7 @@ def gateway_url(path: str) -> str:
 
 def gateway_model(model: str) -> str:
     return {
-        "deepseek-flash": "deepseek-v4.1-flash",
+        "deepseek-flash": "deepseek-v4.1-flash-1017",
         "doubao-seed-2-0-lite-260215": "seed-2.0-lite",
         "doubao-seed-2-0-mini-260215": "seed-2.0-lite",
     }.get(model, model)

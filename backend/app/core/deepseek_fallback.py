@@ -11,7 +11,7 @@ import time
 import httpx
 
 from app.core.config import settings
-from app.core.inference import _scope, check_gateway_response
+from app.core.inference import _scope, check_gateway_response, gateway_model
 
 logger = logging.getLogger(__name__)
 _cooldown_until = 0.0
@@ -25,7 +25,7 @@ def _eligible(request: httpx.Request) -> bool:
         and settings.DEEPSEEK_API_KEY
         and request.url
         == httpx.URL(settings.TOKENDANCE_BASE_URL.rstrip("/") + "/v1/chat/completions")
-        and json.loads(request.content).get("model") == "deepseek-v4.1-flash"
+        and json.loads(request.content).get("model") == gateway_model("deepseek-flash")
     )
 
 

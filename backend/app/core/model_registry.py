@@ -62,7 +62,16 @@ MODEL_SPECS = (
         reasoning_effort="low",
         reaction_output_method="json_mode",
     ),
-    ModelSpec("deepseek-flash", "deepSeek-v4.1-flash", "deepseek", "DeepSeek"),
+    ModelSpec("deepseek-flash", "deepseek-v4.1-flash-1017", "deepseek", "DeepSeek"),
+    ModelSpec(
+        "minimax-m3.1-flash",
+        "MiniMax M3.1 Flash",
+        "minimax",
+        "MiniMax",
+        backends=("tokendance",),
+        reasoning_effort="low",
+        reaction_output_method="function_calling",
+    ),
     ModelSpec("step-3.5-flash", "step-3.5-flash", "stepfun", "StepFun", backends=("direct",)),
     ModelSpec(
         "ling-3.0-flash",
@@ -111,6 +120,8 @@ PROBE_FILE = LOCAL_DATA_DIR / "model-probes.json"
 
 
 MODEL_ALIASES = {
+    "deepseek-v4.1-flash-1017": "deepseek-flash",
+    "deepseek-v4.1-flash": "deepseek-flash",
     "deepseek-v4-flash": "deepseek-flash",
     "deepseek-v4-flash-vision-exp": "deepseek-flash",
     "doubao-seed-2-0-mini-260215": "doubao-seed-2-0-lite-260215",

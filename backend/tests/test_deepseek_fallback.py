@@ -25,7 +25,7 @@ def request():
             "X-App-URL": "https://example.test/",
         },
         json={
-            "model": "deepseek-v4.1-flash",
+            "model": "deepseek-v4.1-flash-1017",
             "messages": [],
             "tools": [{"type": "function"}],
             "thinking": {"type": "disabled"},

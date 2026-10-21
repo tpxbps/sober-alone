@@ -157,5 +157,5 @@ def test_legacy_deepseek_ids_resolve_to_current_model(monkeypatch):
 
     monkeypatch.setattr(llm_factory, "_create_deepseek", lambda *args: args[0])
     for model in ("deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"):
-        assert get_model_spec(model).name == "deepSeek-v4.1-flash"
+        assert get_model_spec(model).name == "deepseek-v4.1-flash-1017"
         assert llm_factory.create_llm(model=model, api_key="unit-test-only") == "deepseek-flash"
