@@ -22,6 +22,7 @@ from app.services.capabilities import get_capabilities
 def test_deepseek_saved_ids_dispatch_to_1017(monkeypatch, model_id):
     monkeypatch.setattr(settings, "INFERENCE_BACKEND", "tokendance")
     assert get_model_spec(model_id).id == "deepseek-flash"
+    assert get_model_spec(model_id).name == "deepseek-v4.1-flash"
     assert create_llm(model_id).model_name == "deepseek-v4.1-flash-1017"
 
 

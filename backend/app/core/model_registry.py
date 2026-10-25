@@ -62,7 +62,7 @@ MODEL_SPECS = (
         reasoning_effort="low",
         reaction_output_method="json_mode",
     ),
-    ModelSpec("deepseek-flash", "deepseek-v4.1-flash-1017", "deepseek", "DeepSeek"),
+    ModelSpec("deepseek-flash", "deepseek-v4.1-flash", "deepseek", "DeepSeek"),
     ModelSpec(
         "minimax-m3.1-flash",
         "MiniMax M3.1 Flash",
