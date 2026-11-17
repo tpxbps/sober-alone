@@ -945,7 +945,7 @@ class GameFlowController:
         # 获取当前 vote 配置中的 system_notice（从 children[1] 获取投票引导）
         current_config = self.game_process[self.current_process_index]
         children = current_config.get("children", [])
-        default_notice = "总结发言结束，现在进入投票阶段。请各位投票指认凶手！"
+        default_notice = "总结发言结束，现在进入投票阶段。请根据本剧本的投票目标选择角色。"
         if len(children) > 1:
             system_notice = children[1].get("system_notice", default_notice)
         else:
@@ -1174,7 +1174,20 @@ class GameFlowController:
             stage_type = current_config.get("type")
 
             # 对于 advancement 类型（线索轮次），system_notice 在 children 中
-            if stage_type != "advancement":
+            if stage_type == "vote":
+                children = current_config.get("children", [])
+                if self.session.current_stage == GameStage.SUMMARY.value and children:
+                    notice = children[0].get("system_notice", "")
+                    if notice:
+                        context_parts.append(notice)
+                vote_notice = (
+                    children[1].get("system_notice", "")
+                    if len(children) > 1
+                    else current_config.get("system_notice", "")
+                )
+                if vote_notice:
+                    context_parts.append("【本剧本投票目标】\n" + vote_notice)
+            elif stage_type != "advancement":
                 # 其他阶段的 system_notice 直接在配置中
                 system_notice = current_config.get("system_notice", "")
                 if system_notice:

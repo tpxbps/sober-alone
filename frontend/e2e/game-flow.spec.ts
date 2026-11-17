@@ -296,7 +296,7 @@ test('大厅 → 选角 → 发言 → 推进 → 投票 → 复盘', async ({ p
   await expect(humanSpeech).toHaveCount(1)
   await page.getByRole('button', { name: '进入下一阶段' }).click()
 
-  await expect(page.getByText('请投票指认真凶')).toBeVisible()
+  await expect(page.getByText('请投票')).toBeVisible()
   await page.getByRole('button', { name: /顾宁/ }).click()
   await page.getByRole('button', { name: '确认投票' }).click()
 

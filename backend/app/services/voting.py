@@ -599,15 +599,15 @@ class VotingService:
         tied_suspects = vote_results.get("tied_suspects", [])
         if final_suspect:
             if final_suspect_votes == total_votes:
-                lines.append(f"\n最终，大家一致指认「{final_suspect_name}」为凶手。")
+                lines.append(f"\n最终，大家一致投票给「{final_suspect_name}」。")
             elif len(tied_suspects) > 1:
                 tied_names = "」和「".join(id_to_name.get(sid, sid) for sid in tied_suspects)
                 lines.append(
-                    f"\n最终，「{tied_names}」以 {final_suspect_votes} 票平票，共同成为最大嫌疑人。"
+                    f"\n最终，「{tied_names}」以 {final_suspect_votes} 票平票，并列获得最高票数。"
                 )
             else:
                 lines.append(
-                    f"\n最终，「{final_suspect_name}」以 {final_suspect_votes} 票成为最大嫌疑人。"
+                    f"\n最终，「{final_suspect_name}」以 {final_suspect_votes} 票获得最高票数。"
                 )
 
         # 3. 真相揭晓

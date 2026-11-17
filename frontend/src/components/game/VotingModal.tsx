@@ -112,7 +112,7 @@ export function VotingModal({
             {/* Header */}
             <div className="flex items-center justify-between p-6 border-b border-border/50">
               <Dialog.Title className="text-xl font-bold text-glow">
-                {showResults ? "投票结果" : "请投票指认真凶"}
+                {showResults ? "投票结果" : "请投票"}
               </Dialog.Title>
               <Dialog.Close asChild>
                 <button className="p-2 rounded-lg hover:bg-secondary/50 transition-colors">
@@ -232,7 +232,7 @@ export function VotingModal({
                 /* Voting Form */
                 <>
                   <p className="text-muted-foreground text-sm">
-                    请选择你认为是凶手的角色，并填写投票理由（可选）。
+                    请根据本剧本的投票目标选择角色，并填写投票理由（可选）。
                   </p>
 
                   {/* Character Selection */}

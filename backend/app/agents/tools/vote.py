@@ -25,8 +25,8 @@ _vote_locks: dict[str, asyncio.Lock] = {}
 class VoteInput(BaseModel):
     """投票输入参数"""
 
-    suspect_name: str = Field(description="你投票认为是凶手的角色名")
-    reasoning: str = Field(description="你的投票理由，简述为什么认为此人是凶手")
+    suspect_name: str = Field(description="根据本剧本投票目标选定的角色名")
+    reasoning: str = Field(description="你的投票理由，说明该角色为何符合本剧本的投票目标")
 
 
 @tool(args_schema=VoteInput)
@@ -35,11 +35,11 @@ async def submit_final_vote(suspect_name: str, reasoning: str, runtime: ToolRunt
     提交最终投票。
 
     仅在投票阶段可调用。
-    指认你认为的凶手并说明理由。
+    根据本剧本的投票目标选择角色并说明理由。
     注意: 每位玩家只能投票一次!
 
     Args:
-        suspect_name: 你认为是凶手的角色名
+        suspect_name: 根据本剧本投票目标选定的角色名
         reasoning: 投票理由
 
     Returns:
