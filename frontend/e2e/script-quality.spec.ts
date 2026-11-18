@@ -93,7 +93,7 @@ test('评分同行展示，轻量说明及悬浮文字点击均打开对应剧�
   await expect.poll(async () => Math.abs((await rating.boundingBox())!.y - (await page.getByText('3人', {exact:true}).boundingBox())!.y)).toBeLessThan(4)
   await rating.hover()
   await expect(tip).toBeVisible()
-  await expect(tip).toContainText('AI评分: 78 （GPT 6 ASTRA）')
+  await expect(tip).toContainText('AI评分: 78 （gpt-6-astra）')
   await expect(tip).toContainText('叙事与人物塑造 15%')
   await expect(tip).not.toContainText('2026')
   await expect(tip).not.toContainText('基于剧本文本')

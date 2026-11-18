@@ -14,7 +14,15 @@ from app.core.reasoning_chat import ReasoningChatOpenAI
 from app.services import model_health
 from app.services.capabilities import get_capabilities
 
-FRONTIER = [spec for spec in MODEL_SPECS if spec.tier == "frontier"]
+FRONTIER = [spec for spec in MODEL_SPECS if spec.tier == "frontier" and spec.backends]
+
+
+def test_kimi_k3_legacy_id_dispatches_to_k3_1_pro(monkeypatch):
+    monkeypatch.setattr(settings, "INFERENCE_BACKEND", "tokendance")
+    models = {row["id"]: row for row in get_capabilities()["models"]}
+    assert "kimi-k3" not in models
+    assert models["kimi-k3.1-pro"]["name"] == "kimi-k3.1-pro"
+    assert create_llm("kimi-k3").model_name == "kimi-k3.1-pro"
 
 
 @pytest.mark.parametrize("backend", ["direct", "tokendance"])
@@ -36,7 +44,9 @@ def test_qwen_thinking_is_scoped_to_role_speech(monkeypatch, backend, purpose):
     }
 
 
-@pytest.mark.parametrize("spec", [s for s in MODEL_SPECS if s.id != "qwen3.8-flash" and s.backends])
+@pytest.mark.parametrize(
+    "spec", [s for s in MODEL_SPECS if s.id != "qwen3.8-flash" and "tokendance" in s.backends]
+)
 def test_other_game_models_keep_existing_inference_policy(monkeypatch, spec):
     monkeypatch.setattr(settings, "INFERENCE_BACKEND", "tokendance")
     old = create_llm(spec.id, disable_thinking=True)
@@ -55,16 +65,35 @@ def test_frontier_cannot_be_selected_for_creator_assistant():
     assert ChatRequest(message="hello", chat_session_id="test").model == "deepseek-flash"
 
 
-@pytest.mark.parametrize("spec", FRONTIER, ids=lambda spec: spec.id)
-def test_frontier_parameters_never_default_to_max(monkeypatch, spec):
+def test_kimi_requests_low_reasoning_without_sampling_overrides(monkeypatch):
     monkeypatch.setattr(settings, "INFERENCE_BACKEND", "tokendance")
-    model = create_llm(spec.id, disable_thinking=True)
+    model = create_llm("kimi-k3.1-pro", disable_thinking=True)
     payload = model._get_request_payload([HumanMessage(content="test")])
-    assert payload["extra_body"]["reasoning_effort"] == "low"
-    if spec.provider == "moonshot":
-        assert "temperature" not in payload
-        assert "thinking" not in payload["extra_body"]
-        assert model.max_tokens > 8192
+    assert payload["extra_body"] == {"reasoning_effort": "low"}
+    assert "temperature" not in payload
+    assert model.max_tokens > 8192
+
+
+@pytest.mark.parametrize(
+    ("backend", "frontier_ids"),
+    [("direct", set()), ("tokendance", {"kimi-k3.1-pro", "qwen4-max"})],
+)
+def test_selectable_frontier_models_match_supported_routes(monkeypatch, backend, frontier_ids):
+    monkeypatch.setattr(settings, "INFERENCE_BACKEND", backend)
+    models = get_capabilities()["models"]
+    assert {row["id"] for row in models if row["tier"] == "frontier"} == frontier_ids
+    assert all(row["name"] == row["name"].lower() and " " not in row["name"] for row in models)
+
+
+def test_qwen4_max_game_profile(monkeypatch):
+    monkeypatch.setattr(settings, "INFERENCE_BACKEND", "tokendance")
+    for purpose in ("speech", "reaction"):
+        model = create_game_model("qwen4-max", purpose)
+        assert model.model_name == "qwen4-max"
+        assert model.extra_body == {"enable_thinking": False}
+    assert next(spec for spec in FRONTIER if spec.id == "qwen4-max").reaction_output_method == (
+        "function_calling"
+    )
 
 
 def test_gateway_catalog_retires_step_but_direct_mode_keeps_it(monkeypatch):
@@ -77,7 +106,7 @@ def test_gateway_catalog_retires_step_but_direct_mode_keeps_it(monkeypatch):
     monkeypatch.setattr(settings, "INFERENCE_BACKEND", "direct")
     ids = {spec["id"] for spec in get_capabilities()["models"]}
     assert "step-3.5-flash" in ids and "ling-3.0-flash" not in ids
-    assert not ids.intersection(spec.id for spec in FRONTIER)
+    assert "kimi-k3.1-pro" not in ids
 
 
 @pytest.mark.asyncio

@@ -37,24 +37,25 @@ describe('capability adapters', () => {
   it('uses identical picker and chat labels, including provider IDs and old aliases', () => {
     const source = { ...capabilities, models: [
       { ...capabilities.models[0], name: 'deepSeek-v4.1-flash' },
-      { ...capabilities.models[0], id: 'doubao-lite', model: 'doubao-seed-2-0-lite-260215', name: 'doubao-seed-2.0-lite' },
+      { ...capabilities.models[0], id: 'doubao-lite', model: 'doubao-seed-2-0-lite-260215', name: 'Doubao Seed 2.0 Lite' },
     ] }
     for (const option of configuredModels(source)) expect(modelDisplayName(option.id, source.models)).toBe(option.name)
     expect(modelDisplayName('doubao-seed-2-0-lite-260215', source.models)).toBe('doubao-seed-2.0-lite')
     expect(modelDisplayName('deepseek-v4-flash', source.models)).toBe('deepseek-v4.1-flash')
+    expect(modelDisplayName('deepseek-v4.1-flash-1017', source.models)).toBe('deepseek-v4.1-flash')
     expect(modelDisplayName('unavailable', source.models)).toBe('')
   })
-  it('keeps frontier models first and prioritizes common models with lowercase labels', () => {
+  it('keeps frontier models first and uses lowercase, hyphenated labels', () => {
     const source = { ...capabilities, models: [
       { ...capabilities.models[0], id: 'ling-3.0-flash', name: 'Ling-3.0-flash' },
       { ...capabilities.models[0], id: 'glm-5.3-flash', name: 'GLM-5.3-flash' },
-      { ...capabilities.models[0], id: 'kimi-k3', name: 'Kimi K3', tier: 'frontier' as const },
+      { ...capabilities.models[0], id: 'kimi-k3.1-pro', name: 'Kimi K3.1  Pro', tier: 'frontier' as const },
       capabilities.models[0],
       { ...capabilities.models[0], id: 'qwen3.8-flash', name: 'Qwen3.8-flash' },
     ] }
     const models = configuredModels(source)
-    expect(models.map(model => model.id)).toEqual(['kimi-k3', 'deepseek-flash', 'qwen3.8-flash', 'glm-5.3-flash', 'ling-3.0-flash'])
-    expect(models.every(model => model.name === model.name.toLowerCase())).toBe(true)
+    expect(models.map(model => model.id)).toEqual(['kimi-k3.1-pro', 'deepseek-flash', 'qwen3.8-flash', 'glm-5.3-flash', 'ling-3.0-flash'])
+    expect(models.map(model => model.name)).toEqual(['kimi-k3.1-pro', 'deepseek-v4-flash', 'qwen3.8-flash', 'glm-5.3-flash', 'ling-3.0-flash'])
   })
 
   it('normalizes the legacy deepSeek V4 display name without changing model IDs', () => {

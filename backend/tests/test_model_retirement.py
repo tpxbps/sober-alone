@@ -8,6 +8,14 @@ from app.core.llm_factory import create_llm
 from app.services import model_health
 from app.services.capabilities import get_capabilities
 
+RETIRED_MODELS = {
+    "ling-3.0-flash",
+    "mimo-v2.5",
+    "qwen3.8-max-0902",
+    "glm-5.3",
+    "deepseek-v4-pro-0813",
+}
+
 
 @pytest.mark.parametrize("backend", ["direct", "tokendance"])
 @pytest.mark.asyncio
@@ -18,10 +26,10 @@ async def test_retired_chat_models_are_not_selectable_or_probed_but_tts_remains(
     monkeypatch.setattr(type(settings), "get_api_key", lambda *_: "configured")
     capabilities = get_capabilities()
     ids = {item["id"] for item in capabilities["models"]}
-    assert not ids.intersection({"ling-3.0-flash", "mimo-v2.5", "doubao-seed-2-0-mini-260215"})
+    assert not ids.intersection(RETIRED_MODELS | {"doubao-seed-2-0-mini-260215"})
     assert "doubao-seed-2-0-lite-260215" in ids
     assert capabilities["features"]["static_tts"]["enabled"]
-    for model in ("ling-3.0-flash", "mimo-v2.5"):
+    for model in RETIRED_MODELS:
         with pytest.raises(ValueError, match="暂停服务"):
             create_llm(model)
 
@@ -48,6 +56,10 @@ async def test_retired_chat_models_are_not_selectable_or_probed_but_tts_remains(
         ("inclusionai", "ling-3.0-flash", "deepseek", "deepseek-flash"),
         ("mimo", "mimo-v2.5", "deepseek", "deepseek-flash"),
         ("stepfun", "step-3.5-flash", "deepseek", "deepseek-flash"),
+        ("moonshot", "kimi-k3", "moonshot", "kimi-k3.1-pro"),
+        ("alibaba", "qwen3.8-max-0902", "alibaba", "qwen3.8-flash"),
+        ("zhipuai", "glm-5.3", "zhipuai", "glm-5.3-flash"),
+        ("deepseek", "deepseek-v4-pro-0813", "deepseek", "deepseek-flash"),
         ("bytedance", "doubao-seed-2-0-mini-260215", "bytedance", "doubao-seed-2-0-lite-260215"),
         ("mimo", None, "deepseek", "deepseek-flash"),
     ],
@@ -64,7 +76,9 @@ async def test_saved_games_resume_with_matching_model_and_provider(
 
     monkeypatch.setattr(settings, "INFERENCE_BACKEND", "tokendance")
     monkeypatch.setattr(
-        type(settings), "get_api_key", lambda _, p: None if p == "zhipuai" else "key"
+        type(settings),
+        "get_api_key",
+        lambda _, p: "key" if p != "zhipuai" or provider == p else None,
     )
     monkeypatch.setattr("app.agents.agent_manager.AgentPlayer", Player)
     monkeypatch.setattr("app.agents.agent_manager._game_checkpointer", lambda: None)

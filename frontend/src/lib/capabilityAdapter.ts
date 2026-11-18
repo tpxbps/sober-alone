@@ -3,17 +3,22 @@ import type { AIModelOption } from '@/types/game'
 
 const preferredGameModels = ['deepseek-flash', 'qwen3.8-flash', 'glm-5.3-flash']
 
+export function formatModelLabel(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, '-')
+}
+
 /** Use the same registry labels for the picker and historical chat bubbles. */
 export function modelDisplayName(id: string | null | undefined, models: SystemCapabilities['models']): string {
   if (!id) return ''
   const aliases: Record<string, string> = {
+    'deepseek-v4.1-flash-1017': 'deepseek-flash',
     'deepseek-v4-flash': 'deepseek-flash',
     'deepseek-v4-flash-vision-exp': 'deepseek-flash',
     'deepseek-v4.1-flash': 'deepseek-flash',
   }
   const canonical = aliases[id.toLowerCase()] ?? id
   const spec = models.find(model => model.id === canonical || model.model === id)
-  return spec ? spec.name.toLowerCase() : ''
+  return spec ? formatModelLabel(spec.name) : ''
 }
 
 function modelOrder(model: AIModelOption): number {
@@ -27,7 +32,7 @@ export function configuredModels(
 ): AIModelOption[] {
   return capabilities.models
     .filter((item) => item.configured)
-    .map((item) => ({ id: item.id, name: item.name.toLowerCase(), provider: item.provider, ...(item.tier ? { tier: item.tier } : {}) }))
+    .map((item) => ({ id: item.id, name: formatModelLabel(item.name), provider: item.provider, ...(item.tier ? { tier: item.tier } : {}) }))
     .sort((left, right) => modelOrder(left) - modelOrder(right))
 }
 

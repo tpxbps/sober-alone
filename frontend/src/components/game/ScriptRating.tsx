@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import * as HoverCard from "@radix-ui/react-hover-card";
+import { formatModelLabel } from "@/lib/capabilityAdapter";
 import type { Script } from "@/types/game";
 
 function Explanation({ label, children, open, onOpenChange, detail = false }: { detail?: boolean; label: string; children: ReactNode; open: boolean; onOpenChange: (open: boolean) => void }) {
@@ -36,7 +37,7 @@ export function ScriptRating({ script, disabled = false, context = "card" }: { s
       <span aria-hidden="true">|</span>
       <Explanation detail={context === "detail"} label={ai ? `AI评分: ${ai.score}` : "AI 待评分"} open={!disabled && active === "ai"} onOpenChange={(open) => change("ai", open)}>
         {ai ? <div className="w-72 max-w-full whitespace-normal">
-          <p className="font-medium">AI评分: {ai.score} <span className="text-xs font-normal text-muted-foreground">（{ai.model === "gpt-6-astra" ? "GPT 6 ASTRA" : ai.model}）</span></p>
+          <p className="font-medium">AI评分: {ai.score} <span className="text-xs font-normal text-muted-foreground">（{formatModelLabel(ai.model)}）</span></p>
           <div className="space-y-1.5 mt-3">{ai.dimensions.map((dimension) => <div key={dimension.key} className="flex justify-between gap-3 text-xs">
             <span>{dimension.label} <span className="text-muted-foreground">{dimension.weight}%</span></span><span className="shrink-0 tabular-nums">{dimension.score}/5</span>
           </div>)}</div>

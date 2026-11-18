@@ -25,8 +25,8 @@ class ModelSpec:
 
 MODEL_SPECS = (
     ModelSpec(
-        "kimi-k3",
-        "Kimi K3",
+        "kimi-k3.1-pro",
+        "kimi-k3.1-pro",
         "moonshot",
         "Kimi",
         tier="frontier",
@@ -34,38 +34,43 @@ MODEL_SPECS = (
         reasoning_effort="low",
     ),
     ModelSpec(
-        "qwen3.8-max-0902",
-        "Qwen3.8 Max",
+        "qwen4-max",
+        "qwen4-max",
         "alibaba",
         "Qwen",
         tier="frontier",
         backends=("tokendance",),
-        reasoning_effort="low",
+        disable_thinking_extra="qwen",
+        reaction_output_method="function_calling",
+    ),
+    ModelSpec(
+        "qwen3.8-max-0902",
+        "qwen3.8-max-0902",
+        "alibaba",
+        "Qwen",
+        tier="frontier",
+        backends=(),
     ),
     ModelSpec(
         "glm-5.3",
-        "GLM-5.3",
+        "glm-5.3",
         "zhipuai",
         "Zhipu GLM",
         tier="frontier",
-        backends=("tokendance",),
-        reasoning_effort="low",
-        reaction_output_method="json_mode",
+        backends=(),
     ),
     ModelSpec(
         "deepseek-v4-pro-0813",
-        "DeepSeek V4 Pro",
+        "deepseek-v4-pro-0813",
         "deepseek",
         "DeepSeek",
         tier="frontier",
-        backends=("tokendance",),
-        reasoning_effort="low",
-        reaction_output_method="json_mode",
+        backends=(),
     ),
     ModelSpec("deepseek-flash", "deepseek-v4.1-flash", "deepseek", "DeepSeek"),
     ModelSpec(
         "minimax-m3.1-flash",
-        "MiniMax M3.1 Flash",
+        "minimax-m3.1-flash",
         "minimax",
         "MiniMax",
         backends=("tokendance",),
@@ -75,7 +80,7 @@ MODEL_SPECS = (
     ModelSpec("step-3.5-flash", "step-3.5-flash", "stepfun", "StepFun", backends=("direct",)),
     ModelSpec(
         "ling-3.0-flash",
-        "Ling-3.0-flash",
+        "ling-3.0-flash",
         "inclusionai",
         "Ling",
         backends=(),
@@ -120,11 +125,20 @@ PROBE_FILE = LOCAL_DATA_DIR / "model-probes.json"
 
 
 MODEL_ALIASES = {
+    "kimi-k3": "kimi-k3.1-pro",
     "deepseek-v4.1-flash-1017": "deepseek-flash",
     "deepseek-v4.1-flash": "deepseek-flash",
     "deepseek-v4-flash": "deepseek-flash",
     "deepseek-v4-flash-vision-exp": "deepseek-flash",
     "doubao-seed-2-0-mini-260215": "doubao-seed-2-0-lite-260215",
+}
+
+RETIRED_GAME_MODELS = {
+    "qwen3.8-max-0902": "qwen3.8-flash",
+    "glm-5.3": "glm-5.3-flash",
+    "deepseek-v4-pro-0813": "deepseek-flash",
+    "ling-3.0-flash": "deepseek-flash",
+    "mimo-v2.5": "deepseek-flash",
 }
 
 
@@ -149,11 +163,9 @@ def resolve_game_model(model_id: str, backend: str) -> ModelSpec:
     them. Cross-provider replacements belong here, not in credential aliases.
     """
     spec = get_model_spec(model_id)
-    if spec.id in {"ling-3.0-flash", "mimo-v2.5"} or (
-        spec.id == "step-3.5-flash" and backend == "tokendance"
-    ):
+    if spec.id == "step-3.5-flash" and backend == "tokendance":
         return get_model_spec("deepseek-flash")
-    return spec
+    return MODEL_BY_ID[RETIRED_GAME_MODELS.get(spec.id, spec.id)]
 
 
 def load_probe_results() -> dict[str, dict]:
