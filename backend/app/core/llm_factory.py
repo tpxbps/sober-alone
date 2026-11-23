@@ -86,7 +86,7 @@ def create_llm(
                 extra = {"enable_thinking": False}
             elif spec.disable_thinking_extra == "glm_low":
                 extra = {"reasoning_effort": "low"}
-            elif spec.disable_thinking_extra in {"ling", "doubao"}:
+            elif spec.disable_thinking_extra in {"ling", "doubao", "hunyuan"}:
                 extra = {"thinking": {"type": "disabled"}}
         return ReasoningChatOpenAI(
             model=gateway_model(model_lower),

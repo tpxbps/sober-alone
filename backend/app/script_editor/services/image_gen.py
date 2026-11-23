@@ -1,5 +1,5 @@
 """
-Image Generation Service — doubao-seedream-4-0
+Seedream image generation service.
 用于生成剧本封面图和角色头像
 """
 
@@ -21,6 +21,9 @@ class ImageGenerationRejected(ValueError):
 
 # 图片存储目录
 IMAGE_ROOT = settings.image_dir / "scripts"
+TOKENDANCE_IMAGE_MODEL = "seedream-5.5"
+TOKENDANCE_IMAGE_MIN_PIXELS = 921_600
+TOKENDANCE_IMAGE_MAX_PIXELS = 2_610_000
 
 
 def _get_doubao_client() -> AsyncOpenAI:
@@ -189,7 +192,7 @@ async def _generate_image(
     size: str = "1024x1024",
 ) -> bool:
     """
-    调用 doubao-seedream-4-0 API 生成图片并下载保存
+    调用 Seedream API 生成单张图片并下载保存
 
     Returns:
         是否成功
@@ -198,21 +201,23 @@ async def _generate_image(
         logger.warning("DOUBAO_API_KEY not configured, skipping image generation")
         return False
 
+    gateway = settings.INFERENCE_BACKEND == "tokendance"
+    if gateway:
+        width, height = (int(dimension) for dimension in size.split("x"))
+        if not TOKENDANCE_IMAGE_MIN_PIXELS <= width * height <= TOKENDANCE_IMAGE_MAX_PIXELS:
+            raise ValueError("工坊生图请求须在 Seedream 5.5 的低像素计费档内")
+
     try:
         import httpx
 
         client = _get_doubao_client()
         response = await client.images.generate(
-            model="seedream-5.0-lite"
-            if settings.INFERENCE_BACKEND == "tokendance"
-            else "doubao-seedream-4-0-250828",
+            model=TOKENDANCE_IMAGE_MODEL if gateway else "doubao-seedream-4-0-250828",
             prompt=prompt,
-            size=("2560x1536" if size == "1280x768" else "2048x2048")
-            if settings.INFERENCE_BACKEND == "tokendance"
-            else size,  # type: ignore[arg-type]
+            size=size,  # type: ignore[arg-type]
             response_format="url",
             extra_body={"watermark": False, "output_format": "png"}
-            if settings.INFERENCE_BACKEND == "tokendance"
+            if gateway
             else {"watermark": True},
         )
 

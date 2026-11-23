@@ -4,7 +4,7 @@ import httpx
 import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 
-from app.agents.game_model_paths import create_game_model, visible_speech_text
+from app.agents.game_model_paths import bind_reaction_output, create_game_model, visible_speech_text
 from app.api.schemas.script_editor import ChatRequest
 from app.core.config import settings
 from app.core.inference import GatewayAuth, InferenceRecoveryError, InferenceScope, inference_scope
@@ -76,13 +76,26 @@ def test_kimi_requests_low_reasoning_without_sampling_overrides(monkeypatch):
 
 @pytest.mark.parametrize(
     ("backend", "frontier_ids"),
-    [("direct", set()), ("tokendance", {"kimi-k3.1-pro", "qwen4-max"})],
+    [("direct", set()), ("tokendance", {"kimi-k3.1-pro", "qwen4-max", "hy4"})],
 )
 def test_selectable_frontier_models_match_supported_routes(monkeypatch, backend, frontier_ids):
     monkeypatch.setattr(settings, "INFERENCE_BACKEND", backend)
     models = get_capabilities()["models"]
     assert {row["id"] for row in models if row["tier"] == "frontier"} == frontier_ids
+    flash = [row["tier"] for row in models if row["id"] == "hy4-flash"]
+    assert flash == (["standard"] if backend == "tokendance" else [])
     assert all(row["name"] == row["name"].lower() and " " not in row["name"] for row in models)
+
+
+@pytest.mark.parametrize("model_id", ["hy4-flash", "hy4"])
+def test_hunyuan_game_profiles_use_gateway_thinking_control_and_tool_output(monkeypatch, model_id):
+    monkeypatch.setattr(settings, "INFERENCE_BACKEND", "tokendance")
+    for purpose in ("speech", "reaction"):
+        model = create_game_model(model_id, purpose)
+        assert model.model_name == model_id
+        assert model.extra_body == {"thinking": {"type": "disabled"}}
+    bound = bind_reaction_output(model, model_id)
+    assert bound.first.kwargs["tools"][0]["function"]["name"] == "SpeechReactionPayload"
 
 
 def test_qwen4_max_game_profile(monkeypatch):

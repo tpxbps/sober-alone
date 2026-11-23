@@ -153,6 +153,32 @@ async def test_provider_rejection_is_not_reported_as_empty_image(tmp_path, monke
 
 
 @pytest.mark.asyncio
+async def test_workshop_requests_seedream_55_at_explicit_low_tier_sizes(tmp_path, monkeypatch):
+    generate = AsyncMock(return_value=SimpleNamespace(data=[]))
+    monkeypatch.setattr(image_gen.settings, "INFERENCE_BACKEND", "tokendance")
+    monkeypatch.setattr(image_gen.settings, "TOKENDANCE_API_KEY", "test-key")
+    monkeypatch.setattr(image_gen.settings, "TOKENDANCE_REQUIRE_SCOPE", False)
+    monkeypatch.setattr(image_gen, "IMAGE_ROOT", tmp_path)
+    monkeypatch.setattr(
+        image_gen,
+        "_get_doubao_client",
+        lambda: SimpleNamespace(images=SimpleNamespace(generate=generate)),
+    )
+
+    await image_gen.generate_cover_image("test", "一个故事")
+    await image_gen.generate_character_avatar("test", "role", "林岚")
+    requests = [call.kwargs for call in generate.await_args_list]
+    assert [request["size"] for request in requests] == ["1280x768", "1024x1024"]
+    assert all(
+        request["model"] == "seedream-5.5" and "image" not in request for request in requests
+    )
+
+    with pytest.raises(ValueError, match="低像素计费档"):
+        await image_gen._generate_image("封面", tmp_path / "cover.png", "2048x2048")
+    assert generate.await_count == 2
+
+
+@pytest.mark.asyncio
 async def test_rejected_image_is_terminal_and_other_assets_keep_running(monkeypatch):
     sid = "permanent-rejection"
     registry.init(

@@ -44,6 +44,16 @@ MODEL_SPECS = (
         reaction_output_method="function_calling",
     ),
     ModelSpec(
+        "hy4",
+        "hy4",
+        "hunyuan",
+        "Tencent Hunyuan",
+        tier="frontier",
+        backends=("tokendance",),
+        disable_thinking_extra="hunyuan",
+        reaction_output_method="function_calling",
+    ),
+    ModelSpec(
         "qwen3.8-max-0902",
         "qwen3.8-max-0902",
         "alibaba",
@@ -102,6 +112,15 @@ MODEL_SPECS = (
     ),
     ModelSpec("mimo-v2.5", "mimo-v2.5", "mimo", "Xiaomi MiMo", backends=()),
     ModelSpec("hy3", "hy3", "hunyuan", "Tencent Hunyuan"),
+    ModelSpec(
+        "hy4-flash",
+        "hy4-flash",
+        "hunyuan",
+        "Tencent Hunyuan",
+        backends=("tokendance",),
+        disable_thinking_extra="hunyuan",
+        reaction_output_method="function_calling",
+    ),
     ModelSpec(
         "glm-5.3-flash",
         "glm-5.3-flash",

@@ -20,6 +20,7 @@ from app.script_editor.asset_generation.progress import (
     get_asset_progress,
 )
 from app.script_editor.repositories.script_repository import ScriptRepository
+from app.script_editor.services.image_gen import TOKENDANCE_IMAGE_MODEL
 from app.script_editor.services.portrait_direction import get_portrait_direction
 from app.script_editor.services.progress_registry import asset_progress_registry
 from app.script_editor.state import STEP_GENERATE_ASSETS, ScriptGenState
@@ -156,7 +157,7 @@ async def _generate_assets(state: ScriptGenState) -> dict:
             "id": "image",
             "label": "剧本图片生成",
             "tech": "Text-to-Image",
-            "model": "seedream-5.0-lite"
+            "model": TOKENDANCE_IMAGE_MODEL
             if settings.INFERENCE_BACKEND == "tokendance"
             else "doubao-seedream-4.0",
             "tasks": [
